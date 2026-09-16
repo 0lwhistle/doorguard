@@ -1,6 +1,6 @@
 # RK3576 K7 人脸识别门禁系统 — 项目方案与执行手册
 
-> 更新:2026-09-15。本文档是项目的唯一事实来源(Single Source of Truth)。
+> 更新:2026-09-17。本文档是项目的唯一事实来源(Single Source of Truth)。
 > 每次会话开工前先读本文档恢复上下文;完成阶段后更新"进度快照"。
 
 ---
@@ -26,7 +26,7 @@
 - 人脸识别门禁:刷脸(1:N)+ 活体检测(单目 RGB 动作指令式)→ 开锁
 - 5 寸触摸屏显示:摄像头实时预览 + 识别结果 + 动作引导动画/文字
 - 模块化预留:指纹模块(UART)、IC 读卡器(UART/SPI)后续接入,与人脸走同一认证抽象接口
-- 系统:**无桌面 Linux**(LVGL 直跑 DRM,无 X11/Wayland)
+- 系统:**Buildroot 无桌面 Linux**(LVGL 直跑 DRM,无 X11/Wayland),开发期即产品形态
 
 ---
 
@@ -51,7 +51,7 @@
 │   gpio_hal(libgpiod)  uart_hal(指纹/读卡)  storage(SQLite)│
 ├─────────────────────────────────────────────────────┤
 │  平台层:官方 SDK(kernel-6.1 + rkaiq + rknpu2 + rga    │
-│          + mpp + libmali + buildroot/ubuntu rootfs)   │
+│          + mpp + libmali + buildroot rootfs)          │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -157,23 +157,27 @@ door-guard/
 ## 五、固件编译计划(下次会话执行)
 
 > 编译机 = 本 VM。SDK 顶层 `./build.sh`;板级 defconfig 位于
-> `device/rockchip/.chips/rk3576/rockchip_rk3576_kickpi_k7_ubuntu_defconfig`
-> (K7 的 DTS:`rk3576-kickpi-k7-linux`)。
+> `device/rockchip/.chips/rk3576/rockchip_rk3576_kickpi_k7_buildroot_defconfig`
+> (K7 的 DTS:`rk3576-kickpi-k7-linux`;Buildroot 根配置:`buildroot/configs/rockchip_rk3576_kickpi_k7_doorGuard_defconfig`)。
 
 | Phase | 内容 | 验收标准 |
 |---|---|---|
 | B1 | 环境自检:依赖包(git ssh make gcc 等按 SDK docs)、外网连通、磁盘/内存 | 自检脚本全绿 |
-| B2 | **ubuntu2404 无桌面改造**:`ubuntu/mk-rootfs-ubuntu2404.sh` 当前 `TARGET=xfce-desktop` → 去桌面(删 xfce/xserver,保留 openssh);改动用 git 分支管理 | 脚本 diff 干净可回退 |
+| B2 | **Buildroot 定制配置生效**:配置文件已建(SDK 分支 `k7-door-guard-dev`,补丁 `sdk-patches/0001-buildroot-K7-doorGuard.patch`):基于 `rockchip_rk3576_defconfig` 去 weston/chromium,加 lvgl(自带 DRM 后端)/中文 locale/gdb+strace/dropbear,启用 `BR2_PACKAGE_RKADK` + `RKADK_USE_AIQ`(自动拉起 rockit/rkaiq);B2 时确认 `RK_BUILDROOT_CFG` 绑定方式使 doorGuard 配置被选用 | `buildroot/output/*/` 下 menuconfig 可见 LVGL/RKADK/RKAIQ 开启、weston 关闭 |
 | B3 | **屏幕使能**:K7 DTS 加 include 5 寸 dtsi;顺带确认触摸节点 | kernel 编过,dtb 里能反查 panel/gt9xx 节点 |
-| B4 | 全量编译:`./build.sh` 选 K7 ubuntu 配置 → uboot+kernel+rootfs+镜像(首次需外网拉依赖,预计 1~3h,`make -j6`) | `output/` 产出镜像;**镜像 md5 连读两次一致** |
-| B5 | 烧录验证:USB(Maskrom/Loader)烧录;串口 1500000 8N1 + SSH | 验收清单:登录✓ dmesg 无异常✓ rknpu 驱动✓ media-ctl 有 IMX415 拓扑✓ 屏亮✓ 触摸有 event✓ |
+| B4 | 全量编译:`./build.sh` 选 K7 buildroot 配置 → uboot+kernel+rootfs+镜像(首次需外网拉依赖,预计 1~3h,`make -j6`) | `output/` 产出镜像;**镜像 md5 连读两次一致** |
+| B5 | 烧录验证:USB(Maskrom/Loader)烧录;串口 1500000 8N1 + SSH(dropbear) | 验收清单:登录✓ dmesg 无异常✓ rknpu 驱动✓ media-ctl 有 IMX415 拓扑✓ 屏亮✓ 触摸有 event✓ |
 | B6 | 摄像头出图:rkaiq 起 3A,v4l2 抓帧存图人工确认成像 | NV12 抓帧图正常曝光/色彩 |
 | B7 | NPU 单项:SCRFD demo 上板跑通(检测帧率/框正确) | 检测 demo 出框 |
 | B8 | 应用整合:door-guard 骨架 + LVGL 上屏 + 预览上屏 | 预览+UI 同屏,触摸可操作 |
 | B9 | 人脸全链路:注册→识别→开门→日志 | 端到端 <1s,误识/拒识标定 |
-| B10 | 活体接入 → 指纹/读卡器接入 → 产品化(buildroot 固件) | 按各自验收 |
+| B10 | 活体接入 → 指纹/读卡器接入 → 产品化裁剪(去调试包/只读根文件系统/数据分区分离/签名) | 按各自验收 |
 
-> 决策记录:先 ubuntu 2404(无桌面)打通全链路,产品化阶段再评估切 buildroot(小体积/快启动/只读根文件系统)。
+> 决策记录(2026-09-17):**直接采用 Buildroot 作为唯一 rootfs 路线**(放弃 Ubuntu 过渡方案)。
+> 依据:Buildroot 片段体系完整覆盖本项目全部需求——`lvgl.config`(自带 DRM 后端)、
+> `multimedia/camera.config`(rkaiq)、`npu2.config`、`gpu/gpu.config`、`network/network.config`
+> (dropbear)、`tools/gdb.config`,RKADK 包自动拉起 rockit/rkaiq 视觉链。
+> 用户有开发基础,接受"缺包改配置重编 rootfs"的迭代方式,换取从第一天就是产品形态。
 
 ---
 
@@ -192,8 +196,8 @@ door-guard/
 
 | 风险 | 等级 | 对策 |
 |---|---|---|
+| Buildroot 缺包/配置遗漏导致迭代重编 | 中(已接受) | doorGuard defconfig 一次配全常用工具;缺啥补 defconfig 重编 rootfs;复杂探索性工作放 PC 交叉环境 |
 | 单目 RGB 活体防不住高级重放 | 中(产品定位相关) | 已声明边界;预留 IR 双目升级路径,liveness 接口不变 |
-| ubuntu rootfs 改造后缺依赖 | 低 | 缺啥补啥;实在不行回退 xfce 版先跑通 |
 | i8 量化后识别阈值漂移 | 中 | 量化后必做 ROC 标定,阈值进配置文件 |
 | 编译机内存 7.2G 偏小 | 低 | -j6;必要时加 swap |
 | 触摸/屏幕排线硬件差异 | 低 | dtsi 与官方屏一一对应;不亮先查排线 |

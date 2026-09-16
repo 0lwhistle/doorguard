@@ -1,0 +1,69 @@
+From 779769b2fd9c478ce6163f50e47fcc3355add3d0 Mon Sep 17 00:00:00 2001
+From: olwhistle <olwhistle@local>
+Date: Thu, 17 Sep 2026 00:17:34 +0800
+Subject: [PATCH] =?UTF-8?q?buildroot:=20=E6=96=B0=E5=A2=9E=20K7=20?=
+ =?UTF-8?q?=E9=97=A8=E7=A6=81=E5=AE=9A=E5=88=B6=E9=85=8D=E7=BD=AE=20doorGu?=
+ =?UTF-8?q?ard?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- 基于 rockchip_rk3576_defconfig:去 weston/chromium
+- 加 lvgl(带DRM后端)/locale中文/调试工具(gdb,strace)
+- 启用 RKADK + RKADK_USE_AIQ(视觉链:取流+3A+显示)
+---
+ ...kchip_rk3576_kickpi_k7_doorGuard_defconfig | 42 +++++++++++++++++++
+ 1 file changed, 42 insertions(+)
+ create mode 100644 buildroot/configs/rockchip_rk3576_kickpi_k7_doorGuard_defconfig
+
+diff --git a/buildroot/configs/rockchip_rk3576_kickpi_k7_doorGuard_defconfig b/buildroot/configs/rockchip_rk3576_kickpi_k7_doorGuard_defconfig
+new file mode 100644
+index 000000000..97f4f6146
+--- /dev/null
++++ b/buildroot/configs/rockchip_rk3576_kickpi_k7_doorGuard_defconfig
+@@ -0,0 +1,42 @@
++# RK3576 KickPi K7 人脸识别门禁定制 Buildroot 配置(k7-door-guard)
++#
++# 基于 rockchip_rk3576_defconfig 裁剪(2026-09-17):
++#   裁掉:weston(Wayland 合成器)、network/chromium(浏览器)、x11 —— LVGL 直跑 DRM 不需要
++#   增加:lvgl(官方片段,自带 DRM 后端)、locale/中文字体、调试工具(gdb/gdbserver/strace)
++#   门禁视觉链:RKADK(自动拉起 rockit/common_algorithm)+ RKADK_USE_AIQ(拉起 rkaiq 3A)
++#
++#include "base/base.config"
++#include "bus/can.config"
++#include "bus/pci.config"
++#include "chips/rk3576_aarch64.config"
++#include "font/chinese.config"
++#include "font/font.config"
++#include "fs/e2fs.config"
++#include "fs/exfat.config"
++#include "fs/ntfs.config"
++#include "fs/vfat.config"
++#include "gpu/gpu.config"
++#include "locale/chinese.config"
++#include "lvgl.config"
++#include "multimedia/audio.config"
++#include "multimedia/camera.config"
++#include "multimedia/gst/audio.config"
++#include "multimedia/gst/camera.config"
++#include "multimedia/gst/video.config"
++#include "multimedia/mpp.config"
++#include "network/network.config"
++#include "npu2.config"
++#include "powermanager.config"
++#include "tools/common.config"
++#include "tools/gdb.config"
++#include "wifibt/bt.config"
++#include "wifibt/wireless.config"
++
++# ---- 门禁应用视觉链 ----
++BR2_PACKAGE_RKADK=y
++BR2_PACKAGE_RKADK_USE_AIQ=y
++
++# ---- 产品化裁剪清单(出厂镜像时处理) ----
++# 1. 去掉 tools/gdb.config 调试链与 debug 工具
++# 2. 根文件系统只读(squashfs 或 ext4 ro)+ 数据分区分离
++# 3. 按 security/AVB 文档启用签名(如需)
+-- 
+2.53.0
+

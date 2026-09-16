@@ -10,12 +10,14 @@
 
 关键路径:
 - 官方 SDK:/home/olwhistle/Linux/rk3576/Rk3576-SDK/rk3576_data/rk3576-linux-2026091008
-  (已解压,git fsck 已通过,HEAD=f06400239,不要重复解压)
-- 板型:K7;defconfig:rockchip_rk3576_kickpi_k7_ubuntu_defconfig
+  (已解压,git fsck 已通过,HEAD=f06400239,不要重复解压;SDK 内已有分支
+  k7-door-guard-dev,包含 K7 门禁定制 Buildroot 配置)
+- 板型:K7;设备 defconfig:rockchip_rk3576_kickpi_k7_buildroot_defconfig;
+  Buildroot 配置:rockchip_rk3576_kickpi_k7_doorGuard_defconfig
 - 硬件:5寸屏 F050008M01(720x1280,GT9xx触摸)+ IMX415 摄像头
 
 本次目标:【从 PROJECT_PLAN.md 第五节"固件编译计划"的下一个未完成 Phase 继续,
-首次开工填:Phase B1 环境自检 + B2 ubuntu2404 无桌面改造 + B3 屏幕使能】
+首次开工填:Phase B1 环境自检 + B2 Buildroot 定制配置生效 + B3 屏幕使能】
 
 纪律提醒:产物 >1GB 必须 md5 连读两次一致;make -j6;SDK 内改动走 git 分支。
 完成后更新 PROJECT_PLAN.md 的进度快照表。
@@ -25,18 +27,22 @@
 
 ### Phase B1+B2+B3(首次编译前准备)
 ```
-本次目标:Phase B1 环境自检、B2 ubuntu2404 无桌面改造、B3 屏幕使能。
-B2 要点:ubuntu/mk-rootfs-ubuntu2404.sh 里 TARGET=xfce-desktop,改造为无桌面
-(保留 openssh-server,去掉 xfce/xserver 相关),先给我看 diff 再执行。
+本次目标:Phase B1 环境自检、B2 Buildroot 定制配置生效、B3 屏幕使能。
+B2 要点:SDK 分支 k7-door-guard-dev 已含
+buildroot/configs/rockchip_rk3576_kickpi_k7_doorGuard_defconfig
+(去 weston/chromium,含 lvgl+DRM、gdb/strace、dropbear、RKADK+AIQ)。
+任务:1) 确认 RK_BUILDROOT_CFG 如何绑定到该配置(build.sh 菜单或环境变量);
+2) 执行一次 buildroot 构建验证配置可用(缺包按报错补);
+3) 把过程中的 SDK 变更提交到 k7-door-guard-dev 分支并 format-patch 进仓库。
 B3 要点:kernel-6.1/arch/arm64/boot/dts/rockchip/rk3576-kickpi-k7-linux.dts
 增加 #include "rk3576-kickpi-lcd-mipi-5-720-1280-F050008M01.dtsi"(先确认
-该 dtsi 的节点和 K7 的 io 复用无冲突)。
+该 dtsi 的节点和 K7 的 io 复用无冲突),同样提交到 k7-door-guard-dev 并导出补丁。
 ```
 
 ### Phase B4(全量编译)
 ```
-本次目标:Phase B4 全量编译 ubuntu 2404 无桌面固件。用 ./build.sh 交互选
-kickpi_k7_ubuntu 配置或直接命令行;长时间任务放后台跑,期间每 10 分钟汇报
+本次目标:Phase B4 全量编译 Buildroot 无桌面固件。用 ./build.sh 交互选
+kickpi_k7_buildroot 配置或直接命令行;长时间任务放后台跑,期间每 10 分钟汇报
 进度;失败先读日志定位,不要盲目重跑。产物镜像 md5 双读一致后列出
 output/ 下全部产物路径和大小。
 ```
