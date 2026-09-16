@@ -26,4 +26,4 @@
 
 - 代码流转只经本仓库 push/pull,不复制目录
 - WSL:写代码、跑纯逻辑单元测试;VM:交叉编译(SDK prebuilts 工具链)、固件全量编译
-- 中枢:git@192.168.2.150:olwhistle/k7_rk3576.git(局域网 Gitea,SSH 密钥认证)
+- 中枢:ssh://git@192.168.2.150:222/olwhistle/k7_rk3576.git(局域网 Gitea,SSH 密钥认证)
