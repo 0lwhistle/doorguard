@@ -1,0 +1,47 @@
+{
+  "_comment": "door-guard 设备配置模板 — 字段含义见 PROJECT_PLAN.md",
+  "camera": {
+    "sensor": "imx415",
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "format": "NV12",
+    "iqfile": "auto"
+  },
+  "display": {
+    "backend": "drm",
+    "ui_plane": "auto",
+    "video_plane": "auto",
+    "width": 720,
+    "height": 1280,
+    "touch": "/dev/input/event1"
+  },
+  "face": {
+    "provider": "rockiva",
+    "detect_interval_ms": 200,
+    "liveness_enable": true,
+    "liveness_actions_min": 2,
+    "liveness_actions_max": 3,
+    "liveness_timeout_ms": 2000,
+    "match_threshold": 0.42
+  },
+  "access": {
+    "relay_gpio_chip": "/dev/gpiochip0",
+    "relay_gpio_line": 0,
+    "relay_pulse_ms": 3000,
+    "door_sensor_gpio_line": -1
+  },
+  "stream": {
+    "rtsp_enable": false,
+    "rtsp_port": 8554,
+    "rtsp_path": "/preview",
+    "bitrate_kbps": 2048
+  },
+  "network": {
+    "ntp_server": "ntp.aliyun.com",
+    "timezone": "Asia/Shanghai"
+  },
+  "storage": {
+    "db_path": "/data/door-guard/door.db"
+  }
+}
