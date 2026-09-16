@@ -14,7 +14,7 @@
 | LVGL 界面 | lvgl_demo + LVGL 官方指南 | `app/lvgl_demo`,`docs/` 有 PDF |
 | NPU 推理(C API) | rknpu2 runtime + examples | `external/rknpu2` |
 | 模型转换(PC 端) | rknn-toolkit2 | `external/rknn-toolkit2` |
-| 人脸模型(检测/识别) | rknn_model_zoo(**在 GitHub,不在 SDK**) | 见 §5 |
+| 人脸识别(官方方案,**已采用**) | ROCKIVA | `external/iva` |
 | ISP 3A / 画质调优 | camera_engine_rkaiq | `external/camera_engine_rkaiq` |
 | 快速验证视频管线 | gstreamer-rockchip | `external/gstreamer-rockchip` |
 | 图像缩放/裁剪/格式转换(硬件) | linux-rga | `external/linux-rga` |
@@ -104,26 +104,25 @@ IMX415 是 RAW 传感器,**没有它画面就是不正常的**。
 
 **本项目对应**:Phase B6(出图)、B10(画质调优)。
 
-## 5. NPU:rknn-toolkit2(转换)+ rknpu2(板端推理)
+## 5. 人脸识别:官方 ROCKIVA(本项目采用)+ NPU 工具链
 
-**两件套,版本必须配套**:
+**首选:ROCKIVA**(`external/iva`,Rockchip 官方智能视觉分析 SDK)——检测/关键点/人脸识别/
+**1:N 检索(注册+搜索)**/属性分析(性别年龄表情等)一体,模型自带,NPU 推理:
+
+- 板型适配:`librockiva/rockiva-rk3576-Linux`(预编译库)+ `models/rockiva_data_rk3576`
+- API 头文件:`librockiva/rockiva-rk3576-Linux/include/rockiva_face_api.h`
+- 开发指南:`Rockchip_Developer_Guide_ROCKIVA_SDK_CN.pdf`(已拷入本仓库 `sdk-guide/docs/`)
+- Buildroot:`BR2_PACKAGE_IVA=y` + `BR2_PACKAGE_IVA_RK3576=y`(doorGuard 配置已启用,staging 可直接链接)
+
+**NPU 工具链(备选/自定义模型时用)**:
 
 | 组件 | 位置 | 干什么 | 跑在哪 |
 |---|---|---|---|
 | rknn-toolkit2 | `external/rknn-toolkit2` | 把 ONNX/TF 模型转成 `.rknn`(含量化) | PC(Linux,x86) |
 | rknpu2 | `external/rknpu2` | 板端运行时 `librknnrt.so` + C API | 板子 |
 
-**examples 里直接可参考的**(`external/rknpu2/examples/`):
-
-- `rknn_api_demo`:最基础的加载/推理流程,先看这个
-- `rknn_yolov5_demo`:检测模型完整示例(前处理 RGA + 推理 + 后处理解码),**SCRFD 检测照这个改**
-- `rknn_benchmark`:测各层耗时,优化时用
-
-**人脸模型不在 SDK 里**,从 GitHub 取(和 toolkit2 配套):
-`https://github.com/airockchip/rknn_model_zoo` —— 里面有 RetinaFace/SCRFD(检测)、ArcFace(识别)
-的 ONNX + 转换脚本 + 板端 demo,直接用。
-
-**流程**:PC 上 toolkit2 转 SCRFD/ArcFace → `.rknn` → 推到板子 → 用 rknpu2 C API 加载推理。
+examples(`external/rknpu2/examples/`):`rknn_api_demo`(基础流程)、`rknn_yolov5_demo`(检测模板)、
+`rknn_benchmark`(耗时分析)。自定义模型从 GitHub 的 rknn_model_zoo 取(SCRFD/ArcFace 有现成转换脚本)。
 量化校准用人脸图 100~500 张;量化后重标定比对阈值。
 
 **本项目对应**:Phase B7(NPU 单项)、B9(人脸链路)。
@@ -158,6 +157,7 @@ IMX415 是 RAW 传感器,**没有它画面就是不正常的**。
 | `Rockchip_User_Guide_Linux_Rockit_CN.pdf` | rockit 媒体管线 | ★★ 需要下沉时读 |
 | `Rockchip_User_Guide_Linux_Gstreamer_CN.pdf` | GStreamer 硬件插件 | ★ 快速验证用 |
 | `Rockchip_Developer_Guide_Linux_Graphics_CN.pdf` | 图形栈架构(DRM/KMS) | ★★ 理解双平面 |
+| `Rockchip_Developer_Guide_ROCKIVA_SDK_CN.pdf` | 官方人脸方案 API/集成指南 | ★★★ B7/B9 必读 |
 
 **留在 SDK 里按需取**(`docs/cn/`,共 674MB 未搬运):Audio/Security/Recovery/System 等主题,
 以及 `docs/en/` 英文版。NPU 文档在 `external/rknpu2/doc/`,toolkit2 文档在其仓库内。

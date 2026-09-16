@@ -58,7 +58,9 @@ Maskrom 进法),串口参数 1500000 8N1。烧录后按 PROJECT_PLAN.md B5 验�
 ```
 本次目标:Phase B【6/7/8/9】。涉及取流/NPU/应用的开发,先按 PROJECT_PLAN.md
 第三、四节的架构和模块约定搭骨架,给我看目录和接口设计再写实现。
-模型转换在 PC 端做(需要 pip 装 rknn-toolkit2,注意 python 版本)。
+人脸识别用官方 ROCKIVA(external/iva,模型自带无需转换,API 见
+librockiva/rockiva-rk3576-Linux/include,指南在 sdk-guide/docs 的 ROCKIVA PDF);
+仅当需要自定义模型时才用 rknn-toolkit2(PC 端 pip 安装,注意 python 版本)。
 ```
 
 ## 备注

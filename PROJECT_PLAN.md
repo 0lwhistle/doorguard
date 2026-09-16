@@ -41,7 +41,7 @@
 ├─────────────────────────────────────────────────────┤
 │  业务服务层(线程 + 消息总线,互不直接调用)              │
 │   capture_service   取流:rkaiq 3A + V4L2 → NV12 环形缓冲│
-│   vision_service    SCRFD检测→关键点→RGA对齐→ArcFace→比对│
+│   vision_service    ROCKIVA 检测/识别/1:N检索(官方方案)  │
 │   liveness_service  动作状态机(随机序列)+姿态/张嘴判定   │
 │   access_service    认证融合、门控决策、继电器、日志       │
 │   enroll_service    人脸/指纹/卡注册管理                 │
@@ -60,8 +60,9 @@
 ```
 IMX415 ─MIPI→ RKISP(rkaiq 3A)→ NV12 帧
    ├─① RGA 缩放 ─→ DRM video plane(屏幕预览,零拷贝)
-   ├─② RGA 裁剪对齐(人脸区域 112×112)→ NPU:SCRFD→ArcFace→特征
-   └─③ 关键点序列 → liveness_service(动作判定)
+   ├─② 人脸区域 → ROCKIVA(检测/关键点/识别/1:N 检索,NPU,官方方案)
+   ├─③ 关键点序列 → liveness_service(动作判定)
+   └─④ GStreamer → RTSP 推流(远程实时预览,可选)
 比对/活体结果 → access_service → GPIO 继电器开锁 + SQLite 日志
 事件总线 → LVGL UI 刷新(预览叠加框、结果、动作提示)
 ```
@@ -114,17 +115,21 @@ door-guard/
   capture/display 两个 HAL 直接基于 RKADK 实现(内部已是 V4L2+DRM 零拷贝管线),省去裸写;不够用的层次再下沉到
   rockit MPI(`external/samples`,见 `sample_demo_vi_venc.c` 等)或裸 V4L2。
 - 画质调优:`rkaiq_tool_server` + PC 端 IQ Tool 在线调曝光/色彩/降噪,导出 IQ xml 随固件发布。
+- **远程推流(已定)**:GStreamer + RTSP 服务端(`BR2_PACKAGE_GST1_RTSP_SERVER=y` 已启用)。
+  分工:上屏预览走 RKADK/RGA→DRM(§4.1),远程实时预览走 GStreamer RTSP 管线;
+  两者共享取流源或各自开流,B8 阶段按 CPU 占用实测决定。
 
-### 4.3 NPU 人脸识别
+### 4.3 人脸识别:官方 ROCKIVA 方案(已定,2026-09-17)
 
-- **模型选型(开源,全部有 rknn_model_zoo 转换先例)**:
-  - 检测:**SCRFD**(500M/2.5G 档),输出 5 关键点;输入 640×640
-  - 识别:**ArcFace**(MobileFaceNet 级,glint360k 权重),输入 112×112,输出 512 维特征
-  - 备用:98 点 landmark 轻量模型(供活体张嘴判定,首版可缓)
-- **转换(PC 端)**:pip 装 rknn-toolkit2 → ONNX→RKNN;量化校准集用业务同分布人脸 100~500 张;i8 量化后**必须重标定比对阈值**。
-- **板端**:`external/rknpu2/runtime` 的 C API(librknnrt.so);预处理全部走 RGA 硬件。
-- **比对**:SQLite 存特征(float32 blob);余弦相似度,阈值先验 0.35~0.45,**用实测 ROC 标定**;判定 = Top-1 相似度 > 阈值。千人内暴力比对 <10ms,无需 ANN。
-- 版本对齐:烧录后 `dmesg | grep rknpu` 查驱动版本,librknnrt 版本须 ≥ 驱动要求。
+- **采用 `external/iva` 的 ROCKIVA**(Rockchip 官方智能视觉分析 SDK):
+  - 能力:人脸检测 + 关键点 + **1:N 人脸检索(注册/搜索)** + 属性(性别/年龄/表情/眼镜等);模型自带,NPU 推理
+  - 板型适配:`librockiva/rockiva-rk3576-Linux`(预编译库)+ `models/rockiva_data_rk3576`
+  - API:`include/rockiva_face_api.h`(初始化/送帧 + 人脸注册/检索接口)
+  - 文档:`Rockchip_Developer_Guide_ROCKIVA_SDK_CN.pdf`(已拷入本仓库 sdk-guide/docs/)
+  - Buildroot:`BR2_PACKAGE_IVA=y` + `BR2_PACKAGE_IVA_RK3576=y`(已启用,装 staging 可直接链接)
+- **活体判定输入**:ROCKIVA 输出的关键点/姿态供 liveness_service 使用(张嘴判定二期接口部能力或补 landmark 模型)
+- **备选/扩展**:需自定义识别模型或更高精度时,再走 rknn-toolkit2 + rknn_model_zoo 自组 SCRFD+ArcFace(转换方法见 sdk-guide §5);无论哪条路,比对阈值都要实测 ROC 标定
+- 版本对齐:烧录后 `dmesg | grep rknpu` 查驱动版本
 
 ### 4.4 活体检测(单目 RGB,动作指令式)
 
@@ -150,7 +155,15 @@ door-guard/
 ### 4.7 门控与存储
 
 - 开锁:libgpiod 控继电器(脉冲 1~10s 可配);门磁反馈输入可选。
-- 记录:SQLite(开门日志/告警/特征库);RTC + NTP 校时。
+- 记录:SQLite(`BR2_PACKAGE_SQLITE=y` 已启用)存开门日志/告警/特征库;RTC + chrony(NTP)校时。
+
+### 4.8 网络与联网(门禁必需,已核实)
+
+- **以太网**:RK3576 GMAC 内核原生支持;DHCP 由 dhcpcd(`network.config` 已启用)
+- **WiFi**:wifibt 片段已启用,作备选链路
+- **时间同步**:chrony(NTP)——门禁日志强依赖正确时间,部署时必配 NTP 服务器
+- **远程运维**:dropbear(SSH)+ SFTP(`network.config` 已启用)
+- **管理面规划**:首版以 SSH + 配置文件交付;二期加局域网 Web 管理接口(人脸/卡/指纹库管理、日志查询)
 
 ---
 
@@ -163,12 +176,12 @@ door-guard/
 | Phase | 内容 | 验收标准 |
 |---|---|---|
 | B1 | 环境自检:依赖包(git ssh make gcc 等按 SDK docs)、外网连通、磁盘/内存 | 自检脚本全绿 |
-| B2 | **Buildroot 定制配置生效**:配置文件已建(SDK 分支 `k7-door-guard-dev`,补丁 `sdk-patches/0001-buildroot-K7-doorGuard.patch`):基于 `rockchip_rk3576_defconfig` 去 weston/chromium,加 lvgl(自带 DRM 后端)/中文 locale/gdb+strace/dropbear,启用 `BR2_PACKAGE_RKADK` + `RKADK_USE_AIQ`(自动拉起 rockit/rkaiq);B2 时确认 `RK_BUILDROOT_CFG` 绑定方式使 doorGuard 配置被选用 | `buildroot/output/*/` 下 menuconfig 可见 LVGL/RKADK/RKAIQ 开启、weston 关闭 |
+| B2 | **Buildroot 定制配置生效**:配置文件已建(SDK 分支 `k7-door-guard-dev`,补丁 `sdk-patches/0001+0002`):去 weston/chromium,加 lvgl(带 DRM 后端)/中文 locale/gdb+strace/dropbear,启用 `BR2_PACKAGE_RKADK`+`RKADK_USE_AIQ`、`BR2_PACKAGE_IVA`(RK3576,官方人脸)、`BR2_PACKAGE_GST1_RTSP_SERVER`(推流)、`BR2_PACKAGE_SQLITE`(数据库);B2 时确认 `RK_BUILDROOT_CFG` 绑定方式使 doorGuard 配置被选用 | `buildroot/output/*/` 下 menuconfig 可见 LVGL/RKADK/RKAIQ/IVA/SQLITE/GST1_RTSP_SERVER 开启、weston 关闭 |
 | B3 | **屏幕使能**:K7 DTS 加 include 5 寸 dtsi;顺带确认触摸节点 | kernel 编过,dtb 里能反查 panel/gt9xx 节点 |
 | B4 | 全量编译:`./build.sh` 选 K7 buildroot 配置 → uboot+kernel+rootfs+镜像(首次需外网拉依赖,预计 1~3h,`make -j6`) | `output/` 产出镜像;**镜像 md5 连读两次一致** |
 | B5 | 烧录验证:USB(Maskrom/Loader)烧录;串口 1500000 8N1 + SSH(dropbear) | 验收清单:登录✓ dmesg 无异常✓ rknpu 驱动✓ media-ctl 有 IMX415 拓扑✓ 屏亮✓ 触摸有 event✓ |
 | B6 | 摄像头出图:rkaiq 起 3A,v4l2 抓帧存图人工确认成像 | NV12 抓帧图正常曝光/色彩 |
-| B7 | NPU 单项:SCRFD demo 上板跑通(检测帧率/框正确) | 检测 demo 出框 |
+| B7 | NPU 单项:ROCKIVA 人脸 demo 上板(检测/注册/1:N 检索) | 检测出框,检索返回正确 ID |
 | B8 | 应用整合:door-guard 骨架 + LVGL 上屏 + 预览上屏 | 预览+UI 同屏,触摸可操作 |
 | B9 | 人脸全链路:注册→识别→开门→日志 | 端到端 <1s,误识/拒识标定 |
 | B10 | 活体接入 → 指纹/读卡器接入 → 产品化裁剪(去调试包/只读根文件系统/数据分区分离/签名) | 按各自验收 |
