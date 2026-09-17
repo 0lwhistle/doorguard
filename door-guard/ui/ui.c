@@ -12,7 +12,13 @@
 
 #include <string.h>
 
-extern void page_demo_register(void);   /* demo 页(Phase 6 由真实页面替代) */
+extern void page_home_register(void);
+extern void page_standby_register(void);
+extern void page_menu_register(void);
+extern void page_users_register(void);
+extern void page_device_register(void);
+extern void page_access_set_register(void);
+extern void page_logs_register(void);
 
 static lv_obj_t *s_page_root = NULL;
 
@@ -35,8 +41,14 @@ int ui_init(const dg_ui_args_t *args)
     lv_obj_set_size(s_page_root, DG_SCREEN_W, DG_SCREEN_H);
     page_mgr_attach_root(s_page_root);
 
-    page_demo_register();
-    page_mgr_open("demo");
+    page_home_register();
+    page_standby_register();
+    page_menu_register();
+    page_users_register();
+    page_device_register();
+    page_access_set_register();
+    page_logs_register();
+    page_mgr_open("home");
 
     return DG_OK;
 }

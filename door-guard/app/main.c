@@ -19,7 +19,12 @@
 #include "tasker.h"
 #include "ui.h"
 
+#ifdef DG_SIM
+extern void sim_vision_start(void);
+#endif
+
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -34,16 +39,10 @@
 #define DG_KEY_PATH "/var/lib/door-guard/dg.key"
 #endif
 
-/* Phase 5 相机帧探针:仅计数证明链路活;Phase 6 page_home 接管渲染 */
-static void frame_probe(const camera_frame_t *f, void *ud)
-{
-    static uint32_t last = 0;
-    (void)ud;
-    if (f->seq - last >= 150) {
-        last = f->seq;
-        fprintf(stderr, "[camera] seq=%u %dx%d\n", f->seq, f->w, f->h);
-    }
-}
+#ifndef DG_SIM
+/* 板上占位:sim 用 sim_vision_start */
+static void frame_probe(void) {}
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -85,8 +84,16 @@ int main(int argc, char *argv[])
     }
 
     /* camera:失败不致命(spec-auth-business §5 摄像头未就绪路径) */
-    if (camera_init(ui_args.camera_dir, frame_probe, NULL) != DG_OK)
+    if (camera_init(ui_args.camera_dir, NULL, NULL) != DG_OK)
         fprintf(stderr, "camera_init 失败(目录 %s)\n", ui_args.camera_dir);
+
+#ifdef DG_SIM
+    /* 视觉 mock 默认开;DG_SIM_VISION=0 关闭以便交互式走查 */
+    if (getenv("DG_SIM_VISION") == NULL || strcmp(getenv("DG_SIM_VISION"), "0") != 0)
+        sim_vision_start();
+#else
+    (void)frame_probe;
+#endif
 
     fprintf(stderr, "door-guard 运行中(Ctrl-C 退出)\n");
     for (;;) {

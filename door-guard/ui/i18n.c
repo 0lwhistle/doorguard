@@ -38,18 +38,23 @@ int i18n_init(const char *lang_dir)
 
 int i18n_apply_locked(const char *lang)
 {
+    /* lang 可能就是 s_lang 自身(i18n_init 以当前语言启动):
+     * snprintf(dst==src) 自别名会产生空串,先拷到局部副本 */
+    char lang_copy[16];
+    snprintf(lang_copy, sizeof(lang_copy), "%s", lang ? lang : "");
+
     /* 已加载过:直接切换(缓存常驻,见 s_tables 注释) */
     for (int i = 0; i < s_table_cnt; i++) {
-        if (!strcmp(s_table_lang[i], lang)) {
+        if (!strcmp(s_table_lang[i], lang_copy)) {
             s_table = s_tables[i];
-            snprintf(s_lang, sizeof(s_lang), "%s", lang);
-            DG_LOGI(TAG, "语言切换为 %s", lang);
+            snprintf(s_lang, sizeof(s_lang), "%s", lang_copy);
+            DG_LOGI(TAG, "语言切换为 %s", lang_copy);
             return DG_OK;
         }
     }
 
     char path[256];
-    snprintf(path, sizeof(path), "%s/%s.json", s_lang_dir, lang);
+    snprintf(path, sizeof(path), "%s/%s.json", s_lang_dir, lang_copy);
 
     FILE *f = fopen(path, "rb");
     if (!f) {
@@ -70,15 +75,15 @@ int i18n_apply_locked(const char *lang)
     pthread_mutex_lock(&s_mtx);
     if (s_table_cnt < I18N_TABLE_MAX) {
         s_tables[s_table_cnt] = table;
-        snprintf(s_table_lang[s_table_cnt], sizeof(s_table_lang[0]), "%s", lang);
+        snprintf(s_table_lang[s_table_cnt], sizeof(s_table_lang[0]), "%s", lang_copy);
         s_table_cnt++;
     } else {
         DG_LOGW(TAG, "语言表缓存满,本表不缓存");
     }
     s_table = table;
-    snprintf(s_lang, sizeof(s_lang), "%s", lang);
+    snprintf(s_lang, sizeof(s_lang), "%s", lang_copy);
     pthread_mutex_unlock(&s_mtx);
-    DG_LOGI(TAG, "语言切换为 %s", lang);
+    DG_LOGI(TAG, "语言切换为 %s", lang_copy);
     return DG_OK;
 }
 

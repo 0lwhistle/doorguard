@@ -7,6 +7,8 @@
  * EV_CAPTURE_STATE 显示"摄像头未就绪"(spec-auth-business §5)。
  */
 #include "camera.h"
+
+#include <stddef.h>
 #include "dg_log.h"
 
 int camera_init(const char *res_path, camera_frame_fn cb, void *ud)
@@ -20,4 +22,9 @@ int camera_init(const char *res_path, camera_frame_fn cb, void *ud)
 
 void camera_poll(void)
 {
+}
+
+const camera_frame_t *camera_latest(void)
+{
+    return NULL;
 }

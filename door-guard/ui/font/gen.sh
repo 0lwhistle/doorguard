@@ -17,8 +17,10 @@ out = "".join(sorted(c for c in chars if ord(c) > 0x7f))
 sys.stdout.write(out)
 PY
 
+# 双字体:Latin 取 DejaVu(CJK 后备字体通常无 ASCII 字形),汉字取 Droid CJK
 npx --yes lv_font_conv --no-compress --bpp 4 --size 16 \
-  --font "$FONT_SRC" -r 0x20-0x7f \
+  --font "${DG_FONT_LATIN:-/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf}" -r 0x20-0x7f \
+  --font "$FONT_SRC" \
   --symbols "$(cat /tmp/dg_font_symbols.txt)" \
   --format lvgl --lv-include lvgl.h \
   --no-prefilter -o font/dg_font_cn_16.c

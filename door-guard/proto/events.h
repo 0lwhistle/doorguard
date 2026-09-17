@@ -90,6 +90,7 @@ typedef struct {
     bool    matched;
     char    user_id[DG_UID_LEN];
     char    user_name[DG_NAME_LEN];
+    int32_t role;                         /**< dg_role_t(黑名单命中即拒,spec-auth §2) */
     int32_t score_permille;               /**< 相似度千分比(0~1000) */
 } ev_match_t;
 

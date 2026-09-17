@@ -29,7 +29,7 @@ find_package(Threads REQUIRED)
 # ---- 基础组件(板上与测试同一份源码) ----
 # dg_log:移植组件共用的极简日志(接口见 proto/dg_log.h)
 add_library(dg_log STATIC proto/dg_log.c)
-target_include_directories(dg_log PUBLIC proto)
+target_include_directories(dg_log PUBLIC ${CMAKE_SOURCE_DIR}/proto)
 
 # event_bus:发布订阅事件总线(UI↔服务解耦骨干,README 见 proto/event_bus/)
 add_library(dg_event_bus STATIC
@@ -37,7 +37,7 @@ add_library(dg_event_bus STATIC
     proto/event_bus/event_bus_port.c
     proto/event_bus/dg_event_pool.c
 )
-target_include_directories(dg_event_bus PUBLIC proto/event_bus)
+target_include_directories(dg_event_bus PUBLIC ${CMAKE_SOURCE_DIR}/proto/event_bus)
 target_link_libraries(dg_event_bus PUBLIC dg_log)
 
 # tasker:短任务调度器(≤500ms 约定,README 见 proto/tasker/)
@@ -47,14 +47,14 @@ add_library(dg_tasker STATIC
     proto/tasker/task_worker.c
     proto/tasker/tasker_port.c
 )
-target_include_directories(dg_tasker PUBLIC proto/tasker)
+target_include_directories(dg_tasker PUBLIC ${CMAKE_SOURCE_DIR}/proto/tasker)
 target_link_libraries(dg_tasker PUBLIC dg_log)
 
 # holder:全局模块注册表(启动顺序/健康状态,README 见 proto/holder/)
 add_library(dg_holder STATIC
     proto/holder/holder.c
 )
-target_include_directories(dg_holder PUBLIC proto/holder)
+target_include_directories(dg_holder PUBLIC ${CMAKE_SOURCE_DIR}/proto/holder)
 target_link_libraries(dg_holder PUBLIC dg_log)
 
 # proto 契约层:错误码/数据结构/业务事件(types.h err.h events.h,头在 proto/ 根)
@@ -62,18 +62,18 @@ add_library(dg_proto STATIC
     proto/types.c
     proto/events.c
 )
-target_include_directories(dg_proto PUBLIC proto)
+target_include_directories(dg_proto PUBLIC ${CMAKE_SOURCE_DIR}/proto)
 target_link_libraries(dg_proto PUBLIC dg_event_bus)
 
 # cjson:第三方 JSON 解析(MIT,vendored 于 third_party/cjson)
 add_library(cjson STATIC third_party/cjson/cJSON.c)
-target_include_directories(cjson PUBLIC third_party/cjson)
+target_include_directories(cjson PUBLIC ${CMAKE_SOURCE_DIR}/third_party/cjson)
 # 屏蔽第三方源码的告警(不因 vendored 代码破"零警告"纪律,不修改其内容)
 target_compile_options(cjson PRIVATE -w)
 
 # config:配置体系(默认→device.json→DB device_config)
 add_library(dg_config STATIC config/cfg.c)
-target_include_directories(dg_config PUBLIC config)
+target_include_directories(dg_config PUBLIC ${CMAKE_SOURCE_DIR}/config)
 target_link_libraries(dg_config PUBLIC dg_storage cjson)
 
 # storage:SQLite 存储加加密(storage.h API;sysroot 实测有 sqlite3/openssl3)
@@ -81,14 +81,14 @@ add_library(dg_storage STATIC
     hal/storage/storage.c
     hal/storage/crypto.c
 )
-target_include_directories(dg_storage PUBLIC hal/storage)
+target_include_directories(dg_storage PUBLIC ${CMAKE_SOURCE_DIR}/hal/storage)
 target_link_libraries(dg_storage PUBLIC dg_proto sqlite3 crypto)
 
 # ---- LVGL 8.3(third_party 源码双端同源编译:板上不再依赖 sysroot 的
 # liblvgl.so,以获得自定义 lv_conf:CJK 字体/256KB 内存池) ----
 file(GLOB_RECURSE LVGL_SRCS third_party/lvgl/src/*.c)
 add_library(lvgl STATIC ${LVGL_SRCS})
-target_include_directories(lvgl PUBLIC third_party/lvgl)
+target_include_directories(lvgl PUBLIC ${CMAKE_SOURCE_DIR}/third_party/lvgl)
 target_compile_definitions(lvgl PUBLIC LV_CONF_INCLUDE_SIMPLE)
 target_compile_options(lvgl PRIVATE -w)   # vendored 源码不改动内容,告警豁免
 
@@ -99,12 +99,23 @@ add_library(dg_ui STATIC
     ui/port.c
     ui/i18n.c
     ui/page_mgr.c
-    ui/page_demo.c
+    ui/page_home.c
+    ui/page_standby.c
+    ui/page_menu.c
+    ui/page_users.c
+    ui/page_device.c
+    ui/page_access_set.c
+    ui/page_logs.c
     ui/font/dg_font_cn_16.c
     ${DG_WIDGET_SRCS}
 )
-target_include_directories(dg_ui PUBLIC ui)
-target_link_libraries(dg_ui PUBLIC lvgl dg_config)
+target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DIR}/modules/access)
+target_link_libraries(dg_ui PUBLIC lvgl dg_config dg_access)
+
+# access:验证状态机(纯 C,事件驱动,UI/服务层翻译执行)
+add_library(dg_access STATIC modules/access/auth_fsm.c)
+target_include_directories(dg_access PUBLIC ${CMAKE_SOURCE_DIR}/modules/access)
+target_link_libraries(dg_access PUBLIC dg_proto dg_config)
 
 if(DG_BUILD_TESTS)
     enable_testing()
@@ -118,10 +129,19 @@ if(DG_SIM)
     add_library(dg_display STATIC hal/display/display_sim.c)
     target_link_libraries(dg_display PUBLIC lvgl SDL2::SDL2)
     add_library(dg_camera STATIC hal/camera/camera_sim.c)
-    target_include_directories(dg_camera PRIVATE third_party/stb)
+    target_include_directories(dg_camera PRIVATE ${CMAKE_SOURCE_DIR}/third_party/stb)
     target_link_libraries(dg_camera PUBLIC m)   # stb_image 解码用到 pow
+    # sim 视觉 mock(模拟器全流程演示;板上不编译)
+    add_library(dg_simvision STATIC sim/sim_vision.c)
+    target_link_libraries(dg_simvision PUBLIC dg_event_bus)
 else()
-    add_library(dg_display STATIC hal/display/display_drm.c)
+    add_library(dg_display STATIC hal/display/display_drm.c third_party/lv_drivers/drm.c)
+    # 顺序敏感:libdrm 在前——lv_drivers/drm.c 内部 #include <drm.h> 必须解析到
+    # libdrm 的 drm.h 而不是本目录同名头(避免 xf86drm 类型未定义)
+    target_include_directories(dg_display PRIVATE ${CMAKE_SYSROOT}/usr/include/libdrm)
+    target_include_directories(dg_display PRIVATE ${CMAKE_SOURCE_DIR}/third_party/lv_drivers)
+    set_source_files_properties(third_party/lv_drivers/drm.c PROPERTIES COMPILE_OPTIONS "-w")
+    target_link_libraries(dg_display PUBLIC lvgl drm)   # libdrm:sysroot 实测有
     add_library(dg_camera STATIC hal/camera/camera_board.c)
 endif()
 target_link_libraries(dg_display PUBLIC dg_log)
@@ -147,8 +167,11 @@ add_executable(door-guard app/main.c)
 target_link_libraries(door-guard PRIVATE
     -Wl,--start-group
     dg_event_bus dg_tasker dg_holder dg_proto dg_storage dg_config
-    lvgl dg_ui dg_display dg_camera
+    lvgl dg_ui dg_access dg_display dg_camera
     -Wl,--end-group)
+if(DG_SIM)
+    target_link_libraries(door-guard PRIVATE dg_simvision)
+endif()
 if(DG_SIM)
     target_compile_definitions(door-guard PRIVATE DG_SIM=1)
 endif()

@@ -17,9 +17,10 @@ extern "C" {
 #endif
 
 typedef struct {
-    int32_t w, h;              /**< 帧宽高(RGB888) */
+    int32_t w, h;              /**< 帧宽高 */
     uint32_t seq;              /**< 递增序号(丢帧检测) */
-    const uint8_t *pixels;     /**< RGB888,回调返回后失效 */
+    const uint8_t *pixels;     /**< XRGB8888(4 字节/像素,与 LVGL 32 位色直通),
+                                    回调返回后失效 */
 } camera_frame_t;
 
 typedef void (*camera_frame_fn)(const camera_frame_t *frame, void *ud);
@@ -33,6 +34,10 @@ int camera_init(const char *res_path, camera_frame_fn cb, void *ud);
 
 /** 投帧泵(主循环调用;SIM 按帧率节拍投递) */
 void camera_poll(void);
+
+/** 最近一帧(渲染端 100ms 级轮询拷贝,帧不过事件总线);
+ *  无帧/未就绪返回 NULL。帧内存由 camera 模块持有,下次 poll 前有效 */
+const camera_frame_t *camera_latest(void);
 
 /** sim 后端帧率(ms/帧) */
 void camera_sim_set_interval(uint32_t ms);

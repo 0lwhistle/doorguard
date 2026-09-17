@@ -20,6 +20,7 @@ dg_add_test(test_storage dg_storage)
 set_tests_properties(test_storage PROPERTIES TIMEOUT 300)
 dg_add_test(test_cfg dg_config)
 set_tests_properties(test_cfg PROPERTIES TIMEOUT 60)
+dg_add_test(test_auth_fsm dg_access)
 
 # i18n 一致性:扫描源码 _() 键 + 双 json 覆盖 + 裸中文检查 + 字体字形覆盖
 add_executable(test_i18n test_i18n.c)

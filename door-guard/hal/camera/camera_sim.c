@@ -20,7 +20,7 @@ static const char *TAG = "[CAMERA]";
 #define SIM_IMG_MAX 8
 
 typedef struct {
-    uint8_t *pixels;           /* RGB888 */
+    uint8_t *pixels;           /* XRGB8888(4B/px,装载时由 RGB 展开) */
     int32_t w, h;
 } sim_image_t;
 
@@ -42,8 +42,8 @@ static int64_t mono_ms(void)
 
 int camera_init(const char *res_path, camera_frame_fn cb, void *ud)
 {
-    if (!res_path || !cb)
-        return DG_ERR_PARAM;
+    if (!res_path)
+        return DG_ERR_PARAM;            /* cb 可空:仅维护 latest 供渲染轮询 */
 
     DIR *d = opendir(res_path);
     if (!d) {
@@ -64,12 +64,26 @@ int camera_init(const char *res_path, camera_frame_fn cb, void *ud)
         char full[512];
         snprintf(full, sizeof(full), "%s/%s", res_path, ent->d_name);
         int w, h, comp;
-        uint8_t *img = stbi_load(full, &w, &h, &comp, 3);   /* 强制 RGB */
-        if (!img) {
+        uint8_t *rgb = stbi_load(full, &w, &h, &comp, 3);   /* 强制 RGB */
+        if (!rgb) {
             DG_LOGW(TAG, "解码失败 %s", full);
             continue;
         }
-        s_imgs[s_img_cnt].pixels = img;
+        /* RGB888 → XRGB8888 展开:与 LVGL 32 位色/板上 ARGB 帧直通一致 */
+        size_t npix = (size_t)w * h;
+        uint8_t *xrgb = malloc(npix * 4);
+        if (!xrgb) {
+            stbi_image_free(rgb);
+            continue;
+        }
+        for (size_t i = 0; i < npix; i++) {
+            xrgb[i * 4 + 0] = 0xFF;            /* X */
+            xrgb[i * 4 + 1] = rgb[i * 3 + 0];  /* R */
+            xrgb[i * 4 + 2] = rgb[i * 3 + 1];  /* G */
+            xrgb[i * 4 + 3] = rgb[i * 3 + 2];  /* B */
+        }
+        stbi_image_free(rgb);
+        s_imgs[s_img_cnt].pixels = xrgb;
         s_imgs[s_img_cnt].w = w;
         s_imgs[s_img_cnt].h = h;
         s_img_cnt++;
@@ -94,9 +108,25 @@ void camera_sim_set_interval(uint32_t ms)
     s_interval_ms = ms;
 }
 
+/* latest 双缓冲:投帧线程写 back,渲染端读 front(poll 与渲染同线程,直写即可) */
+static sim_image_t *s_latest = NULL;
+static uint32_t s_latest_seq = 0;
+
+const camera_frame_t *camera_latest(void)
+{
+    static camera_frame_t f;
+    if (!s_latest)
+        return NULL;
+    f.w = s_latest->w;
+    f.h = s_latest->h;
+    f.seq = s_latest_seq;
+    f.pixels = s_latest->pixels;
+    return &f;
+}
+
 void camera_poll(void)
 {
-    if (!s_cb || s_img_cnt == 0)
+    if (s_img_cnt == 0)
         return;
     int64_t now = mono_ms();
     if (now < s_next_ms)
@@ -104,12 +134,17 @@ void camera_poll(void)
     s_next_ms = now + s_interval_ms;
 
     sim_image_t *img = &s_imgs[s_cur];
-    camera_frame_t frame = {
-        .w = img->w,
-        .h = img->h,
-        .seq = ++s_seq,
-        .pixels = img->pixels,
-    };
-    s_cb(&frame, s_ud);
+    s_latest = img;
+    s_latest_seq = ++s_seq;
+
+    if (s_cb) {
+        camera_frame_t frame = {
+            .w = img->w,
+            .h = img->h,
+            .seq = s_latest_seq,
+            .pixels = img->pixels,
+        };
+        s_cb(&frame, s_ud);
+    }
     s_cur = (s_cur + 1) % s_img_cnt;
 }
