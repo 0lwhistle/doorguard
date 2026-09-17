@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-09-18 Phase 8 板上 HAL 完成 + 板失联事故
+
+### 完成内容
+- **gpio_hal**:B4 rootfs 无 libgpiod/gpiod CLI(实测)→ sysfs 实现;
+  引脚号入 device.json(access.relay_gpio_line);开门脉冲+电平读回对拍接口
+- **uart_hal**:termios 框架(原始模式+接收线程)+ mock 回环后端;
+  test_uart_mock 回环三帧/重复打开拒绝/关闭后拒发全绿;
+  **协议纪律执行**:指纹/读卡帧协议等手册,auth/{finger,card} 层未动
+- **camera_board**:实测探测到 /dev/video0-72(rkisp 多节点)——B6/B7
+  ISP 链路定位的重要线索;真实取流仍 mock 占位
+- access_service OPEN_DOOR 接 gpio_hal(初始化失败降级为仅事件可观测)
+
+### ⚠️ 事故记录(引以为戒)
+- 板上 gpio 对拍时选择了未知引脚 gpio108,写 direction 后**板上内核挂起
+  失联**(ping 不通),需**物理断电恢复**;door-guard 程序本身无恙
+- 教训:GPIO 物理操作必须先确认引脚复用状态(pinctrl),未知引脚禁止写
+  direction。gpio_hal 代码路径正确性待引脚确认后重测
+
+### 待硬件确认清单(累计)
+1. 继电器接线引脚(access.relay_gpio_line)与继电器类型(电平/脉冲)
+2. 指纹模块型号/协议/接线 UART
+3. IC 读卡器型号/协议/接线
+4. 摄像头真实链路:rkaiq 3A + V4L2(B6/B7,/dev/video0-72 已探明)
+5. 触摸:GT9xx 待 B5 固件(B4 FTS probe fail 无输入节点)
+
+### 未完成 / 下一步
+- Phase 9 网络功能(web/OTA/NTP/mDNS)
+
+---
+
 ## 2026-09-18 Phase 7 服务层完成
 
 ### 完成内容
