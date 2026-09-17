@@ -18,6 +18,7 @@
 #include "widgets/dg_popup.h"
 
 #include "hal/camera/camera.h"
+#include "ui_events.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -33,11 +34,18 @@ static event_subscription_t *s_subs[6];
 static int s_sub_cnt = 0;
 static ev_auth_result_t s_last_result;       /* 最近认证结果(弹窗文案源) */
 
+static void render_evt(const ui_evt_t *evt);
+
 /* ---- 相机帧 → 画布(100ms 轮询) ---- */
 
 static void canvas_timer_cb(lv_timer_t *t)
 {
     (void)t;
+    /* 排空 UI 事件队列(LVGL 线程内渲染) */
+    ui_evt_t evt;
+    while (ui_evt_pop(&evt))
+        render_evt(&evt);
+
     const camera_frame_t *f = camera_latest();
     if (!f || !s_canvas)
         return;
@@ -58,24 +66,16 @@ static void canvas_timer_cb(lv_timer_t *t)
 
 /* ---- 视觉脸框(纯绘制) ---- */
 
+/* 总线回调(LVGL 禁区):一律入队,LVGL 线程泵出渲染 */
+
 static int on_face_box(const event_t *e, void *ud)
 {
     (void)ud;
-    const ev_face_box_t *b = (const ev_face_box_t *)e->data;
-    if (!s_facebox)
-        return 0;
-    s_box_last[0] = (lv_coord_t)b->x;
-    s_box_last[1] = (lv_coord_t)b->y;
-    s_box_last[2] = (lv_coord_t)b->w;
-    s_box_last[3] = (lv_coord_t)b->h;
-    lv_color_t c = (b->state == DG_BOX_MATCHED)  ? DG_COL_OK()
-                   : (b->state == DG_BOX_FAILED) ? DG_COL_ERR()
-                                                 : DG_COL_WARN();
-    lv_obj_clear_flag(s_facebox, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_pos(s_facebox, s_box_last[0], s_box_last[1]);
-    lv_obj_set_size(s_facebox, s_box_last[2], s_box_last[3]);
-    lv_obj_set_style_border_color(s_facebox, c, 0);
-    lv_obj_invalidate(s_facebox);
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_FACE_BOX;
+    evt.box = *(const ev_face_box_t *)e->data;
+    ui_evt_push(&evt);
     return 0;
 }
 
@@ -83,70 +83,129 @@ static int on_face_lost(const event_t *e, void *ud)
 {
     (void)e;
     (void)ud;
-    if (s_facebox)
-        lv_obj_add_flag(s_facebox, LV_OBJ_FLAG_HIDDEN);
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_FACE_LOST;
+    ui_evt_push(&evt);
     return 0;
 }
-
-/* ---- 服务决策 → 渲染 ---- */
 
 static int on_auth_result(const event_t *e, void *ud)
 {
     (void)ud;
-    s_last_result = *(const ev_auth_result_t *)e->data;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_AUTH_RESULT;
+    evt.result = *(const ev_auth_result_t *)e->data;
+    ui_evt_push(&evt);
     return 0;
 }
 
 static int on_hint(const event_t *e, void *ud)
 {
     (void)ud;
-    const ev_hint_t *h = (const ev_hint_t *)e->data;
-    if (!s_hint)
-        return 0;
-
-    if (h->method == -3) {                              /* 成功弹窗 */
-        char text[DG_UID_LEN + DG_NAME_LEN + 8];
-        snprintf(text, sizeof(text), "%s %s", _("验证成功"),
-                 s_last_result.has_user ? s_last_result.user_name : "");
-        dg_popup_success(text, 3000, NULL, NULL);
-        return 0;
-    }
-    if (h->method == -4) {                              /* 失败弹窗 */
-        dg_popup_fail(_("验证失败"), 3000, NULL, NULL);
-        return 0;
-    }
-
-    const char *text = NULL;
-    if (h->method == -1)
-        text = _("管理员认证");
-    else if (h->method == DG_METHOD_FACE_11)
-        text = _("请正对摄像头");
-    else if (h->method == DG_METHOD_FINGER)
-        text = _("请按指纹");
-    else if (h->method == DG_METHOD_PWD)
-        text = _("请输入密码");
-    else if (h->method == DG_METHOD_IC)
-        text = _("请刷卡");
-    if (text) {
-        lv_label_set_text(s_hint, text);
-        lv_obj_clear_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
-    }
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_HINT;
+    evt.hint = *(const ev_hint_t *)e->data;
+    ui_evt_push(&evt);
     return 0;
 }
 
 static int on_goto_page(const event_t *e, void *ud)
 {
     (void)ud;
-    page_mgr_open(((const ev_goto_page_t *)e->data)->page);
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_GOTO_PAGE;
+    evt.page = *(const ev_goto_page_t *)e->data;
+    ui_evt_push(&evt);
     return 0;
 }
 
 static int on_refresh_evt(const event_t *e, void *ud)
 {
-    (void)ud;
     (void)e;
-    page_mgr_open(page_mgr_current());      /* 语言切换:整页重建 */
+    (void)ud;
+    /* 语言切换页重建由刷新事件在 LVGL 定时器内执行更简单:走队列 */
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_HINT;
+    evt.hint.method = -5;                   /* -5 = 刷新页 */
+    ui_evt_push(&evt);
     return 0;
+}
+
+/* ---- LVGL 线程:队列泵出渲染 ---- */
+
+static void render_evt(const ui_evt_t *evt)
+{
+    switch (evt->kind) {
+    case UI_EVT_FACE_BOX: {
+        const ev_face_box_t *b = &evt->box;
+        if (!s_facebox)
+            break;
+        s_box_last[0] = (lv_coord_t)b->x;
+        s_box_last[1] = (lv_coord_t)b->y;
+        s_box_last[2] = (lv_coord_t)b->w;
+        s_box_last[3] = (lv_coord_t)b->h;
+        lv_color_t c = (b->state == DG_BOX_MATCHED)  ? DG_COL_OK()
+                       : (b->state == DG_BOX_FAILED) ? DG_COL_ERR()
+                                                     : DG_COL_WARN();
+        lv_obj_clear_flag(s_facebox, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(s_facebox, s_box_last[0], s_box_last[1]);
+        lv_obj_set_size(s_facebox, s_box_last[2], s_box_last[3]);
+        lv_obj_set_style_border_color(s_facebox, c, 0);
+        lv_obj_invalidate(s_facebox);
+        break;
+    }
+    case UI_EVT_FACE_LOST:
+        if (s_facebox)
+            lv_obj_add_flag(s_facebox, LV_OBJ_FLAG_HIDDEN);
+        break;
+    case UI_EVT_AUTH_RESULT:
+        s_last_result = evt->result;
+        break;
+    case UI_EVT_HINT: {
+        const ev_hint_t *h = &evt->hint;
+        if (h->method == -5) {
+            page_mgr_open(page_mgr_current());   /* 整页重建(语言刷新) */
+            break;
+        }
+        if (h->method == -3) {
+            char text[DG_UID_LEN + DG_NAME_LEN + 8];
+            snprintf(text, sizeof(text), "%s %s", _("验证成功"),
+                     s_last_result.has_user ? s_last_result.user_name : "");
+            dg_popup_success(text, 3000, NULL, NULL);
+            break;
+        }
+        if (h->method == -4) {
+            dg_popup_fail(_("验证失败"), 3000, NULL, NULL);
+            break;
+        }
+        if (!s_hint)
+            break;
+        const char *text = NULL;
+        if (h->method == -1)
+            text = _("管理员认证");
+        else if (h->method == DG_METHOD_FACE_11)
+            text = _("请正对摄像头");
+        else if (h->method == DG_METHOD_FINGER)
+            text = _("请按指纹");
+        else if (h->method == DG_METHOD_PWD)
+            text = _("请输入密码");
+        else if (h->method == DG_METHOD_IC)
+            text = _("请刷卡");
+        if (text) {
+            lv_label_set_text(s_hint, text);
+            lv_obj_clear_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
+        }
+        break;
+    }
+    case UI_EVT_GOTO_PAGE:
+        page_mgr_open(evt->page.page);
+        break;
+    }
 }
 
 /* ---- UI 输入 → 服务请求 ---- */

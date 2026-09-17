@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# OTA 升级包上传。用法: dg-ota-upload <板IP> <包文件> [版本号]
+#   校验闭环到板端 /tmp/ota_staged.bin(分区方案落地前不刷写,见 docs/tech/OTA_PLAN.md)
+set -euo pipefail
+
+ip="${1:-}"; pkg="${2:-}"; ver="${3:-dev}"
+[ -n "$ip" ] || { echo "用法: dg-ota-upload <板IP> <包文件> [版本号]"; exit 1; }
+[ -f "$pkg" ] || { echo "包文件不存在: $pkg"; exit 1; }
+[ -r "$pkg" ] || { echo "包不可读"; exit 1; }
+
+port="${DG_WEB_PORT:-8080}"
+base="http://$ip:$port"
+
+resp=$(curl -s -H 'Content-Type: application/json' \
+    -d '{"user":"admin","pwd":"admin"}' "$base/api/login")
+token=$(echo "$resp" | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+[ -n "$token" ] || { echo "登录失败: $resp"; exit 1; }
+
+size=$(stat -c %s "$pkg")
+sha=$(sha256sum "$pkg" | cut -d' ' -f1)
+echo "上传 $pkg ($size bytes, v=$ver)"
+
+code=$(curl -s -o /tmp/ota_resp.json -w "%{http_code}" -X POST \
+    -H "X-Auth-Token: $token" -H "X-OTA-Version: $ver" \
+    -H "X-OTA-Size: $size" -H "X-OTA-SHA256: $sha" \
+    --data-binary "@$pkg" "$base/api/ota/upload")
+
+cat /tmp/ota_resp.json; echo
+case "$code" in
+    200) echo "✅ 上传+校验闭环通过(未刷分区)" ;;
+    422) echo "❌ 校验失败(sha256/大小不符)" ; exit 1 ;;
+    400) echo "❌ 拒收(大小超限/参数非法)" ; exit 1 ;;
+    409) echo "⚠️ 冲突(其他上传中/续传偏移不符)" ; exit 1 ;;
+    *)   echo "❌ HTTP $code" ; exit 1 ;;
+esac

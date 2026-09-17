@@ -19,6 +19,9 @@
 #include "enroll_service.h"
 #include "event_bus.h"
 #include "liveness_service.h"
+#include "mdns/mdns_responder.h"
+#include "ntp/ntp_service.h"
+#include "web/web_server.h"
 #include "storage.h"
 #include "tasker.h"
 #include "ui.h"
@@ -74,6 +77,8 @@ int main(int argc, char *argv[])
     access_service_start();
     enroll_service_start();
     liveness_service_start();
+    web_server_start();
+    mdns_start();
 
     dg_ui_args_t ui_args = {
         .lang_dir = "ui/lang",

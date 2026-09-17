@@ -100,6 +100,7 @@ add_library(dg_ui STATIC
     ui/i18n.c
     ui/page_mgr.c
     ui/page_home.c
+    ui/ui_events.c
     ui/page_standby.c
     ui/page_menu.c
     ui/page_users.c
@@ -155,6 +156,28 @@ add_library(dg_liveness STATIC modules/liveness/liveness_service.c)
 target_include_directories(dg_liveness PUBLIC ${CMAKE_SOURCE_DIR}/modules/liveness)
 target_link_libraries(dg_liveness PUBLIC dg_proto)
 
+# civetweb:第三方 HTTP/WebSocket 单库(MIT,vendored)
+add_library(civetweb STATIC third_party/civetweb/civetweb.c)
+target_include_directories(civetweb PUBLIC third_party/civetweb)
+target_include_directories(civetweb PRIVATE ${CMAKE_SOURCE_DIR}/third_party/civetweb)
+target_compile_options(civetweb PRIVATE -w)
+target_compile_definitions(civetweb PRIVATE
+    MG_ENABLE_IPV6=0 MG_ENABLE_SSL=0 MG_DISABLE_POPEN=1
+    NO_SSL=1 NO_SSL_DL=1 MG_ENABLE_MD5=1 USE_WEBSOCKET=1
+    MG_ENABLE_SHA1=1 OPENSSL_API_3_0=1)
+target_compile_definitions(civetweb PUBLIC USE_WEBSOCKET=1)
+
+# net:web 上位机 / OTA / NTP / mDNS
+add_library(dg_net STATIC
+    modules/net/web/web_server.c
+    modules/net/web/web_pages.c
+    modules/net/ota/ota_service.c
+    modules/net/ntp/ntp_service.c
+    modules/net/mdns/mdns_responder.c
+)
+target_include_directories(dg_net PUBLIC ${CMAKE_SOURCE_DIR}/modules/net)
+target_link_libraries(dg_net PUBLIC dg_access dg_storage civetweb crypto)
+
 if(DG_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
@@ -202,7 +225,7 @@ add_executable(door-guard app/main.c)
 target_link_libraries(door-guard PRIVATE
     -Wl,--start-group
     dg_event_bus dg_tasker dg_holder dg_proto dg_storage dg_config
-    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_gpio dg_uart dg_display dg_camera
+    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_gpio dg_uart dg_net dg_display dg_camera
     -Wl,--end-group)
 
 if(DG_SIM)
