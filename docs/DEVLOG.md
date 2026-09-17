@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-09-17(晚)目录整理 + door-guard-dev skill + 环境资产落库
+
+### 完成内容
+- 目录重构:`docs/`(DEVLOG/TECH 文档)、`env/`(env.sh + dg-build/dg-deploy/dg-tc-install/dg-serial,source 后免路径);FLASH_GUIDE 迁至 docs/tech/FLASHING 并修正 IDB/分区表错误(parameter 0x800→0x0)
+- WSL 工具链:sysroot 坏包已由 VM 重导(软链未解引用),sqlite 探针通过;cmake 工具链文件适配真实目录名+多用户探测
+- 创建 `.agents/skills/door-guard-dev/`:SKILL.md 工作流 + 5 份 references(数据库/认证业务/UI/网络/架构),全量业务规格入库
+- ESP32 模板(/home/olwhistle/dockerNow/esp32/programs/ovs)API 已确认(tasker/event_bus/holder,带 port 层),映射表写入 skill references/architecture.md
+- 环境资产落库:板 IP 192.168.2.95(env.sh 默认)、root 口令、Gitea 地址、模板路径 → DEV_HANDBOOK §4/§6
+- 板子已装 WSL 公钥免密;`dg-deploy -r` 零参数推板运行验证通过
+
+### 未完成 / 下一步
+- 移植模板组件:event_bus → tasker → holder(按 skill architecture.md §2.2 纪律)
+- 主页面验证状态机、用户管理页、OTA 分区方案(对照 references 规格)
+- WiFi 驱动修复、recovery、ISP 节点定位(B6)仍挂账
+
+---
+
 ## 2026-09-17 首版固件产出 + 烧录上板 + WSL 交叉编译链路打通
 
 ### 固件(B1~B4,VM 侧)

@@ -55,6 +55,10 @@
 
 ## 4. 板端速查
 
+- **网络**:默认 IP **192.168.2.95**(DHCP;变了改 env/env.sh 的 DOORGUARD_IP)
+- **SSH**:`root` / 密码 `a231634904`(开发板局域网口令;WSL 公钥已装,`dg-deploy` 免密)
+- 串口 **1500000 8N1**(不是 115200);dropbear 拒绝空密码
+
 ```bash
 dmesg | grep -i imx415        # 传感器探测/出流状态
 ls /dev/video* /dev/media*    # 媒体节点(media0~8:多个 rkcif 实例 + ISP 等)
@@ -90,6 +94,8 @@ cat /proc/bus/input/devices | grep -iA3 goodix  # 触摸
 | Buildroot 配置 | `buildroot/configs/rockchip_rk3576_kickpi_k7_doorGuard_defconfig` |
 | Buildroot 输出 | `buildroot/output/rockchip_rk3576_kickpi_k7_doorGuard/` |
 | 产物 | `output/firmware/`(分区镜像);update.img 用 `RK_UPDATE=y ./build.sh firmware` 打包 |
+| ESP32 模板(复用 tasker/event_bus/holder) | `/home/olwhistle/dockerNow/esp32/programs/ovs`(WSL 本地;映射表见 skill references/architecture.md) |
+| 中枢仓库 | Gitea `ssh://git@192.168.2.150:222/olwhistle/k7_rk3576.git`(网页 http://192.168.2.150:3002,WSL 密钥名 wsl 已注册) |
 
 ### 常用命令
 
