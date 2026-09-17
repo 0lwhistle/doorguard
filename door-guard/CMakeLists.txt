@@ -57,6 +57,14 @@ add_library(dg_proto STATIC
 target_include_directories(dg_proto PUBLIC proto)
 target_link_libraries(dg_proto PUBLIC dg_event_bus)
 
+# storage:SQLite 存储加加密(storage.h API;sysroot 实测有 sqlite3/openssl3)
+add_library(dg_storage STATIC
+    hal/storage/storage.c
+    hal/storage/crypto.c
+)
+target_include_directories(dg_storage PUBLIC hal/storage)
+target_link_libraries(dg_storage PUBLIC dg_proto sqlite3 crypto)
+
 if(DG_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
@@ -78,7 +86,7 @@ link_directories(
 
 add_executable(door-guard app/main.c)
 # 组件链入应用:装配顺序在 app/main.c(architecture.md §1,main.c 头注同步维护)
-target_link_libraries(door-guard PRIVATE dg_event_bus dg_tasker dg_holder dg_proto)
+target_link_libraries(door-guard PRIVATE dg_event_bus dg_tasker dg_holder dg_proto dg_storage)
 # rockiva     # 官方人脸库(B7 阶段启用)
 # sqlite3     # 存储(启用 storage HAL 时)
 # gpiod       # 门控 GPIO

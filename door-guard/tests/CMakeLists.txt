@@ -16,6 +16,8 @@ dg_add_test(test_event_bus_stress dg_event_bus)
 dg_add_test(test_tasker dg_tasker)
 dg_add_test(test_holder dg_holder)
 dg_add_test(test_proto dg_proto)
+dg_add_test(test_storage dg_storage)
+set_tests_properties(test_storage PROPERTIES TIMEOUT 300)
 
 # 模块 demo 冒烟(使用示例须始终可运行)
 macro(dg_add_demo name src)
