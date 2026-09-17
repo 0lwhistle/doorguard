@@ -70,13 +70,13 @@ struct task_node {
     atomic_int done;
     atomic_int cancel;
     int timeout;
-    int is_timeout;
+    int is_timeout;        /* 仅执行线程写、无跨线程读,保持普通 int */
     int period;
-    int run_cnt;
-    enum task_priority pri;
-    enum task_time_cost_level level;
-    task_fn fn;
-    uint64_t inject_time;
+    atomic_int run_cnt;    /* sched 写、执行线程读,跨互斥域 → 原子 */
+    atomic_int pri;        /* dispatcher/sched/worker 三线程读改写 → 原子 */
+    atomic_int level;      /* 同上(超时升级/队列满升级) */
+    task_fn fn;            /* 入队前写定,入队后只读(发布经互斥锁同步) */
+    uint64_t inject_time;  /* 仅 sched 线程在自家锁内读写 */
     char name[32];
     void *ctx;
     atomic_int dispatched; /* 1=节点被分发/执行线程借用中 */

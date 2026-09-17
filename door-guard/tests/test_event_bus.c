@@ -90,14 +90,15 @@ static int on_nested(const event_t *e, void *ud)
     return 0;
 }
 
+static event_subscription_t *s_self_sub = NULL;
+
 static int on_reentrant(const event_t *e, void *ud)
 {
-    (void)e;
+    (void)e; (void)ud;
     /* 危险动作三连:分发过程中再订阅、发布、退订自己 */
-    event_subscription_t *self = ud;
     event_bus_subscribe(EVENT_TEST_NO_DATA, on_nested, NULL);
     event_bus_publish(EVENT_UI_PAGE_CHANGE, NULL, 0);
-    event_bus_unsubscribe(self);
+    event_bus_unsubscribe(s_self_sub);
     atomic_store(&s_nested_done, 1);
     return 0;
 }
@@ -106,8 +107,8 @@ static void test_reentrant_dispatch(void)
 {
     printf("[EB2] reentrant dispatch (no deadlock)\n");
     atomic_store(&s_nested_done, 0);
-    event_subscription_t *sub = event_bus_subscribe(EVENT_TEST_REENTRANT, on_reentrant, sub);
-    DG_CHECK(sub != NULL);
+    s_self_sub = event_bus_subscribe(EVENT_TEST_REENTRANT, on_reentrant, NULL);
+    DG_CHECK(s_self_sub != NULL);
 
     DG_CHECK(event_bus_publish(EVENT_TEST_REENTRANT, NULL, 0) == EVENT_BUS_OK);
     wait_until(&s_nested_done, 3000);

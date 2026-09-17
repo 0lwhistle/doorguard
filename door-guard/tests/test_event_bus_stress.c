@@ -111,7 +111,7 @@ int main(void)
         pthread_join(th[t], NULL);
 
     /* 发布方全部返回并不代表分发完毕:等 processed 追平 published(上限 60s) */
-    const int32_t total = STRESS_THREADS * STRESS_PER_THREAD;
+    const uint32_t total = STRESS_THREADS * STRESS_PER_THREAD;
     uint32_t pub = 0, pro = 0, drop = 0, herr = 0;
     for (int i = 0; i < 6000; i++) {
         event_bus_get_stats(&pub, &pro, &drop, &herr);
@@ -129,7 +129,7 @@ int main(void)
     /* 注:drop 统计的是"队列满丢弃的发布尝试次数",发布方按契约重试,
      * 事件本体不丢——零丢失由下方 (tid,seq) 恰好一次证明,不要求 drop==0 */
     DG_CHECK(atomic_load(&s_payload_err) == 0); /* 载荷无串包 */
-    DG_CHECK(atomic_load(&s_received) == total);
+    DG_CHECK((uint32_t)atomic_load(&s_received) == total);
 
     /* 每条恰好一次:既不丢(==0)也不重(>=2) */
     int lost = 0, dup = 0;

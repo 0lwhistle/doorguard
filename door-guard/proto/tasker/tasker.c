@@ -22,7 +22,7 @@ static inline uint64_t tasker_get_time_ms(void) {
 
 /* 自动初始化检查 */
 static inline int tasker_auto_init(void) {
-    if (!worker_init_flag) {
+    if (!atomic_load(&worker_init_flag)) {
         int ret = worker_init();
         if (ret != 0) {
             DG_LOGE("[TASKER]", "tasker_init failed: %d", ret);
@@ -81,11 +81,18 @@ void tasker_cancel_by_name(const char* name) {
 }
 
 int tasker_is_full(void) {
-    return task_manager_is_full(s_task_worker_ctx.s_sched_table->worker_queue) ? 1 : 0;
+    /* 槽位指针由 sched 线程在自家锁内写:查询须持同一把锁,否则指针读竞态 */
+    pthread_mutex_lock(&(s_task_worker_ctx.s_sched_table->mtx));
+    int full = task_manager_is_full(s_task_worker_ctx.s_sched_table->worker_queue) ? 1 : 0;
+    pthread_mutex_unlock(&(s_task_worker_ctx.s_sched_table->mtx));
+    return full;
 }
 
 int tasker_is_empty(void) {
-    return task_manager_is_empty(s_task_worker_ctx.s_sched_table->worker_queue) ? 1 : 0;
+    pthread_mutex_lock(&(s_task_worker_ctx.s_sched_table->mtx));
+    int empty = task_manager_is_empty(s_task_worker_ctx.s_sched_table->worker_queue) ? 1 : 0;
+    pthread_mutex_unlock(&(s_task_worker_ctx.s_sched_table->mtx));
+    return empty;
 }
 
 int tasker_task_init_li(struct task_node* out, int period, int run_cnt, 

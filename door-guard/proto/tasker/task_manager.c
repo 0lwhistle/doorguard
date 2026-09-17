@@ -38,9 +38,9 @@ struct task_node *task_node_pool_alloc(void)
     pthread_mutex_unlock(&s_task_node_pool_mtx);
 
     memset(node, 0, sizeof(*node));
-    node->cancel = 0;
-    node->done = 0;
-    node->dispatched = 0;
+    atomic_store(&node->cancel, 0);
+    atomic_store(&node->done, 0);
+    atomic_store(&node->dispatched, 0);
     return node;
 }
 
@@ -52,9 +52,9 @@ void task_node_pool_free(struct task_node *node)
     task_node_pool_init_locked();
     if (s_task_node_free_count < TASK_NODE_POOL_SIZE) {
         s_task_node_free_stack[s_task_node_free_count++] = node;
-        node->cancel = 1;
-        node->done = 1;
-        node->dispatched = -1; /* free-list 哨兵 */
+        atomic_store(&node->cancel, 1);
+        atomic_store(&node->done, 1);
+        atomic_store(&node->dispatched, -1); /* free-list 哨兵 */
     }
     pthread_mutex_unlock(&s_task_node_pool_mtx);
 }
@@ -92,16 +92,16 @@ void task_node_init(struct task_node *node,
 {
     node->inject_time = inject_time;
     node->fn = fn;
-    node->pri = pri;
+    atomic_store(&node->pri, pri);
     node->timeout = timeout;
-    node->cancel = 0;
+    atomic_store(&node->cancel, 0);
     node->ctx = ctx;
-    node->done = 0;
+    atomic_store(&node->done, 0);
     node->is_timeout = 0;
-    node->level = level;
+    atomic_store(&node->level, level);
     node->period = period;
-    node->run_cnt = run_cnt;
-    node->dispatched = 0;
+    atomic_store(&node->run_cnt, run_cnt);
+    atomic_store(&node->dispatched, 0);
     strncpy(node->name, name, sizeof(node->name) - 1);
     node->name[sizeof(node->name) - 1] = '\0';
 }
@@ -120,7 +120,7 @@ bool task_manager_is_full(const struct task_manager *mgr)
 {
     for (unsigned int i = 0; i < mgr->size; ++i) {
         struct task_node *node = mgr->queue[i];
-        if (!node || node->cancel || node->done)
+        if (!node || atomic_load(&node->cancel) || atomic_load(&node->done))
             return false;
     }
     return true;
@@ -128,34 +128,36 @@ bool task_manager_is_full(const struct task_manager *mgr)
 
 void task_done(struct task_node *node)
 {
-    node->done = 1;
+    atomic_store(&node->done, 1);
 }
 
 int task_is_done(struct task_node *node)
 {
-    return node->done;
+    return atomic_load(&node->done);
 }
 
 void task_cancel(struct task_node *node)
 {
-    node->cancel = 1;
+    atomic_store(&node->cancel, 1);
 }
 
 int task_is_cancel(struct task_node *node)
 {
-    return node->cancel;
+    return atomic_load(&node->cancel);
 }
 
 void task_node_pri_up(struct task_node *node)
 {
-    if (node->pri > first)
-        --node->pri;
+    int p = atomic_load(&node->pri);
+    if (p > first)
+        atomic_store(&node->pri, p - 1);
 }
 
 void task_node_leve_up(struct task_node *node)
 {
-    if (node->level < level_lots)
-        ++node->level;
+    int lv = atomic_load(&node->level);
+    if (lv < level_lots)
+        atomic_store(&node->level, lv + 1);
 }
 
 struct task_node *find_task_node_by_name(struct task_manager *worker_queue, const char *name)
@@ -164,8 +166,8 @@ struct task_node *find_task_node_by_name(struct task_manager *worker_queue, cons
     for (unsigned int i = 0; i < size; ++i) {
         struct task_node *node = worker_queue->queue[i];
         if (node &&
-            !node->cancel &&
-            !node->done &&
+            !atomic_load(&node->cancel) &&
+            !atomic_load(&node->done) &&
             !strcmp(node->name, name)) {
             return node;
         }
@@ -184,9 +186,9 @@ void task_manager_pri_sort(struct task_manager *worker_queue)
     unsigned int count[4] = { 0 };
     for (unsigned int i = 0; i < size; ++i) {
         struct task_node *node = worker_queue->queue[i];
-        if (!node || node->cancel || node->done)
+        if (!node || atomic_load(&node->cancel) || atomic_load(&node->done))
             continue;
-        int p = node->pri;
+        int p = atomic_load(&node->pri);
         if (p >= 1 && p <= 3)
             ++count[p];
     }
@@ -199,9 +201,9 @@ void task_manager_pri_sort(struct task_manager *worker_queue)
     unsigned int pos[4] = { start[0], start[1], start[2], start[3] };
     for (unsigned int i = 0; i < size; ++i) {
         struct task_node *node = worker_queue->queue[i];
-        if (!node || node->cancel || node->done)
+        if (!node || atomic_load(&node->cancel) || atomic_load(&node->done))
             continue;
-        int p = node->pri;
+        int p = atomic_load(&node->pri);
         if (p < 1 || p > 3)
             continue;
         temp[pos[p]++] = node;
@@ -211,14 +213,16 @@ void task_manager_pri_sort(struct task_manager *worker_queue)
     unsigned int out = count[1] + count[2] + count[3];
     for (unsigned int i = 0; i < size; ++i) {
         struct task_node *node = worker_queue->queue[i];
-        if (node && !node->cancel && !node->done && (node->pri < first || node->pri > last))
+        int p = node ? atomic_load(&node->pri) : 0;
+        if (node && !atomic_load(&node->cancel) && !atomic_load(&node->done)
+            && (p < first || p > last))
             temp[out++] = node;
     }
 
     /* 空闲/取消槽位保持在尾部 */
     for (unsigned int i = 0; i < size; ++i) {
         struct task_node *node = worker_queue->queue[i];
-        if (!node || node->cancel || node->done)
+        if (!node || atomic_load(&node->cancel) || atomic_load(&node->done))
             temp[out++] = node;
     }
 

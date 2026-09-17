@@ -10,7 +10,7 @@
 
 const char* TASK_WORKER_TAG = "[TASK_WORKER]";
 
-int worker_init_flag = 0;
+atomic_int worker_init_flag = 0;
 static uint32_t s_spin_fallback_usleeps = 0;
 
 struct task_worker_ctx s_task_worker_ctx = {0};
@@ -59,7 +59,7 @@ int worker_init(void){
 		return ret;
 	}
 
-	worker_init_flag = 1;
+	atomic_store(&worker_init_flag, 1);
 
 	return ret;
 
@@ -70,7 +70,7 @@ int worker_init(void){
 static void worker_release_one(struct task_worker* worker){
 	if (!worker) return;
 	if (worker->pt_created){
-		worker->stop = 1;
+		atomic_store(&worker->stop, 1);
 		pthread_cond_signal(&(worker->cond));
 		pthread_join(worker->pt, NULL);
 	}
@@ -95,7 +95,7 @@ static void worker_release_partial(void){
 	worker_release_one(s_task_worker_ctx.s_dispatcher);
 	worker_release_one(s_task_worker_ctx.s_sched_table);
 	memset(&s_task_worker_ctx, 0, sizeof(s_task_worker_ctx));
-	worker_init_flag = 0;
+	atomic_store(&worker_init_flag, 0);
 }
 
 int worker_little_init(void){
@@ -286,7 +286,7 @@ int worker_sched_init(void){
 /* 归还节点给 sched 表后唤醒其等待（5.2 修复1 配套：借出节点回归即醒） */
 static void sched_wake(void){
 	struct task_worker* sched = s_task_worker_ctx.s_sched_table;
-	if (sched && !sched->stop){
+	if (sched && !atomic_load(&sched->stop)){
 		pthread_cond_signal(&sched->cond);
 	}
 }
@@ -314,13 +314,13 @@ void* worker_dispatcher_handler(void* arg){
 	int size;
 	int ret;
 	int need_sort;
-	worker->stop = 0;
-	while(!worker->stop){
+	atomic_store(&worker->stop, 0);
+	while(!atomic_load(&worker->stop)){
 		pthread_mutex_lock(&(worker->mtx));
 		while(!worker->stop && task_manager_is_empty(worker->worker_queue))	{
 			pthread_cond_wait(&worker->cond, &worker->mtx);
 		}
-		if (worker->stop) {
+		if (atomic_load(&worker->stop)) {
 			pthread_mutex_unlock(&(worker->mtx));
 			break;
 		}
@@ -332,10 +332,10 @@ void* worker_dispatcher_handler(void* arg){
 			struct task_node* node = worker_queue->queue[i];
 			if (!node) continue;
 
-			if (node->cancel || node->done){
+			if (atomic_load(&node->cancel) || atomic_load(&node->done)){
 				worker_queue->queue[i] = NULL;
-				node->done = 1;
-				node->dispatched = 0;
+				atomic_store(&node->done, 1);
+				atomic_store(&node->dispatched, 0);
 				sched_wake();
 				continue;
 			}
@@ -369,8 +369,8 @@ void* worker_dispatcher_handler(void* arg){
 void* worker_sched_handler(void* arg){
 	struct task_worker* worker = (struct task_worker*)arg;
 	int ret = 0;
-	worker->stop = 0;
-	while(!worker->stop){
+	atomic_store(&worker->stop, 0);
+	while(!atomic_load(&worker->stop)){
 		pthread_mutex_lock(&(worker->mtx));
 
 		/* 5.2 修复1: 计算最近截止时间，cond 超时等待替代 vTaskDelay(1) 忙轮询。
@@ -437,8 +437,8 @@ void* worker_sched_handler(void* arg){
 			struct task_node* node = worker_queue->queue[i];
 			if (!node) continue;
 
-			if (node->cancel || node->done){
-				if (!node->dispatched){
+			if (atomic_load(&node->cancel) || atomic_load(&node->done)){
+				if (!atomic_load(&node->dispatched)){
 					task_node_pool_free(node);
 					worker_queue->queue[i] = NULL;
 				}
@@ -446,13 +446,13 @@ void* worker_sched_handler(void* arg){
 			}
 
 			/* Node is currently borrowed by dispatcher/worker; wait for it to return. */
-			if (node->dispatched) continue;
+			if (atomic_load(&node->dispatched)) continue;
 
 			int need_sched = 0;
-			if (node->period == 0 && node->run_cnt > 0) {
+			if (node->period == 0 && atomic_load(&node->run_cnt) > 0) {
 				need_sched = 1;
 			}
-			else if (node->period > 0 && node->run_cnt != 0 &&
+			else if (node->period > 0 && atomic_load(&node->run_cnt) != 0 &&
 				cur - node->inject_time >= (uint64_t)node->period) {
 				need_sched = 1;
 			}
@@ -461,17 +461,17 @@ void* worker_sched_handler(void* arg){
 
 			uint64_t now = get_time_ms();
 			node->inject_time = now;
-			if (node->run_cnt > 0) --node->run_cnt;
+			if (atomic_load(&node->run_cnt) > 0) atomic_fetch_sub(&node->run_cnt, 1);
 
 			/* Move the node pointer to dispatcher without copying task metadata. */
-			node->dispatched = 1;
+			atomic_store(&node->dispatched, 1);
 			ret = worker_task_enqueue_nocancel(s_task_worker_ctx.s_dispatcher, node);
 			if (ret == TASK_OK) continue;
 
-			node->dispatched = 0;
+			atomic_store(&node->dispatched, 0);
 			if (ret == TASK_QUEUE_FULL) {
 				node->inject_time = cur;
-				if (node->run_cnt >= 0) ++node->run_cnt;
+				if (atomic_load(&node->run_cnt) >= 0) atomic_fetch_add(&node->run_cnt, 1);
 				task_node_pri_up(node);
 			}
 		}
@@ -497,18 +497,18 @@ static inline void worker_timer_init(struct task_worker* worker){
 void worker_do_handler(struct task_worker* worker){
 
 	enum task_t status;
-	worker->stop = 0;
+	atomic_store(&worker->stop, 0);
 	worker->timeout_flag = 0;
 	worker->timeout_timer = NULL;
 
 	worker_timer_init(worker);
 
-	while(!worker->stop){
+	while(!atomic_load(&worker->stop)){
 		pthread_mutex_lock(&(worker->mtx));
 		while(!worker->stop && task_manager_is_empty(worker->worker_queue))	{
 			pthread_cond_wait(&worker->cond, &worker->mtx);
 		}
-		if (worker->stop) {
+		if (atomic_load(&worker->stop)) {
 			pthread_mutex_unlock(&(worker->mtx));
 			break;
 		}
@@ -519,11 +519,11 @@ void worker_do_handler(struct task_worker* worker){
 			struct task_node* node = worker_queue->queue[i];
 			if (!node) continue;
 
-			if (node->cancel || node->done){
+			if (atomic_load(&node->cancel) || atomic_load(&node->done)){
 				worker_queue->queue[i] = NULL;
-				if (node->dispatched){
-					node->done = 1;
-					node->dispatched = 0;
+				if (atomic_load(&node->dispatched)){
+					atomic_store(&node->done, 1);
+					atomic_store(&node->dispatched, 0);
 				}
 				continue;
 			}
@@ -550,18 +550,18 @@ void worker_do_handler(struct task_worker* worker){
 			node = worker_queue->queue[i];
 			if (!node) continue;
 
-			if (node->cancel || node->done){
+			if (atomic_load(&node->cancel) || atomic_load(&node->done)){
 				worker_queue->queue[i] = NULL;
-				if (node->dispatched){
-					node->done = 1;
-					node->dispatched = 0;
+				if (atomic_load(&node->dispatched)){
+					atomic_store(&node->done, 1);
+					atomic_store(&node->dispatched, 0);
 				}
 				continue;
 			}
 
 			if (status == TASK_OK){
 				node->is_timeout = worker->timeout_flag;
-				if (worker->timeout_flag && node->level < level_lots){
+				if (worker->timeout_flag && atomic_load(&node->level) < level_lots){
 					task_node_leve_up(node);
 				}
 			} else {
@@ -569,10 +569,11 @@ void worker_do_handler(struct task_worker* worker){
 			}
 
 			worker_queue->queue[i] = NULL;
-			node->dispatched = 0;
+			atomic_store(&node->dispatched, 0);
 			sched_wake();
-			if (node->run_cnt == 0 || node->cancel || node->done){
-				node->done = 1;
+			if (atomic_load(&node->run_cnt) == 0 || atomic_load(&node->cancel)
+			    || atomic_load(&node->done)){
+				atomic_store(&node->done, 1);
 			}
 		}
 		pthread_mutex_unlock(&(worker->mtx));
@@ -601,7 +602,8 @@ int worker_task_enqueue(struct task_worker* des, struct task_node* node){
 			return TASK_OK;
 		}
 
-		if ((slot->cancel || slot->done) && !slot->dispatched){
+		if ((atomic_load(&slot->cancel) || atomic_load(&slot->done))
+		    && !atomic_load(&slot->dispatched)){
 			task_node_pool_free(slot);
 			worker_queue->queue[i] = node;
 			DG_LOGD(TASK_WORKER_TAG, "task: %s enqueue successfully.", node->name);
@@ -639,7 +641,8 @@ static int worker_task_enqueue_nocancel(struct task_worker* des, struct task_nod
 			return TASK_OK;
 		}
 
-		if ((slot->cancel || slot->done) && !slot->dispatched){
+		if ((atomic_load(&slot->cancel) || atomic_load(&slot->done))
+		    && !atomic_load(&slot->dispatched)){
 			task_node_pool_free(slot);
 			worker_queue->queue[i] = node;
 			DG_LOGD(TASK_WORKER_TAG, "task: %s enqueue successfully.", node->name);
@@ -675,7 +678,8 @@ int worker_sched_enqueue(struct task_node* node){
 			slot = i;
 			break;
 		}
-		if ((cur->cancel || cur->done) && !cur->dispatched){
+		if ((atomic_load(&cur->cancel) || atomic_load(&cur->done))
+		    && !atomic_load(&cur->dispatched)){
 			task_node_pool_free(cur);
 			slot = i;
 			break;
@@ -697,16 +701,16 @@ int worker_sched_enqueue(struct task_node* node){
 	owned->timeout = node->timeout;
 	owned->is_timeout = 0;
 	owned->period = node->period;
-	owned->run_cnt = node->run_cnt;
-	owned->pri = node->pri;
-	owned->level = node->level;
+	atomic_store(&owned->run_cnt, atomic_load(&node->run_cnt));
+	atomic_store(&owned->pri, atomic_load(&node->pri));
+	atomic_store(&owned->level, atomic_load(&node->level));
 	owned->fn = node->fn;
 	owned->inject_time = node->inject_time;
 	memcpy(owned->name, node->name, sizeof(owned->name));
 	owned->ctx = node->ctx;
-	owned->cancel = 0;
-	owned->done = 0;
-	owned->dispatched = 0;
+	atomic_store(&owned->cancel, 0);
+	atomic_store(&owned->done, 0);
+	atomic_store(&owned->dispatched, 0);
 
 	worker_queue->queue[slot] = owned;
 	DG_LOGI(TASK_WORKER_TAG, "task: %s enqueue successfully.", owned->name);
@@ -717,7 +721,7 @@ int worker_sched_enqueue(struct task_node* node){
 }
 
 static inline int enqueue_switcher(struct task_node* node){
-	switch (node->level){
+	switch (atomic_load(&node->level)){
 		case level_little:
 			return worker_task_enqueue(s_task_worker_ctx.little_worker, node);
 		
@@ -737,14 +741,14 @@ static inline int enqueue_switcher(struct task_node* node){
 void worker_task_done(struct task_worker* worker, struct task_node* node){
 	pthread_mutex_lock(&(worker->mtx));
 	struct task_node* des = find_task_node_by_name(worker->worker_queue, node->name);
-	if (des) des->done = 1;
+	if (des) atomic_store(&des->done, 1);
 	pthread_mutex_unlock(&(worker->mtx));
 }
 
 void worker_task_cancel(struct task_worker* worker, struct task_node* node){
 	pthread_mutex_lock(&(worker->mtx));
 	struct task_node* des = find_task_node_by_name(worker->worker_queue, node->name);
-	if (des) des->cancel = 1;
+	if (des) atomic_store(&des->cancel, 1);
 	pthread_mutex_unlock(&(worker->mtx));
 }
 
@@ -752,7 +756,7 @@ void worker_task_cancel(struct task_worker* worker, struct task_node* node){
 
 void worker_delete(struct task_worker* worker){
 	if (!worker) return;
-	worker->stop = 1;
+	atomic_store(&worker->stop, 1);
 	pthread_cond_signal(&(worker->cond));
 	if (worker->pt_created){
 		pthread_join(worker->pt, NULL);

@@ -16,7 +16,7 @@
 #include "dg_log.h"
 
 extern const char *TASK_WORKER_TAG;
-extern int worker_init_flag;
+extern atomic_int worker_init_flag;
 
 struct task_worker_ctx {
     struct task_worker *little_worker;
@@ -29,7 +29,7 @@ struct task_worker_ctx {
 extern struct task_worker_ctx s_task_worker_ctx;
 
 struct task_worker {
-    int stop;
+    atomic_int stop;       /* 主线程置位、工作线程轮询,跨线程 → 原子 */
     int timeout_flag;
     tasker_timer_t timeout_timer;
     int pt_created;                       /* pthread_create 成功标记(安全 join) */
