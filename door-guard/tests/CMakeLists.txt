@@ -13,6 +13,7 @@ endmacro()
 
 dg_add_test(test_event_bus dg_event_bus)
 dg_add_test(test_event_bus_stress dg_event_bus)
+dg_add_test(test_tasker dg_tasker)
 
 # 模块 demo 冒烟(使用示例须始终可运行)
 macro(dg_add_demo name src)
@@ -24,3 +25,4 @@ macro(dg_add_demo name src)
 endmacro()
 
 dg_add_demo(demo_event_bus ${CMAKE_SOURCE_DIR}/proto/event_bus/demo_event_bus.c dg_event_bus)
+dg_add_demo(demo_tasker ${CMAKE_SOURCE_DIR}/proto/tasker/demo_tasker.c dg_tasker)

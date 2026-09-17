@@ -33,7 +33,15 @@ target_include_directories(dg_event_bus PUBLIC proto/event_bus)
 target_link_libraries(dg_event_bus PUBLIC dg_log)
 
 # tasker:短任务调度器(≤500ms 约定,README 见 proto/tasker/)
-# (Phase 1 按 event_bus → tasker → holder 顺序合入)
+add_library(dg_tasker STATIC
+    proto/tasker/tasker.c
+    proto/tasker/task_manager.c
+    proto/tasker/task_worker.c
+    proto/tasker/tasker_port.c
+)
+target_include_directories(dg_tasker PUBLIC proto/tasker)
+target_link_libraries(dg_tasker PUBLIC dg_log)
+
 # holder:全局模块注册表(启动顺序/健康状态,README 见 proto/holder/)
 
 if(DG_BUILD_TESTS)
@@ -57,7 +65,7 @@ link_directories(
 
 add_executable(door-guard app/main.c)
 # 组件链入应用:装配顺序在 app/main.c(architecture.md §1,main.c 头注同步维护)
-target_link_libraries(door-guard PRIVATE dg_event_bus)
+target_link_libraries(door-guard PRIVATE dg_event_bus dg_tasker)
 # rockiva     # 官方人脸库(B7 阶段启用)
 # sqlite3     # 存储(启用 storage HAL 时)
 # gpiod       # 门控 GPIO
