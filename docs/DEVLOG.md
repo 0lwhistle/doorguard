@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-09-18 Phase 6 三页面 + 验证状态机完成
+
+### 完成内容
+- **auth_fsm**:纯 C 事件驱动状态机,事件注入+动作回调,不碰 LVGL/DB;
+  timer_seq/密码连错锁定/黑名单/日志唯一出口逐条实现;test_auth_fsm 11 用例
+  40+ 断言覆盖 spec-auth-business §5 全部 10 组边界
+- **七页面**:home(推流 canvas+黄/绿/红脸框+菜单验证按钮+四类弹窗)/
+  standby(黑屏 HH:MM)/menu(四宫格)/users/device/access_set/logs,
+  语言切换经 EVENT_UI_REFRESH_REQUEST 全页重建刷新
+- **板上显示打通**:rockchipdrmfb(/dev/fb0)mmap 返回 EBUSY(实测,仿真层
+  限制)→ 改走 lv_drivers DRM dumb-buffer(libdrm);开机 lv_demo 占用 fb
+  需停用(已 mv disabled);板上主页渲染截图 docs/img/board-home-phase6.png
+- **模拟器**:七页面全部渲染验证;DG_SIM_VISION=0 可关视觉 mock 交互走查;
+  全流程截图(输入弹窗/键盘/成功失败弹窗/待机)
+
+### 待确认(硬件)
+- 板上触摸:B4 固件无 GT9xx/FTS 输入节点(FTS probe fail),待 B5 固件;
+  板上 UI 当前只显示无触摸
+- 字体注记:DroidSansFallbackFull 无 ASCII 字形 → 字体生成脚本改双字体
+  (DejaVu Latin + Droid CJK),gen.sh 已固化
+
+### 坑
+- `source env/env.sh` 必须在仓库根执行,子目录静默失败导致几轮"板上没跑
+  新二进制"的假象(md5 校验才定位到)
+- DroidSansFallback 无 Latin → 数字全方块;lv_font_conv 多 --font 段解决
+- 板上 lv_demo 占用 fb/DRM,door-guard 启动前须停(已禁自启,待 B10 rootfs 收编)
+
+### 未完成 / 下一步
+- Phase 7 服务层(access/enroll/vision/capture/liveness,全接 event_bus)
+
+---
+
 ## 2026-09-18 Phase 4 配置体系 + Phase 5 UI 框架/PC 模拟器完成
 
 ### 完成内容
