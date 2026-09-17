@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-09-18(闲时任务开工)10 Phase 应用开发启动
+
+### 完成内容
+- 按开工三步恢复上下文:git log 确认全部 Phase 未开始,从 Phase 0 起步
+- 通读 skill references 全部五份(spec-database / spec-auth-business / spec-ui / spec-network / architecture)
+- Phase 0 基线自检:`source env/env.sh && dg-build -c` 成功,git status 干净
+
+### 本次计划 Phase 顺序
+- Phase 1 基础组件移植(event_bus → tasker → holder)
+- Phase 2 proto 层 → Phase 3 storage → Phase 4 配置体系
+- Phase 5 UI 框架 + PC 模拟器 → Phase 6 三页面 + 验证状态机
+- Phase 7 服务层 → Phase 8 板上 HAL → Phase 9 网络功能 → Phase 10 集成收尾
+- 每 Phase 测试与验收全过才进下一 Phase;卡点 >30min 绕行并记 DEVLOG
+
+---
+
 ## 2026-09-17(晚)目录整理 + door-guard-dev skill + 环境资产落库
 
 ### 完成内容
