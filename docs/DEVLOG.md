@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-09-18 Phase 1 基础组件移植完成(event_bus → tasker → holder)
+
+### 完成内容
+- `proto/dg_log`:组件共用极简日志(承接模板 logger,后续统一日志模块只换实现)
+- `proto/event_bus`:pthread port;锁外回调/事件池+堆兜底/原子统计保留;新增
+  dg_event_pool 自实现定长块池、分发任务 stop+join 清理路径;模板测试 EB1~EB5
+  断言未弱化;新增 4×10000 压测(载荷 (tid,seq) 恰好一次 = 零丢失)+ tsan 全绿
+- `proto/tasker`:pthread port;5.2 三修复与自旋熔断逐行保留;**tsan 检出模板固有
+  数据竞争**(跨线程标志非原子 + is_empty/is_full 无锁读),统一改 C11 原子访问 +
+  补调度表锁,调度逻辑不变,TSAN 复跑全绿
+- `proto/holder`:pthread timedlock 等价带超时取锁;新增 test_holder 61 断言
+  (循环依赖/重复注册/ERROR 态隔离/必需模块停机)
+- `dg-test` 脚本建成(宿主 gcc + ctest,`--tsan` 可选);7/7 常规全绿、tsan 全绿;
+  dg-build 交叉编译零警告;demo×3 全部可执行并进 ctest 冒烟
+
+### 结论 / 坑
+- **压测 drop 计数语义**:event_bus 的 `events_dropped` 是"队列满丢弃的发布尝试
+  次数",发布方按契约重试后事件不丢;零丢失须由载荷序号恰达一次证明,不能断言 drop==0
+- 模板质量总体高,但"5.2 修复版"在 tsan 下仍有竞争——移植不是复制,并发组件必须跑 tsan
+
+### 未完成 / 下一步
+- Phase 2 proto 层(err.h/events.h/types.h + 静态断言 + 事件契约测试)
+
+---
+
 ## 2026-09-18(闲时任务开工)10 Phase 应用开发启动
 
 ### 完成内容
