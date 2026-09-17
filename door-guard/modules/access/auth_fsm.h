@@ -222,6 +222,9 @@ void auth_fsm_init(auth_fsm_t *fsm, int32_t door_open_ms, int32_t standby_timeou
 /** 事件入口(线程约定:与 UI 同线程调用) */
 void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *data);
 
+/** 密码方式入口前预检:该用户连错锁定中返回 true(锁定中直接提示,不计次数) */
+bool auth_fsm_pwd_locked(const auth_fsm_t *fsm, const char *user_id, int64_t now_ms);
+
 const char *auth_fsm_state_name(dg_fsm_state_t st);
 
 #ifdef __cplusplus

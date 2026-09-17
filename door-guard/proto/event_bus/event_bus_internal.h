@@ -47,7 +47,7 @@ typedef struct {
 
     void *lock;                 /**< port 层互斥锁句柄 */
     volatile bool stop;         /**< deinit 置位,分发任务据此退出(port 改动点) */
-    bool initialized;
+    atomic_bool initialized;    /**< 原子:deinit(主线程)与在途 publish 竞争防护 */
 
     struct {
         atomic_uint events_published;

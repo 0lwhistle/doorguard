@@ -112,10 +112,38 @@ add_library(dg_ui STATIC
 target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DIR}/modules/access)
 target_link_libraries(dg_ui PUBLIC lvgl dg_config dg_access)
 
-# access:验证状态机(纯 C,事件驱动,UI/服务层翻译执行)
-add_library(dg_access STATIC modules/access/auth_fsm.c)
+# access:验证状态机 + 认证融合服务(FSM 持有者,日志/开门唯一出口)
+add_library(dg_access STATIC
+    modules/access/auth_fsm.c
+    modules/access/access_service.c
+)
 target_include_directories(dg_access PUBLIC ${CMAKE_SOURCE_DIR}/modules/access)
-target_link_libraries(dg_access PUBLIC dg_proto dg_config)
+target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker)
+
+# vision:视觉服务(槽位句柄 + sim mock / rockiva 占位)
+add_library(dg_vision STATIC modules/vision/vision_service.c)
+target_include_directories(dg_vision PUBLIC ${CMAKE_SOURCE_DIR}/modules/vision)
+target_link_libraries(dg_vision PUBLIC dg_proto)
+if(DG_SIM)
+    target_sources(dg_vision PRIVATE modules/vision/vision_sim.c)
+else()
+    target_sources(dg_vision PRIVATE modules/vision/vision_rockiva.c)
+endif()
+
+# enroll:录入编排
+add_library(dg_enroll STATIC modules/enroll/enroll_service.c)
+target_include_directories(dg_enroll PUBLIC ${CMAKE_SOURCE_DIR}/modules/enroll)
+target_link_libraries(dg_enroll PUBLIC dg_proto dg_storage dg_vision)
+
+# capture:取流状态服务
+add_library(dg_capture STATIC modules/capture/capture_service.c)
+target_include_directories(dg_capture PUBLIC ${CMAKE_SOURCE_DIR}/modules/capture)
+target_link_libraries(dg_capture PUBLIC dg_proto dg_tasker)
+
+# liveness:活体占位
+add_library(dg_liveness STATIC modules/liveness/liveness_service.c)
+target_include_directories(dg_liveness PUBLIC ${CMAKE_SOURCE_DIR}/modules/liveness)
+target_link_libraries(dg_liveness PUBLIC dg_proto)
 
 if(DG_BUILD_TESTS)
     enable_testing()
@@ -131,9 +159,6 @@ if(DG_SIM)
     add_library(dg_camera STATIC hal/camera/camera_sim.c)
     target_include_directories(dg_camera PRIVATE ${CMAKE_SOURCE_DIR}/third_party/stb)
     target_link_libraries(dg_camera PUBLIC m)   # stb_image 解码用到 pow
-    # sim 视觉 mock(模拟器全流程演示;板上不编译)
-    add_library(dg_simvision STATIC sim/sim_vision.c)
-    target_link_libraries(dg_simvision PUBLIC dg_event_bus)
 else()
     add_library(dg_display STATIC hal/display/display_drm.c third_party/lv_drivers/drm.c)
     # 顺序敏感:libdrm 在前——lv_drivers/drm.c 内部 #include <drm.h> 必须解析到
@@ -167,11 +192,9 @@ add_executable(door-guard app/main.c)
 target_link_libraries(door-guard PRIVATE
     -Wl,--start-group
     dg_event_bus dg_tasker dg_holder dg_proto dg_storage dg_config
-    lvgl dg_ui dg_access dg_display dg_camera
+    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_display dg_camera
     -Wl,--end-group)
-if(DG_SIM)
-    target_link_libraries(door-guard PRIVATE dg_simvision)
-endif()
+
 if(DG_SIM)
     target_compile_definitions(door-guard PRIVATE DG_SIM=1)
 endif()

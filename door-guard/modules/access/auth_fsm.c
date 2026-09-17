@@ -135,6 +135,8 @@ static void back_to_normal(auth_fsm_t *fsm)
 {
     fsm->state = ST_NORMAL;
     fsm->popup_active = false;
+    fsm->cur_uid[0] = '\0';             /* 清上下文:陌生人失败不得带上个用户 ID */
+    fsm->cur_name[0] = '\0';
     set_match_enabled(fsm, true);
     goto_page(fsm, "home");
 }

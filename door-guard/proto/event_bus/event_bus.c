@@ -179,7 +179,7 @@ event_bus_err_t event_bus_init(void)
 {
     event_bus_context_t *ctx = event_bus_get_context();
 
-    if (ctx->initialized) {
+    if (atomic_load(&ctx->initialized)) {
         DG_LOGW(TAG, "Event bus already initialized");
         return EVENT_BUS_ERR_ALREADY_INIT;
     }
@@ -219,7 +219,7 @@ event_bus_err_t event_bus_init(void)
     ctx->next_subscriber_id = 1;    /* 0 保留为无效 ID */
     atomic_store(&s_heap_fallback_count, 0);
     atomic_store(&s_heap_outstanding, 0);
-    ctx->initialized = true;
+    atomic_store(&ctx->initialized, true);
 
     if (!bus_task_create("event_bus", EVENT_BUS_TASK_STACK_SIZE, 0,
                          event_bus_process_task, &ctx->task_handle)) {
@@ -229,7 +229,7 @@ event_bus_err_t event_bus_init(void)
         ctx->lock = NULL;
         bus_queue_destroy(ctx->queue);
         ctx->queue = NULL;
-        ctx->initialized = false;
+        atomic_store(&ctx->initialized, false);
         return EVENT_BUS_ERR_NO_MEMORY;
     }
 
@@ -243,7 +243,7 @@ event_bus_err_t event_bus_deinit(void)
 {
     event_bus_context_t *ctx = event_bus_get_context();
 
-    if (!ctx->initialized)
+    if (!atomic_load(&ctx->initialized))
         return EVENT_BUS_ERR_NOT_INIT;
 
     /* 先停任务再拆队列:任务还引用 queue/lock,顺序不能反 */
@@ -264,7 +264,7 @@ event_bus_err_t event_bus_deinit(void)
     for (int i = 0; i < EVENT_BUS_MAX_SUBSCRIBERS; i++)
         ctx->subscribers[i].active = false;
     ctx->subscriber_count = 0;
-    ctx->initialized = false;
+    atomic_store(&ctx->initialized, false);
 
     DG_LOGI(TAG, "Event bus deinitialized");
     return EVENT_BUS_OK;
@@ -274,7 +274,7 @@ event_bus_err_t event_bus_publish(event_type_t type, const void *data, size_t da
 {
     event_bus_context_t *ctx = event_bus_get_context();
 
-    if (!ctx->initialized) {
+    if (!atomic_load(&ctx->initialized)) {
         DG_LOGE(TAG, "publish: event bus not initialized");
         return EVENT_BUS_ERR_NOT_INIT;
     }
@@ -336,7 +336,7 @@ event_subscription_t *event_bus_subscribe(event_type_t event_type,
 {
     event_bus_context_t *ctx = event_bus_get_context();
 
-    if (!ctx->initialized) {
+    if (!atomic_load(&ctx->initialized)) {
         DG_LOGE(TAG, "subscribe: event bus not initialized");
         return NULL;
     }
@@ -393,7 +393,7 @@ event_bus_err_t event_bus_unsubscribe(event_subscription_t *subscription)
 {
     event_bus_context_t *ctx = event_bus_get_context();
 
-    if (!ctx->initialized)
+    if (!atomic_load(&ctx->initialized))
         return EVENT_BUS_ERR_NOT_INIT;
     if (subscription == NULL)
         return EVENT_BUS_ERR_INVALID_PARAM;
@@ -428,7 +428,7 @@ event_bus_err_t event_bus_unsubscribe(event_subscription_t *subscription)
 event_bus_err_t event_bus_get_status(int *queue_size, int *subscriber_count)
 {
     event_bus_context_t *ctx = event_bus_get_context();
-    if (!ctx->initialized)
+    if (!atomic_load(&ctx->initialized))
         return EVENT_BUS_ERR_NOT_INIT;
 
     if (queue_size != NULL)
@@ -442,7 +442,7 @@ event_bus_err_t event_bus_get_stats(uint32_t *events_published, uint32_t *events
                                     uint32_t *events_dropped, uint32_t *handler_errors)
 {
     event_bus_context_t *ctx = event_bus_get_context();
-    if (!ctx->initialized)
+    if (!atomic_load(&ctx->initialized))
         return EVENT_BUS_ERR_NOT_INIT;
 
     if (events_published != NULL)
@@ -459,7 +459,7 @@ event_bus_err_t event_bus_get_stats(uint32_t *events_published, uint32_t *events
 event_bus_err_t event_bus_reset_stats(void)
 {
     event_bus_context_t *ctx = event_bus_get_context();
-    if (!ctx->initialized)
+    if (!atomic_load(&ctx->initialized))
         return EVENT_BUS_ERR_NOT_INIT;
 
     atomic_store(&ctx->stats.events_published, 0);
@@ -471,7 +471,7 @@ event_bus_err_t event_bus_reset_stats(void)
 
 bool event_bus_is_initialized(void)
 {
-    return event_bus_get_context()->initialized;
+    return atomic_load(&event_bus_get_context()->initialized);
 }
 
 uint32_t event_bus_get_heap_fallback(void)
@@ -534,7 +534,7 @@ void event_bus_print_status(void)
 
     printf("=== Event Bus Status ===\n");
     printf("Initialized: %s\n", ctx->initialized ? "Yes" : "No");
-    if (ctx->initialized) {
+    if (atomic_load(&ctx->initialized)) {
         int queue_size = 0, subscriber_count = 0;
         event_bus_get_status(&queue_size, &subscriber_count);
         printf("Queue: %d / %d\n", queue_size, EVENT_BUS_QUEUE_SIZE);

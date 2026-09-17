@@ -12,16 +12,18 @@
  * #ifdef DG_SIM 仅出现在本装配与 HAL sim 后端(纪律允许范围)。
  */
 #include "hal/camera/camera.h"
+#include "access_service.h"
+#include "capture_service.h"
 #include "cfg.h"
 #include "dg_log.h"
+#include "enroll_service.h"
 #include "event_bus.h"
+#include "liveness_service.h"
 #include "storage.h"
 #include "tasker.h"
 #include "ui.h"
+#include "vision_service.h"
 
-#ifdef DG_SIM
-extern void sim_vision_start(void);
-#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,10 +41,6 @@ extern void sim_vision_start(void);
 #define DG_KEY_PATH "/var/lib/door-guard/dg.key"
 #endif
 
-#ifndef DG_SIM
-/* 板上占位:sim 用 sim_vision_start */
-static void frame_probe(void) {}
-#endif
 
 int main(int argc, char *argv[])
 {
@@ -70,6 +68,13 @@ int main(int argc, char *argv[])
 #endif
     cfg_load(json);
 
+    /* 服务层:取流状态 → 视觉 → 认证融合/日志 → 录入 → 活体占位 */
+    capture_service_start();
+    vision_service_start();
+    access_service_start();
+    enroll_service_start();
+    liveness_service_start();
+
     dg_ui_args_t ui_args = {
         .lang_dir = "ui/lang",
 #ifdef DG_SIM
@@ -87,13 +92,14 @@ int main(int argc, char *argv[])
     if (camera_init(ui_args.camera_dir, NULL, NULL) != DG_OK)
         fprintf(stderr, "camera_init 失败(目录 %s)\n", ui_args.camera_dir);
 
+    /* 视觉 mock:模拟器默认开(DG_SIM_VISION=0 关);板上仅录入抓取订阅 */
 #ifdef DG_SIM
-    /* 视觉 mock 默认开;DG_SIM_VISION=0 关闭以便交互式走查 */
-    if (getenv("DG_SIM_VISION") == NULL || strcmp(getenv("DG_SIM_VISION"), "0") != 0)
-        sim_vision_start();
+    bool enable_mock = (getenv("DG_SIM_VISION") == NULL ||
+                        strcmp(getenv("DG_SIM_VISION"), "0") != 0);
 #else
-    (void)frame_probe;
+    bool enable_mock = false;
 #endif
+    vision_backend_start(enable_mock);
 
     fprintf(stderr, "door-guard 运行中(Ctrl-C 退出)\n");
     for (;;) {

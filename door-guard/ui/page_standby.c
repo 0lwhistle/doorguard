@@ -2,8 +2,9 @@
  * page_standby.c — 待机页(spec-ui §3.2):全黑 + 中央 HH:MM 每秒刷新;
  * 触摸/人脸唤醒(TOUCH 事件经 FSM;本页点击也喂 FSM_EV_TOUCH)
  */
-#include "auth_fsm.h"
 #include "dg_log.h"
+#include "event_bus.h"
+#include "events.h"
 #include "page_mgr.h"
 #include "theme.h"
 
@@ -16,9 +17,8 @@ static lv_timer_t *s_timer = NULL;
 static void on_touch(lv_event_t *e)
 {
     (void)e;
-    /* 触摸唤醒由 FSM 统一处理(GOTO_PAGE home) */
-    extern auth_fsm_t *page_home_fsm(void);
-    auth_fsm_handle(page_home_fsm(), FSM_EV_TOUCH, NULL);
+    /* 触摸唤醒由 access 服务统一决策(EV_UI_GOTO_PAGE 回 UI) */
+    EVENT_BUS_PUBLISH_EMPTY(EV_UI_TOUCH);
 }
 
 static void clock_timer_cb(lv_timer_t *t)

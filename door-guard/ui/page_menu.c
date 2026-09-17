@@ -1,8 +1,9 @@
 /*
  * page_menu.c — 菜单页(spec-ui §3.3):仅管理员可达,四入口宫格 + 返回
  */
-#include "auth_fsm.h"
 #include "dg_log.h"
+#include "events.h"
+#include "event_bus.h"
 #include "i18n.h"
 #include "page_mgr.h"
 #include "theme.h"
@@ -11,9 +12,9 @@
 static void on_back(lv_event_t *e)
 {
     (void)e;
-    extern auth_fsm_t *page_home_fsm(void);
-    /* 经 FSM 统一返回(状态同步,FSM 会 GOTO_PAGE home) */
-    auth_fsm_handle(page_home_fsm(), FSM_EV_BACK, NULL);
+    /* 返回请求发服务(access FSM 统一决策,会经 EV_UI_GOTO_PAGE 切页) */
+    ev_ui_btn_t b = { .btn = DG_BTN_BACK };
+    EVENT_BUS_PUBLISH(EV_UI_BTN, &b);
 }
 
 static void on_users(lv_event_t *e)

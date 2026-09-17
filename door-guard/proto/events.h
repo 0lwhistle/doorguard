@@ -57,8 +57,24 @@ extern "C" {
 #define EV_IC_CARD           EV_DEF(DG_MODULE_ID_HAL, 0x0002)    /**< 读到卡号 */
 #define EV_DOOR_STATE        EV_DEF(DG_MODULE_ID_HAL, 0x0003)    /**< 门磁/门控反馈 */
 
-/* UI:待机(UI 内部页面管理用) */
+/* UI:待机与页面(UI 内部页面管理用) */
 #define EV_UI_STANDBY        EV_DEF(DG_MODULE_ID_UI, 0x0010)     /**< 进入/退出待机 */
+
+/* ---- UI ↔ 服务请求/回执(Phase 7 服务层;UI 不做业务决策) ---- */
+#define EV_UI_BTN            EV_DEF(DG_MODULE_ID_UI, 0x0020)     /**< 按钮:菜单/验证/返回 */
+#define EV_UI_TEXT_INPUT     EV_DEF(DG_MODULE_ID_UI, 0x0021)     /**< 弹窗文本提交 */
+#define EV_UI_METHOD_PICK    EV_DEF(DG_MODULE_ID_UI, 0x0022)     /**< 方式选择 */
+#define EV_UI_TOUCH          EV_DEF(DG_MODULE_ID_UI, 0x0023)     /**< 任意触摸 */
+#define EV_UI_GOTO_PAGE      EV_DEF(DG_MODULE_ID_UI, 0x0024)     /**< 服务请求切页 */
+#define EV_UI_HINT           EV_DEF(DG_MODULE_ID_UI, 0x0025)     /**< 提示条语义 */
+
+/* access 内部:FSM 定时器/心跳经 tasker 回注(私有;FSM 全部在总线线程驱动) */
+#define EV_ACCESS_TIMER      EV_DEF(DG_MODULE_ID_AUTH, 0x0010)
+#define EV_ACCESS_TICK       EV_DEF(DG_MODULE_ID_AUTH, 0x0011)
+
+/* 视觉录入抓取(特征大数据走 vision 槽位句柄,事件只带 seq) */
+#define EV_VISION_CAPTURE_REQ EV_DEF(DG_MODULE_ID_VISION, 0x0010)
+#define EV_VISION_FEATURE     EV_DEF(DG_MODULE_ID_VISION, 0x0011)
 
 /* ---- 负载结构(字段与 access_logs / web 推送一致处显式注明) ---- */
 
@@ -171,6 +187,58 @@ typedef struct {
     bool enter;                           /**< true = 进入待机;false = 唤醒 */
 } ev_standby_t;
 
+/* ---- UI ↔ 服务载荷 ---- */
+
+typedef enum {
+    DG_BTN_MENU = 0,                      /**< 主页"菜单" */
+    DG_BTN_VERIFY,                        /**< 主页"验证" */
+    DG_BTN_BACK,                          /**< 返回 */
+} dg_ui_btn_t;
+
+typedef struct {
+    int32_t btn;                          /**< dg_ui_btn_t */
+} ev_ui_btn_t;
+
+typedef enum {
+    DG_INPUT_UID = 0,                     /**< 用户 ID(验证流程) */
+    DG_INPUT_PWD,                         /**< ID+密码验证 */
+    DG_INPUT_TEXT,                        /**< 通用文本(用户管理等) */
+} dg_input_kind_t;
+
+typedef struct {
+    int32_t kind;                         /**< dg_input_kind_t */
+    char    uid[DG_UID_LEN];              /**< 密码验证时的目标用户 */
+    char    text[64];
+} ev_text_input_t;
+
+typedef struct {
+    int32_t method;                       /**< dg_auth_method_t */
+} ev_method_pick_t;
+
+typedef struct {
+    char    page[16];                     /**< "home"/"menu"/"standby" */
+} ev_goto_page_t;
+
+typedef struct {
+    int32_t method;                       /**< -1 = 管理员认证提示;dg_auth_method_t */
+} ev_hint_t;
+
+typedef struct {
+    char    user_id[DG_UID_LEN];
+    uint32_t seq;                         /**< 特征槽位句柄(大数据不过总线) */
+    uint16_t len;                         /**< 特征明文字节数 */
+} ev_feature_t;
+
+typedef struct {
+    char    user_id[DG_UID_LEN];
+    uint32_t seq;
+} ev_capture_req_t;
+
+typedef struct {
+    int32_t timer_id;                     /**< fsm_timer_t */
+    uint32_t seq;
+} ev_access_timer_t;
+
 /* ---- 载荷尺寸守卫:任何负载不得超过总线单事件上限 ---- */
 
 _Static_assert(sizeof(ev_auth_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_auth_result_t 超限");
@@ -187,6 +255,14 @@ _Static_assert(sizeof(ev_finger_status_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_finge
 _Static_assert(sizeof(ev_ic_card_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ic_card_t 超限");
 _Static_assert(sizeof(ev_door_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_door_state_t 超限");
 _Static_assert(sizeof(ev_standby_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_standby_t 超限");
+_Static_assert(sizeof(ev_ui_btn_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ui_btn_t 超限");
+_Static_assert(sizeof(ev_text_input_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_text_input_t 超限");
+_Static_assert(sizeof(ev_method_pick_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_method_pick_t 超限");
+_Static_assert(sizeof(ev_goto_page_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_goto_page_t 超限");
+_Static_assert(sizeof(ev_hint_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_hint_t 超限");
+_Static_assert(sizeof(ev_feature_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_feature_t 超限");
+_Static_assert(sizeof(ev_capture_req_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_capture_req_t 超限");
+_Static_assert(sizeof(ev_access_timer_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_access_timer_t 超限");
 
 /** 事件名(EV_* 优先,回退 event_bus 内置名);日志/web 用 */
 const char *dg_event_name(event_type_t type);
