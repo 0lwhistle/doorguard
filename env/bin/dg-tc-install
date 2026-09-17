@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# 安装/更新 WSL 交叉工具链到 ~/dg-toolchain(幂等,可重复执行)
+# 来源: 仓库 deliverables/wsl-toolchain/(md5 校验通过才解压)
+set -euo pipefail
+
+: "${DOORGUARD_ROOT:?请先 source env/env.sh}"
+
+src="$DOORGUARD_ROOT/deliverables/wsl-toolchain"
+dst="${DG_TC_ROOT:-$HOME/dg-toolchain}"
+
+cd "$src"
+md5sum -c md5sums.txt
+
+echo "== 解压编译器 =="
+mkdir -p "$dst"
+tar xzf gcc-aarch64-10.3.tar.gz -C "$dst"
+
+echo "== 解压 sysroot =="
+mkdir -p "$dst/sysroot"
+tar xzf doorguard-sysroot.tar.gz -C "$dst/sysroot"
+
+echo "== 完成: $dst =="
+echo "验证: dg-build  编译 door-guard,产物 scp 到板子即可运行"

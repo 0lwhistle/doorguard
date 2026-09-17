@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# 推送 door-guard 到板子。用法: dg-deploy [-r] [板子IP]
+#   -r   推送后立即在板上运行(串口/SSH 均可看到输出)
+#   IP   缺省用 $DOORGUARD_IP(env.sh 里 export)
+set -euo pipefail
+
+: "${DOORGUARD_ROOT:?请先 source env/env.sh}"
+
+run=0
+if [ "${1:-}" = "-r" ]; then
+    run=1
+    shift
+fi
+ip="${1:-${DOORGUARD_IP:-}}"
+[ -n "$ip" ] || { echo "用法: dg-deploy [-r] <板子IP>,或先 export DOORGUARD_IP=<IP>"; exit 1; }
+
+bin="$DOORGUARD_ROOT/door-guard/build/door-guard"
+[ -x "$bin" ] || { echo "没有编译产物,先执行 dg-build"; exit 1; }
+
+scp "$bin" "root@$ip:/root/door-guard"
+
+if [ "$run" = 1 ]; then
+    ssh "root@$ip" '/root/door-guard'
+else
+    echo "已推送。运行: ssh root@$ip /root/door-guard"
+fi

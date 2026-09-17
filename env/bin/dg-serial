@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# 板子串口控制台(1500000 8N1 —— 注意不是 115200)
+# 环境变量 DOORGUARD_TTY 可指定设备,默认 /dev/ttyUSB0
+set -euo pipefail
+
+port="${DOORGUARD_TTY:-/dev/ttyUSB0}"
+
+if [ ! -e "$port" ]; then
+    echo "找不到串口 $port。"
+    echo "WSL2 需先在 Windows PowerShell(管理员)把 USB 串口挂进 WSL:"
+    echo "  usbipd list"
+    echo "  usbipd bind   --hardware-id <VID:PID>"
+    echo "  usbipd attach --wsl --hardware-id <VID:PID>"
+    echo "若是 ttyACM 等其他设备名: export DOORGUARD_TTY=/dev/ttyACM0"
+    exit 1
+fi
+
+if command -v minicom >/dev/null 2>&1; then
+    exec minicom -D "$port" -b 1500000
+elif command -v screen >/dev/null 2>&1; then
+    exec screen "$port" 1500000
+else
+    echo "缺少终端工具,先安装: sudo apt install minicom(或 screen)"
+    exit 1
+fi
