@@ -12,6 +12,7 @@
  */
 #include "access_service.h"
 #include "auth_fsm.h"
+#include "hal/gpio/gpio_hal.h"
 #include "cfg.h"
 #include "dg_log.h"
 #include "event_bus.h"
@@ -143,7 +144,16 @@ static void on_fsm_action(fsm_action_t act, const fsm_action_data_t *d, void *ud
         break;
     }
     case FSM_ACT_OPEN_DOOR: {
-        /* 门控执行:Phase 8 gpio_hal 接入;当前广播可观测事件 */
+        /* 门控:gpio_hal 脉冲(引脚配置 device.json;失败不阻断结果事件) */
+        static bool gpio_ready = false;
+        if (!gpio_ready) {
+            if (gpio_hal_init(cfg_get()->relay_gpio_line) == DG_OK)
+                gpio_ready = true;
+            else
+                DG_LOGW(TAG, "gpio 初始化失败,门控仅事件可观测");
+        }
+        if (gpio_ready && gpio_hal_door_pulse(d->door_open_ms) != DG_OK)
+            DG_LOGE(TAG, "开门脉冲失败");
         ev_door_state_t ev = { .open = true };
         EVENT_BUS_PUBLISH(EV_AUTH_DOOR_OPEN, &ev);
         DG_LOGI(TAG, "开门 %ums", d->door_open_ms);

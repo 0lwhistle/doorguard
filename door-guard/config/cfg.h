@@ -35,6 +35,9 @@ typedef struct {
     int  ota_port;             /**< OTA 监听端口,1024~65535,默认 9000 */
     char ntp_server[64];       /**< 默认 ntp.aliyun.com(国内部署实测可用) */
     char ota_url[128];         /**< OTA 升级包源地址,可空 */
+    /* 硬件参数(json-only,不经 DB;引脚待硬件确认) */
+    int  relay_gpio_line;      /**< 开门继电器 GPIO 行号,默认 0 */
+    char relay_gpio_chip[32];  /**< GPIO 控制器(sysfs 模式下仅记录) */
 } dg_cfg_t;
 
 /**

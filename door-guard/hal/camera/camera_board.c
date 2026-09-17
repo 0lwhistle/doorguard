@@ -11,12 +11,26 @@
 #include <stddef.h>
 #include "dg_log.h"
 
+#include <dirent.h>
+#include <string.h>
+
+static const char *TAG = "[CAMERA]";
+
 int camera_init(const char *res_path, camera_frame_fn cb, void *ud)
 {
     (void)res_path;
     (void)cb;
     (void)ud;
-    DG_LOGW("[CAMERA]", "板上后端 Phase 8 接入,当前无真实流");
+    /* 实测线索记录:列出 /dev/video* 供 B6/B7 ISP 链路定位 */
+    DIR *d = opendir("/dev");
+    if (d) {
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL)
+            if (strncmp(ent->d_name, "video", 5) == 0)
+                DG_LOGI(TAG, "发现节点 /dev/%s(B6/B7 链路候选)", ent->d_name);
+        closedir(d);
+    }
+    DG_LOGW("[CAMERA]", "真实链路(rkaiq+V4L2)待 B6/B7,当前 mock 占位");
     return DG_ERR_NOT_INIT;
 }
 

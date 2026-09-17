@@ -118,7 +118,7 @@ add_library(dg_access STATIC
     modules/access/access_service.c
 )
 target_include_directories(dg_access PUBLIC ${CMAKE_SOURCE_DIR}/modules/access)
-target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker)
+target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker dg_gpio)
 
 # vision:视觉服务(槽位句柄 + sim mock / rockiva 占位)
 add_library(dg_vision STATIC modules/vision/vision_service.c)
@@ -139,6 +139,16 @@ target_link_libraries(dg_enroll PUBLIC dg_proto dg_storage dg_vision)
 add_library(dg_capture STATIC modules/capture/capture_service.c)
 target_include_directories(dg_capture PUBLIC ${CMAKE_SOURCE_DIR}/modules/capture)
 target_link_libraries(dg_capture PUBLIC dg_proto dg_tasker)
+
+# gpio:门控(sysfs;rootfs 带 libgpiod 后迁移)
+add_library(dg_gpio STATIC hal/gpio/gpio_hal.c)
+target_include_directories(dg_gpio PUBLIC ${CMAKE_SOURCE_DIR}/hal/gpio)
+target_link_libraries(dg_gpio PUBLIC dg_log)
+
+# uart:串口框架(mock 回环 / termios)
+add_library(dg_uart STATIC hal/uart/uart_hal.c)
+target_include_directories(dg_uart PUBLIC ${CMAKE_SOURCE_DIR}/hal/uart)
+target_link_libraries(dg_uart PUBLIC dg_log)
 
 # liveness:活体占位
 add_library(dg_liveness STATIC modules/liveness/liveness_service.c)
@@ -192,7 +202,7 @@ add_executable(door-guard app/main.c)
 target_link_libraries(door-guard PRIVATE
     -Wl,--start-group
     dg_event_bus dg_tasker dg_holder dg_proto dg_storage dg_config
-    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_display dg_camera
+    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_gpio dg_uart dg_display dg_camera
     -Wl,--end-group)
 
 if(DG_SIM)
