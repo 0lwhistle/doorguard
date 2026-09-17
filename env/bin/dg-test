@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# door-guard 单元测试(宿主 gcc + ctest)。用法: dg-test [--tsan] [-c]
+#   --tsan  另建 ThreadSanitizer 构建目录并跑全部用例(并发组件验收要求)
+#   -c      删除构建目录全新配置
+set -euo pipefail
+
+: "${DOORGUARD_ROOT:?请先 source env/env.sh}"
+
+tsan=0
+clean=0
+for a in "$@"; do
+    case "$a" in
+        --tsan) tsan=1 ;;
+        -c)     clean=1 ;;
+        *) echo "未知参数: $a"; exit 1 ;;
+    esac
+done
+
+build_tests() {
+    local dir="$1"; shift
+    cd "$DOORGUARD_ROOT/door-guard"
+    [ "$clean" = 1 ] && rm -rf "$dir"
+    cmake -B "$dir" -DDG_BUILD_TESTS=ON "$@" >/dev/null
+    cmake --build "$dir" -j"$(nproc)"
+    ctest --test-dir "$dir" --output-on-failure
+}
+
+if [ "$tsan" = 1 ]; then
+    build_tests build-tests-tsan -DCMAKE_C_FLAGS="-fsanitize=thread -g -O1"
+else
+    build_tests build-tests
+fi
