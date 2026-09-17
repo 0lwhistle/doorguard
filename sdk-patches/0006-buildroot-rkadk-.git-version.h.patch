@@ -1,0 +1,51 @@
+From eeb567ab97b98f1948686a858dc7c3fde240c074 Mon Sep 17 00:00:00 2001
+From: olwhistle <olwhistle@local>
+Date: Thu, 17 Sep 2026 15:03:54 +0800
+Subject: [PATCH 6/8] =?UTF-8?q?buildroot:=20rkadk=20=E8=A1=A5=E4=B8=81=20?=
+ =?UTF-8?q?=E2=80=94=20=E6=97=A0=20.git=20=E7=8E=AF=E5=A2=83=E4=B9=9F?=
+ =?UTF-8?q?=E7=94=9F=E6=88=90=20version.h?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../0001-version-h-always-generate.patch      | 27 +++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+ create mode 100644 buildroot/package/rockchip/rkadk/0001-version-h-always-generate.patch
+
+diff --git a/buildroot/package/rockchip/rkadk/0001-version-h-always-generate.patch b/buildroot/package/rockchip/rkadk/0001-version-h-always-generate.patch
+new file mode 100644
+index 000000000..fe8c8e9b3
+--- /dev/null
++++ b/buildroot/package/rockchip/rkadk/0001-version-h-always-generate.patch
+@@ -0,0 +1,27 @@
++From: door-guard project
++Subject: [PATCH] version: always generate version.h
++
++In buildroot builds the package source is a copy without a nested
++.git directory, so the configure_file() call guarded by
++if(EXISTS .git) never runs and rkadk_version.h's "version.h"
++include breaks the build. Generate version.h unconditionally;
++without VCS info the fallback "unknown rkadk version" is used.
++--- a/version/Version.cmake
+++++ b/version/Version.cmake
++@@ -50,11 +50,12 @@
++         else()
++             message(STATUS "git ret ${EXEC_RET}")
++             message(STATUS "${EXEC_ERROR}")
++         endif()
++
++-        configure_file(
++-            "${PROJECT_SOURCE_DIR}/version/version.in"
++-            "${PROJECT_SOURCE_DIR}/include/version.h"
++-        )
++     endif()
+++
+++    configure_file(
+++        "${PROJECT_SOURCE_DIR}/version/version.in"
+++        "${PROJECT_SOURCE_DIR}/include/version.h"
+++    )
++ endif(EXISTS "${PROJECT_SOURCE_DIR}/.git")
+-- 
+2.53.0
+

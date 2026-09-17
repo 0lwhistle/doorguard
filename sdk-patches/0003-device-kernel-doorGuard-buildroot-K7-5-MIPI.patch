@@ -1,7 +1,7 @@
 From 88559f76c6983eee63023dba147d46fd645c4adb Mon Sep 17 00:00:00 2001
 From: olwhistle <olwhistle@local>
 Date: Thu, 17 Sep 2026 00:41:17 +0800
-Subject: [PATCH 3/3] =?UTF-8?q?device+kernel:=20=E7=BB=91=E5=AE=9AdoorGuar?=
+Subject: [PATCH 3/8] =?UTF-8?q?device+kernel:=20=E7=BB=91=E5=AE=9AdoorGuar?=
  =?UTF-8?q?d=20buildroot=E9=85=8D=E7=BD=AE;K7=20=E4=BD=BF=E8=83=BD5?=
  =?UTF-8?q?=E5=AF=B8MIPI=E5=B1=8F?=
 MIME-Version: 1.0

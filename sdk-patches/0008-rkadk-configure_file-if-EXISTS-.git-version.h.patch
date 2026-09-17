@@ -1,0 +1,37 @@
+From 10477c79b2a57a3a62b5f404298055a8c1d5ed57 Mon Sep 17 00:00:00 2001
+From: olwhistle <olwhistle@local>
+Date: Thu, 17 Sep 2026 15:16:00 +0800
+Subject: [PATCH 8/8] =?UTF-8?q?rkadk:=20configure=5Ffile=20=E7=A7=BB?=
+ =?UTF-8?q?=E5=87=BA=20if(EXISTS=20.git),=E7=A1=AE=E4=BF=9D=20version.h=20?=
+ =?UTF-8?q?=E5=BF=85=E7=94=9F=E6=88=90?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ app/rkadk/version/Version.cmake | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/app/rkadk/version/Version.cmake b/app/rkadk/version/Version.cmake
+index 6d30177ea..3ad128f66 100755
+--- a/app/rkadk/version/Version.cmake
++++ b/app/rkadk/version/Version.cmake
+@@ -54,9 +54,10 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/.git")
+ 
+     endif()
+ 
+-    # buildroot 本地包无 .git,version.h 必须无条件生成(否则 rkadk_version.h 编译失败)
+-    configure_file(
+-        "${PROJECT_SOURCE_DIR}/version/version.in"
+-        "${PROJECT_SOURCE_DIR}/include/version.h"
+-    )
+ endif(EXISTS "${PROJECT_SOURCE_DIR}/.git")
++
++# buildroot 本地包的 .git 为悬空软链(EXISTS 为假),version.h 必须无条件生成
++configure_file(
++    "${PROJECT_SOURCE_DIR}/version/version.in"
++    "${PROJECT_SOURCE_DIR}/include/version.h"
++)
+-- 
+2.53.0
+

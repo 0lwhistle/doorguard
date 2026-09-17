@@ -1,0 +1,39 @@
+From ef68eb7e4d9ac61c3dfe01a75b80de187397a753 Mon Sep 17 00:00:00 2001
+From: olwhistle <olwhistle@local>
+Date: Thu, 17 Sep 2026 02:30:20 +0800
+Subject: [PATCH 5/8] =?UTF-8?q?buildroot:=20host-cmake=20=E8=A1=A5?=
+ =?UTF-8?q?=E4=B8=81=E4=BF=AE=E5=A4=8D=20GCC15=20=E4=B8=8B=20cmcppdap=20?=
+ =?UTF-8?q?=E7=BC=BA=20cstdint?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../0001-cmcppdap-add-cstdint-for-gcc15.patch     | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+ create mode 100644 buildroot/package/cmake/0001-cmcppdap-add-cstdint-for-gcc15.patch
+
+diff --git a/buildroot/package/cmake/0001-cmcppdap-add-cstdint-for-gcc15.patch b/buildroot/package/cmake/0001-cmcppdap-add-cstdint-for-gcc15.patch
+new file mode 100644
+index 000000000..0560fa4fc
+--- /dev/null
++++ b/buildroot/package/cmake/0001-cmcppdap-add-cstdint-for-gcc15.patch
+@@ -0,0 +1,15 @@
++From: door-guard project
++Subject: [PATCH] cmcppdap: add missing <cstdint> for GCC 15 hosts
++
++GCC 15 no longer pulls <cstdint> transitively, causing
++"'uint32_t' has not been declared" in dap/network.h when building
++host-cmake with very new host toolchains (Ubuntu 26.04 / GCC 15).
++--- a/Utilities/cmcppdap/include/dap/network.h
+++++ b/Utilities/cmcppdap/include/dap/network.h
++@@ -17,6 +17,7 @@
++
++ #include <functional>
+++#include <cstdint>
++ #include <memory>
++
++ namespace dap {
+-- 
+2.53.0
+

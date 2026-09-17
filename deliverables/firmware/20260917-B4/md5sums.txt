@@ -1,0 +1,5 @@
+cf7b572fae3555b7bb56d223ab72edba  MiniLoaderAll.bin
+97df343d0ba5361790f4b4957619d08a  uboot.img
+fc5eaec7c41e3423282f8ea3f20e5443  boot.img
+1cdc5a2eb27b147ddb582a2010e65c58  rootfs.img
+f4f35d60b3cc18aaa6d8d92f0cd3708a  misc.img

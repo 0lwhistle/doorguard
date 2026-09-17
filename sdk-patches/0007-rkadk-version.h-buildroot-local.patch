@@ -1,0 +1,73 @@
+From 0c0d4862b91b5d569b15abca59173809a140bdbc Mon Sep 17 00:00:00 2001
+From: olwhistle <olwhistle@local>
+Date: Thu, 17 Sep 2026 15:08:23 +0800
+Subject: [PATCH 7/8] =?UTF-8?q?rkadk:=20version.h=20=E6=97=A0=E6=9D=A1?=
+ =?UTF-8?q?=E4=BB=B6=E7=94=9F=E6=88=90(buildroot=20local=20=E5=8C=85?=
+ =?UTF-8?q?=E4=B8=8D=E6=89=93=E8=A1=A5=E4=B8=81,=E7=9B=B4=E6=8E=A5?=
+ =?UTF-8?q?=E6=94=B9=E6=BA=90)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ app/rkadk/version/Version.cmake               | 10 ++++---
+ .../0001-version-h-always-generate.patch      | 27 -------------------
+ 2 files changed, 6 insertions(+), 31 deletions(-)
+ delete mode 100644 buildroot/package/rockchip/rkadk/0001-version-h-always-generate.patch
+
+diff --git a/app/rkadk/version/Version.cmake b/app/rkadk/version/Version.cmake
+index e15060221..6d30177ea 100755
+--- a/app/rkadk/version/Version.cmake
++++ b/app/rkadk/version/Version.cmake
+@@ -52,9 +52,11 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/.git")
+             message(STATUS "${EXEC_ERROR}")
+         endif()
+ 
+-        configure_file(
+-            "${PROJECT_SOURCE_DIR}/version/version.in"
+-            "${PROJECT_SOURCE_DIR}/include/version.h"
+-        )
+     endif()
++
++    # buildroot 本地包无 .git,version.h 必须无条件生成(否则 rkadk_version.h 编译失败)
++    configure_file(
++        "${PROJECT_SOURCE_DIR}/version/version.in"
++        "${PROJECT_SOURCE_DIR}/include/version.h"
++    )
+ endif(EXISTS "${PROJECT_SOURCE_DIR}/.git")
+diff --git a/buildroot/package/rockchip/rkadk/0001-version-h-always-generate.patch b/buildroot/package/rockchip/rkadk/0001-version-h-always-generate.patch
+deleted file mode 100644
+index fe8c8e9b3..000000000
+--- a/buildroot/package/rockchip/rkadk/0001-version-h-always-generate.patch
++++ /dev/null
+@@ -1,27 +0,0 @@
+-From: door-guard project
+-Subject: [PATCH] version: always generate version.h
+-
+-In buildroot builds the package source is a copy without a nested
+-.git directory, so the configure_file() call guarded by
+-if(EXISTS .git) never runs and rkadk_version.h's "version.h"
+-include breaks the build. Generate version.h unconditionally;
+-without VCS info the fallback "unknown rkadk version" is used.
+---- a/version/Version.cmake
+-+++ b/version/Version.cmake
+-@@ -50,11 +50,12 @@
+-         else()
+-             message(STATUS "git ret ${EXEC_RET}")
+-             message(STATUS "${EXEC_ERROR}")
+-         endif()
+-
+--        configure_file(
+--            "${PROJECT_SOURCE_DIR}/version/version.in"
+--            "${PROJECT_SOURCE_DIR}/include/version.h"
+--        )
+-     endif()
+-+
+-+    configure_file(
+-+        "${PROJECT_SOURCE_DIR}/version/version.in"
+-+        "${PROJECT_SOURCE_DIR}/include/version.h"
+-+    )
+- endif(EXISTS "${PROJECT_SOURCE_DIR}/.git")
+-- 
+2.53.0
+

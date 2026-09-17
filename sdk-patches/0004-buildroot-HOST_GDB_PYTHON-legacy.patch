@@ -1,0 +1,30 @@
+From a1037ac9201a6099ed4a9da643c533a2e845136a Mon Sep 17 00:00:00 2001
+From: olwhistle <olwhistle@local>
+Date: Thu, 17 Sep 2026 01:57:27 +0800
+Subject: [PATCH 4/8] =?UTF-8?q?buildroot:=20=E6=98=BE=E5=BC=8F=E5=85=B3?=
+ =?UTF-8?q?=E9=97=AD=E5=B7=B2=E5=BA=9F=E5=BC=83=E7=9A=84=20HOST=5FGDB=5FPY?=
+ =?UTF-8?q?THON(=E8=A7=84=E9=81=BF=20legacy=20=E6=A3=80=E6=9F=A5)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ buildroot/configs/rockchip_rk3576_kickpi_k7_doorGuard_defconfig | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/buildroot/configs/rockchip_rk3576_kickpi_k7_doorGuard_defconfig b/buildroot/configs/rockchip_rk3576_kickpi_k7_doorGuard_defconfig
+index 3d99adbc7..e6f77a220 100644
+--- a/buildroot/configs/rockchip_rk3576_kickpi_k7_doorGuard_defconfig
++++ b/buildroot/configs/rockchip_rk3576_kickpi_k7_doorGuard_defconfig
+@@ -29,6 +29,8 @@
+ #include "powermanager.config"
+ #include "tools/common.config"
+ #include "tools/gdb.config"
++# tools/gdb.config 中的 HOST_GDB_PYTHON 在本 buildroot 已废弃(触发 legacy 检查),显式关闭
++# BR2_PACKAGE_HOST_GDB_PYTHON is not set
+ #include "wifibt/bt.config"
+ #include "wifibt/wireless.config"
+ 
+-- 
+2.53.0
+
