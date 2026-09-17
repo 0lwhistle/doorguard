@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-09-18 Phase 7 服务层完成
+
+### 完成内容
+- **access_service**:FSM 唯一持有者;日志落库与 EV_AUTH_RESULT 唯一出口;门控事件;
+  UID 解析/密码验证(连错预检)服务侧完成;FSM 定时器经 tasker 回注总线(单线程语义)
+- **vision_service**:特征槽位句柄模式(8 槽环形,明文即取即清,大数据不过总线);
+  sim mock(周期事件+确定性伪特征)+ rockiva 占位(B7/B8)
+- **enroll_service**:录入编排(请求→抓取→查重→入库→回执);**capture_service**
+  相机状态巡检广播;**liveness_service** 占位
+- events.h 扩展 UI↔服务契约(EV_UI_BTN/TEXT_INPUT/METHOD_PICK/TOUCH/GOTO_PAGE/HINT);
+  page_home 瘦身为纯渲染+事件转发
+- test_e2e:事件总线全链路——录入→查重→入库→可命中;命中→开门+日志 result=0;
+  陌生人 1.5s→失败 reason=1;密码错/对两路径;14/14 常规+tsan 全绿,三端零警告
+
+### 坑
+- tsan 连抓两处:FSM 心跳在 tasker 线程直接驱动(改经总线回注);
+  event_bus `initialized` 普通 bool 与在途 publish 竞争(改 C11 原子)
+- enroll 的 db_user_update 覆盖语义会清 role/auth_flags——编排侧先取旧记录回填
+  (教训:覆盖式 update 调用方必须带全量字段)
+
+### 未完成 / 下一步
+- Phase 8 板上 HAL(gpio_hal/uart_hal 框架/camera 板上链路)
+
+---
+
 ## 2026-09-18 Phase 6 三页面 + 验证状态机完成
 
 ### 完成内容
