@@ -138,6 +138,9 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 - SDK(19GB)**只在 VM 存一份**;SDK 改动走分支+补丁(见 §6)
 - 板端部署:scp 可执行文件 / buildroot 包;固件迭代走"增量编译 → 只刷对应分区"
 - VM 大文件纪律:任何 >1GB 产物 md5 连读两次一致才算有效;传输用流式
+- **sysroot 重导出注意**:`buildroot/output/<cfg>/staging` 是**绝对路径软链**(指向 host/…/sysroot),
+  直接 `tar czf … staging` 只会打进链接本身(WSL 解压仅 276 字节)。必须:
+  `tar czfh doorguard-sysroot.tar.gz --exclude='./dev' -C <output>/<cfg>/host/aarch64-buildroot-linux-gnu/sysroot .`
 
 ---
 
