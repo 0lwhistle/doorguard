@@ -11,11 +11,19 @@
  * 模块间只经 proto/ 定义的队列与事件总线通信,不直接互调。
  */
 #include <stdio.h>
-#include <stdlib.h>
+#include <sys/utsname.h>
+#include <unistd.h>
 
 int main(int argc, char *argv[])
 {
-    printf("door-guard starting...\n");
+    (void)argc;
+    (void)argv;
+
+    struct utsname u;
+    uname(&u);
+    printf("door-guard 冒烟版:交叉编译链路通了!\n");
+    printf("  arch=%s kernel=%s\n", u.machine, u.release);
+    printf("  pid=%d\n", getpid());
     /* TODO(B8): 按上述顺序装配各模块 */
     return 0;
 }

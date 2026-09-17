@@ -26,14 +26,17 @@ RK3576 K7 人脸识别门禁主应用。架构与约定见仓库根 `PROJECT_PLA
 3. 比对阈值、GPIO 编号、串口路径等全部进 `configs/device.json`,代码里不留魔数
 4. 新增认证方式 = 新写一个 `auth_provider` 实现,`access_service` 不改
 
-## 交叉编译(VM 上)
+## 编译与部署(WSL,主路径)
 
 ```bash
-export SDK_ROOT=~/Linux/rk3576/Rk3576-SDK/rk3576_data/rk3576-linux-2026091008
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64.cmake   # B8 阶段补齐工具链文件
-cmake --build build
-# 产物 scp 到板子 /usr/bin/ 或做成 buildroot 包(B10)
+source env/env.sh          # 仓库根执行一次(工具链未装则先 dg-tc-install)
+dg-build                   # 增量编译;-c 全新配置
+dg-deploy -r <板子IP>       # scp 推送并运行(或 export DOORGUARD_IP 后免 IP)
 ```
+
+工具链构成与版本配套关系见 `docs/tech/TOOLCHAIN.md`;VM 上也可用 SDK 内 buildroot
+host 工具链编译(SDK_ROOT 指向 SDK 根),作为无 WSL 环境时的兜底。
+正式化阶段(B10)把 door-guard 接成 buildroot 包,随固件出片。
 
 ## 里程碑对应(PROJECT_PLAN §五)
 
