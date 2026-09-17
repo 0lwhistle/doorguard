@@ -5,6 +5,33 @@
 
 ---
 
+## 2026-09-18 Phase 2 proto 层 + Phase 3 storage 完成
+
+### 完成内容
+- **Phase 2**:`proto/{err.h,types.h,events.h}` 统一契约。错误码分段(通用/用户/验证/网络);
+  user_rec_t/access_log_t/log_query_t 字段对齐 spec-database,role/auth_flags 位宽
+  _Static_assert;18 种 EV_* 事件+负载(编译期 ≤256B 守卫)+ 事件契约测试(发布→订阅
+  回捕逐字段相等 + EV_AUTH_RESULT 显式比对)。proto/README 含使用示例
+- **Phase 3**:`hal/storage`(storage.c/crypto.c)。DDL 与 spec 逐字一致;加密走 sysroot
+  openssl3 EVP(PBKDF2-HMAC-SHA256 10000 iters / AES-256-CTR 随机 IV 前缀+设备密钥 dg.key);
+  添加全链路校验(密码必填/uid/IC/特征查重/2000 上限);特征查重用比较器注入
+  (`storage_set_feature_cmp`,基线逐字节,Phase 7 注入 ROCKIVA 相似度);日志查询
+  时间段含边界/按用户/分页/倒序;配置 KV upsert;特征迭代器供 enroll 编排
+- 验收:sqlite3 CLI 校验 schema 一致;库文件/密钥 0600;dg-test 9/9(常规+tsan)全绿;
+  dg-build 零警告;宿主 apt 装 libsqlite3-dev(测试构建用,记 DEV_HANDBOOK)
+
+### 踩坑记录
+- **LIMIT ?N 动态占位符错位**:`LIMIT ?4` 在无 WHERE 时 ?4 未绑定 → SQLite 视为 NULL
+  → 0 行返回。改为已校验整数内联 LIMIT/OFFSET,过滤值保持绑定
+- **测试数据算术**:seed 里 i%50==0 的行同时 i%5==0(陌生人→user_id NULL),"按 U000
+  查 50 条"永远查不到;同理 i=4 不是陌生人。教训:测试数据生成器要和断言一起推演
+- tsan 连抓三处测试代码竞争(DG_CHECK 全局计数被 handler 线程改)——测试代码也要原子纪律
+
+### 未完成 / 下一步
+- Phase 4 配置体系(configs/device.json 全参数化 + cjson 加载器)
+
+---
+
 ## 2026-09-18 Phase 1 基础组件移植完成(event_bus → tasker → holder)
 
 ### 完成内容
