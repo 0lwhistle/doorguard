@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-09-18 Phase 9 网络功能完成
+
+### 完成内容
+- **web 上位机**(civetweb 1.16 vendored,NO_SSL+USE_WEBSOCKET):
+  单页蓝白 UI(登录/实时事件/日志查询/设备管理/视频占位);
+  登录 token(PBKDF2 凭据 device_config,默认 admin/admin);
+  WS 实时推送、日志查询(与 db 直查一致)、OTA 上传端点
+- **OTA 应用侧**:流式收包+大小预检+sha256 校验+续传;闭环到暂存文件
+  不刷分区;OTA_PLAN.md(应用级 A/B + uboot env 约定,方案文档)
+- **ntp_service**:三触发点+联网探测+chronyc;**mdns_responder**:
+  doorguard.local A 记录应答(轻量自实现)
+- tests/web:web_test.sh 14 项全过(401/200/400/422 断言)、ws_test.py、
+  mdns_test.sh;dg-ota-upload 脚本
+- **UI 事件队列(ui_events)**:总线线程禁止直接调 LVGL(实 crash 教训),
+  总线回调入队、LVGL 100ms 泵出——所有页面已切换此模式
+
+### 坑
+- civetweb 编译宏:inl 文件需 src 目录 include;NO_SSL 下 websocket 握手
+  的 SHA1 需 OPENSSL_API_3_0=1(跳过 openssl SHA_CTX 兼容路径)
+- LVGL 非线程安全:web/总线线程直接调 lv_* 会堆损坏崩溃 → 事件队列强制
+  LVGL 单线程访问(所有 UI 总线回调只入队)
+- WS 推送改"客户端 ping 触发排水":跨线程 mg_websocket_write 在客户端
+  异常断开时崩溃(实测),改由 civetweb 自有线程写
+
+### 遗留(记录不阻塞)
+- WS 客户端异常断开场景偶发崩溃:已改轮询排水规避,压力场景待压测
+- 板失联中(Phase 8 gpio 事故):web/NTP/mDNS 板上实测待板恢复
+- mDNS WSL2 NAT 组播受限:/etc/hosts 兜底方案已写入 mdns README
+
+### 未完成 / 下一步
+- Phase 10 集成与文档收尾(总验收清单自测)
+
+---
+
 ## 2026-09-18 Phase 8 板上 HAL 完成 + 板失联事故
 
 ### 完成内容
