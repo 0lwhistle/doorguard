@@ -3,6 +3,11 @@
 第一个自编译固件。Buildroot rootfs(doorGuard 定制:LVGL+DRM 后端、ROCKIVA、RKADK+RKAIQ、
 rknpu2、GStreamer+RTSP、SQLite、dropbear/chrony,无桌面无 X11)。
 
+## 两种烧录方式
+
+1. **一键烧录**:RKDevTool"升级固件"页,选 `update.img`(已含全部分区;recovery 分区为空)
+2. **分区烧录**:RKDevTool"下载镜像"页,按下方地址表逐个载入(改哪刷哪,推荐日常迭代用)
+
 ## 校验
 
 烧录前必做:`md5sum -c md5sums.txt`
