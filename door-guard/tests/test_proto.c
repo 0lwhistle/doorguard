@@ -144,13 +144,16 @@ static void catalog_build(void)
 static uint8_t s_captured[18][EVENT_BUS_MAX_EVENT_SIZE];
 static uint16_t s_captured_len[18];
 static atomic_int s_received = 0;
+static atomic_int s_dup_err = 0;
 
 static int on_any(const event_t *e, void *ud)
 {
     (void)ud;
     for (int i = 0; i < s_case_count; i++) {
         if (s_cases[i].type == e->header.type) {
-            DG_CHECK(s_captured_len[i] == 0);   /* 每类型只应到达一次 */
+            /* handler 在分发线程:不用 DG_CHECK(其计数器被主线程并发访问) */
+            if (s_captured_len[i] != 0)         /* 每类型只应到达一次 */
+                atomic_fetch_add(&s_dup_err, 1);
             s_captured_len[i] = e->header.data_len;
             if (e->header.data_len > 0)
                 memcpy(s_captured[i], e->data, e->header.data_len);
@@ -179,6 +182,7 @@ int main(void)
     for (int i = 0; i < 3000 && atomic_load(&s_received) < s_case_count; i++)
         usleep(2000);
     DG_CHECK(atomic_load(&s_received) == s_case_count);
+    DG_CHECK(atomic_load(&s_dup_err) == 0);
 
     /* 负载逐字段相等:零初始化负载下 memcmp 等价于逐字段相等 */
     for (int i = 0; i < s_case_count; i++) {

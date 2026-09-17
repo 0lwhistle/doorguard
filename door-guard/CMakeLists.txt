@@ -7,10 +7,18 @@
 cmake_minimum_required(VERSION 3.16)
 project(door-guard C)
 
+# 未指定构建类型时用 Debug(测试与模拟器默认带 -g;零警告不受影响)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
+endif()
+
 set(CMAKE_C_STANDARD 11)
 
 # 全局零警告纪律(任务清单 §2.6);组件与测试同一标准
 add_compile_options(-Wall -Wextra)
+
+# 根目录相对头文件(如 ui/theme.h)对所有子目标可见
+include_directories(${CMAKE_SOURCE_DIR})
 
 # ---- 交叉编译变量(由工具链文件或环境提供) ----
 # SDK_ROOT 指向官方 SDK 根目录
@@ -76,11 +84,48 @@ add_library(dg_storage STATIC
 target_include_directories(dg_storage PUBLIC hal/storage)
 target_link_libraries(dg_storage PUBLIC dg_proto sqlite3 crypto)
 
+# ---- LVGL 8.3(third_party 源码双端同源编译:板上不再依赖 sysroot 的
+# liblvgl.so,以获得自定义 lv_conf:CJK 字体/256KB 内存池) ----
+file(GLOB_RECURSE LVGL_SRCS third_party/lvgl/src/*.c)
+add_library(lvgl STATIC ${LVGL_SRCS})
+target_include_directories(lvgl PUBLIC third_party/lvgl)
+target_compile_definitions(lvgl PUBLIC LV_CONF_INCLUDE_SIMPLE)
+target_compile_options(lvgl PRIVATE -w)   # vendored 源码不改动内容,告警豁免
+
+# ---- UI 子系统(theme/i18n/widgets/page_mgr/字体) ----
+file(GLOB DG_WIDGET_SRCS ui/widgets/*.c)
+add_library(dg_ui STATIC
+    ui/ui.c
+    ui/port.c
+    ui/i18n.c
+    ui/page_mgr.c
+    ui/page_demo.c
+    ui/font/dg_font_cn_16.c
+    ${DG_WIDGET_SRCS}
+)
+target_include_directories(dg_ui PUBLIC ui)
+target_link_libraries(dg_ui PUBLIC lvgl dg_config)
+
 if(DG_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
     return()
 endif()
+
+# ---- 显示/相机 HAL(按端选择 sim 后端;#ifdef 只出现在后端与 main) ----
+if(DG_SIM)
+    find_package(SDL2 REQUIRED)
+    add_library(dg_display STATIC hal/display/display_sim.c)
+    target_link_libraries(dg_display PUBLIC lvgl SDL2::SDL2)
+    add_library(dg_camera STATIC hal/camera/camera_sim.c)
+    target_include_directories(dg_camera PRIVATE third_party/stb)
+    target_link_libraries(dg_camera PUBLIC m)   # stb_image 解码用到 pow
+else()
+    add_library(dg_display STATIC hal/display/display_drm.c)
+    add_library(dg_camera STATIC hal/camera/camera_board.c)
+endif()
+target_link_libraries(dg_display PUBLIC dg_log)
+target_link_libraries(dg_camera PUBLIC dg_log)
 
 # ---- 应用(交叉编译产物,dg-deploy 推板) ----
 include_directories(
@@ -96,8 +141,17 @@ link_directories(
 )
 
 add_executable(door-guard app/main.c)
-# 组件链入应用:装配顺序在 app/main.c(architecture.md §1,main.c 头注同步维护)
-target_link_libraries(door-guard PRIVATE dg_event_bus dg_tasker dg_holder dg_proto dg_storage dg_config)
+# 组件链入应用:装配顺序在 app/main.c(architecture.md §1,main.c 头注同步维护)。
+# --group:lv_conf 时基(LV_TICK_CUSTOM)回引 ui/port.c 而部分 lvgl 成员又被 ui
+# 引用,静态库符号环需组解析
+target_link_libraries(door-guard PRIVATE
+    -Wl,--start-group
+    dg_event_bus dg_tasker dg_holder dg_proto dg_storage dg_config
+    lvgl dg_ui dg_display dg_camera
+    -Wl,--end-group)
+if(DG_SIM)
+    target_compile_definitions(door-guard PRIVATE DG_SIM=1)
+endif()
 # rockiva     # 官方人脸库(B7 阶段启用)
 # sqlite3     # 存储(启用 storage HAL 时)
 # gpiod       # 门控 GPIO

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# PC 模拟器构建(WSL 宿主 gcc + SDL2,720×1280)。用法: dg-build-pc [-r] [-c] [透传 cmake 参数]
+#   -r  构建后直接运行模拟器(需图形环境/WSLg)
+#   -c  删掉 build-pc 全新配置
+set -euo pipefail
+
+: "${DOORGUARD_ROOT:?请先 source env/env.sh}"
+
+run=0; clean=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -r) run=1; shift ;;
+        -c) clean=1; shift ;;
+        *) break ;;
+    esac
+done
+
+cd "$DOORGUARD_ROOT/door-guard"
+[ "$clean" = 1 ] && rm -rf build-pc
+
+cmake -B build-pc -DDG_SIM=ON "$@"
+cmake --build build-pc -j"$(nproc)"
+
+echo
+echo "产物: door-guard/build-pc/door-guard"
+if [ "$run" = 1 ]; then
+    cd "$DOORGUARD_ROOT/door-guard"       # 相对路径:lang/configs/sim 目录
+    exec ./build-pc/door-guard
+fi

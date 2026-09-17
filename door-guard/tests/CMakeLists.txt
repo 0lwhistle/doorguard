@@ -1,7 +1,7 @@
 # tests/ — ctest 用例(宿主 gcc,dg-test 驱动)
 #
 # 每个测试一个可执行文件、一个 main:失败定位直接到 文件:行号;
-# TIMEOUT 防死锁挂死 CI/闲时任务。demo_* 是模块使用示例,作为冒烟用例一并跑。
+# TIMEOUT 防死锁挂死闲时任务。demo_* 是模块使用示例,作为冒烟用例一并跑。
 set(DG_TEST_TIMEOUT 120)
 
 macro(dg_add_test name)
@@ -17,9 +17,24 @@ dg_add_test(test_tasker dg_tasker)
 dg_add_test(test_holder dg_holder)
 dg_add_test(test_proto dg_proto)
 dg_add_test(test_storage dg_storage)
-dg_add_test(test_cfg dg_config)
 set_tests_properties(test_storage PROPERTIES TIMEOUT 300)
+dg_add_test(test_cfg dg_config)
 set_tests_properties(test_cfg PROPERTIES TIMEOUT 60)
+
+# i18n 一致性:扫描源码 _() 键 + 双 json 覆盖 + 裸中文检查 + 字体字形覆盖
+add_executable(test_i18n test_i18n.c)
+target_compile_definitions(test_i18n PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(test_i18n PRIVATE ${CMAKE_SOURCE_DIR}/third_party/lvgl)
+target_link_libraries(test_i18n PRIVATE lvgl dg_ui cjson)
+add_test(NAME test_i18n COMMAND test_i18n)
+set_tests_properties(test_i18n PROPERTIES TIMEOUT 60)
+
+# widget 冒烟:无头 LVGL 下真实 widget 创建/交互/弹窗生命周期
+add_executable(test_widgets test_widgets.c)
+target_compile_definitions(test_widgets PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_widgets PRIVATE lvgl dg_ui)
+add_test(NAME test_widgets COMMAND test_widgets)
+set_tests_properties(test_widgets PROPERTIES TIMEOUT 60)
 
 # 模块 demo 冒烟(使用示例须始终可运行)
 macro(dg_add_demo name src)
