@@ -6,10 +6,15 @@
 
 ```
 ├── PROJECT_PLAN.md          项目方案与执行手册(唯一事实来源,每阶段更新)
-├── docs/DEV_HANDBOOK.md     软件开发手册(硬件事实/编译环境/踩坑索引)
 ├── NEXT_SESSION_PROMPT.md   下次会话开工提示词
+├── docs/                    开发文档
+│   ├── DEV_HANDBOOK.md      软件开发手册(硬件事实/编译环境/踩坑索引)
+│   ├── DEVLOG.md            开发日志(过程与坑,按日追加)
+│   └── tech/                技术文档(FLASHING 烧录 / TOOLCHAIN 交叉编译)
+├── env/                     WSL 环境与脚本(source env/env.sh 后 dg-* 直接可用)
+├── door-guard/              门禁应用源码(WSL 编码编译 / VM 兜底)
+├── deliverables/            产物:固件包(firmware/)+ WSL 工具链包(wsl-toolchain/)
 ├── sdk-guide/               官方 SDK 开发资源指南(必读) + 9 份精选官方文档 PDF
-├── door-guard/              门禁应用源码(后续创建,WSL 开发 / VM 编译)
 └── sdk-patches/             对官方 SDK 的全部修改,以 git patch 管理
 ```
 
@@ -27,5 +32,7 @@
 ## 开发工作流(WSL 开发 + VM 编译)
 
 - 代码流转只经本仓库 push/pull,不复制目录
-- WSL:写代码、跑纯逻辑单元测试;VM:交叉编译(SDK prebuilts 工具链)、固件全量编译
+- **WSL**:door-guard 编码→编译→部署:`source env/env.sh` 后 `dg-build` / `dg-deploy`;
+  纯逻辑单元测试也在 WSL;工具链见 `docs/tech/TOOLCHAIN.md`
+- **VM**:固件/内核/rootfs 全量编译(SDK `./build.sh` 体系,见 docs/DEV_HANDBOOK.md §6)
 - 中枢:ssh://git@192.168.2.150:222/olwhistle/k7_rk3576.git(局域网 Gitea,SSH 密钥认证)

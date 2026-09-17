@@ -7,18 +7,19 @@
 
 | 文件 | 解压后 | 说明 |
 |---|---|---|
-| `gcc-aarch64-10.3.tar.gz` | ~700M | SDK 官方 aarch64 交叉编译器(gcc-arm-10.3,与固件同源) |
-| `doorguard-sysroot.tar.gz` | ~316M | 目标 sysroot(buildroot staging):全部目标库的头文件+.so,含 **rockiva / lvgl / sqlite3 / gstreamer / rkaiq / rga** 等 |
+| `gcc-aarch64-10.3.tar.gz` | ~700M,目录 `gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu/` | SDK 官方 aarch64 交叉编译器(gcc-arm-10.3,与固件同源),自带基础目标 libc |
+| `doorguard-sysroot.tar.gz` | ~300M,顶层即 `usr/` | 目标 sysroot(B4 buildroot):rockiva / lvgl / sqlite3 / gstreamer / rkaiq / rga 等全部头文件+.so,**与板上 .so 版本严格一致**(20260917 曾误打包为纯软链,已重导修复,命令见文末) |
 
-md5sum 见 `md5sums.txt`(先 `md5sum -c md5sums.txt` 再解压)。
+md5sum 见 `md5sums.txt`(先 `md5sum -c md5sums.txt` 再解压;重导 sysroot 后需更新)。
 
-## WSL 三步上手
+## WSL 上手
 
 ```bash
 md5sum -c md5sums.txt
 mkdir -p ~/dg-toolchain
-tar xzf gcc-aarch64-10.3.tar.gz  -C ~/dg-toolchain     # → ~/dg-toolchain/gcc-aarch64
-tar xzf doorguard-sysroot.tar.gz -C ~/dg-toolchain     # → ~/dg-toolchain/sysroot
+tar xzf gcc-aarch64-10.3.tar.gz       -C ~/dg-toolchain            # 解出 gcc-arm-10.3-...
+mkdir -p ~/dg-toolchain/sysroot
+tar xzf doorguard-sysroot.tar.gz      -C ~/dg-toolchain/sysroot    # 顶层即 usr/,别解到 dg-toolchain 根
 
 cd door-guard
 cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64.cmake
@@ -26,15 +27,16 @@ cmake --build build -j$(nproc)
 ```
 
 - 工具链根目录默认 `~/dg-toolchain`,环境变量 `DG_TC_ROOT` 可改
-- sysroot 就是这版固件(B4)的 staging,**与板上 .so 版本严格一致**,不存在"我这边编过、板上缺库"
+- sysroot 就绪后放到 `~/dg-toolchain/sysroot`(cmake 优先用它);没有时自动退回编译器自带 libc(仅基础程序)
 
 ## 部署到板子
 
 ```bash
-scp build/door-guard root@<板子IP>:/usr/bin/
+scp build/door-guard root@<板子IP>:/root/
+ssh root@<板子IP> /root/door-guard
 ```
 
-rootfs(B4)已包含二进制运行所需的全部 .so(rockiva/sqlite3/lvgl 等),推上去就能跑。
+rootfs(B4)已包含基础程序运行所需全部 .so;rockiva/sqlite3/lvgl 等要等 sysroot 重导后编进来的程序才涉及。
 
 ## 分工边界(重申)
 
@@ -44,6 +46,13 @@ rootfs(B4)已包含二进制运行所需的全部 .so(rockiva/sqlite3/lvgl 等),
 
 ## 注意
 
-- 目标 glibc 为 buildroot 的 2.38;WSL 编译时链接的是 sysroot 里的库,与板一致
-- 若后续 PROJECT_PLAN 升级了固件(加/改包),**sysroot 需要重新导出**(在 VM 上重打
-  `doorguard-sysroot.tar.gz`,命令:`tar czf doorguard-sysroot.tar.gz -C <SDK>/buildroot/output/rockchip_rk3576_kickpi_k7_doorGuard staging`)
+- 目标 glibc 为 buildroot 的 2.38;编译器自带 libc(glibc 2.32)编出的基础程序在板上可正常运行
+- **sysroot 重导(在 VM 上;原命令 `tar czf ... staging` 会把符号链接打进包、丢掉全部实体文件,必须归档目录本体)**:
+
+  ```bash
+  cd <SDK>/buildroot/output/rockchip_rk3576_kickpi_k7_doorGuard/host/aarch64-buildroot-linux-gnu
+  tar czf doorguard-sysroot.tar.gz sysroot
+  # 替换 deliverables/wsl-toolchain/ 里的坏包,并更新 md5sums.txt 后 push
+  ```
+
+- 若后续 PROJECT_PLAN 升级了固件(加/改包),sysroot 需按上面命令重新导出

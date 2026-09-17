@@ -2,7 +2,7 @@
 
 > 面向:在本项目上做开发的任何人(WSL 侧 / VM 侧)。
 > 上次更新:2026-09-17(固件 20260917-B4 产出后)。
-> 配套文档:`PROJECT_PLAN.md`(方案与里程碑)、`sdk-guide/README.md`(SDK 资源)、`deliverables/FLASH_GUIDE.md`(烧录)。
+> 配套文档:`PROJECT_PLAN.md`(方案与里程碑)、`sdk-guide/README.md`(SDK 资源)、`docs/tech/FLASHING.md`(烧录)、`docs/tech/TOOLCHAIN.md`(WSL 交叉编译)、`docs/DEVLOG.md`(开发日志)。
 
 ---
 
@@ -135,6 +135,8 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 ## 7. 开发工作流
 
 - **代码流转只经 git**:WSL(写代码/单测)→ push → Gitee(`ssh://git@192.168.2.150:222/olwhistle/k7_rk3576.git`)→ VM pull 交叉编译
+- **WSL 快速循环**(door-guard 应用):`source env/env.sh` → `dg-build` → `dg-deploy -r <板子IP>`;
+  工具链安装/更新 `dg-tc-install`;技术细节见 `docs/tech/TOOLCHAIN.md`
 - SDK(19GB)**只在 VM 存一份**;SDK 改动走分支+补丁(见 §6)
 - 板端部署:scp 可执行文件 / buildroot 包;固件迭代走"增量编译 → 只刷对应分区"
 - VM 大文件纪律:任何 >1GB 产物 md5 连读两次一致才算有效;传输用流式

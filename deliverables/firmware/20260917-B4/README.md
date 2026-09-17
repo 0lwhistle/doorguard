@@ -16,12 +16,18 @@ rknpu2、GStreamer+RTSP、SQLite、dropbear/chrony,无桌面无 X11)。
 
 | 文件 | 地址 | 说明 |
 |---|---|---|
-| MiniLoaderAll.bin | 0x0 | Loader |
-| parameter.txt | 0x800 | 分区表(工具里作为"参数"载入) |
+| MiniLoaderAll.bin | 0x0 | Loader(工具自行放置 IDB) |
+| parameter.txt | 0x0 | 分区表,**地址固定填 0x0**,工具特殊处理、交给设备重建 GPT |
 | uboot.img | 0x4000 | U-Boot |
 | misc.img | 0x6000 | 启动模式标记 |
 | boot.img | 0x8000 | 内核 6.1 + 设备树(FIT,含 5 寸屏 F050008M01 使能) |
 | rootfs.img | 0x78000 | Buildroot rootfs(可增长分区) |
+
+> ⚠️ **IDB/Loader 保留区**:eMMC 0x4000 扇区(8MB)之前是 BootROM/Loader 保留区,
+> 除 Loader 行与 parameter 行(均填 0x0,工具特殊处理)外,任何镜像不得写到该区域
+> (实测 RKDevTool 对 parameter 填 0x800 会拦截:"IDB 将会被 parameter.txt 破坏,
+> 不要写数据在 4824 扇区之前")。若 parameter 行在 0x0 仍触发该警告,改用
+> upgrade_tool `di -p` 方式,见 docs/tech/FLASHING.md。一键烧录 `update.img` 不涉及此问题。
 
 ## 本版已知事项
 
@@ -33,4 +39,4 @@ rknpu2、GStreamer+RTSP、SQLite、dropbear/chrony,无桌面无 X11)。
 
 ## 首次开机验收
 
-按仓库 `deliverables/FLASH_GUIDE.md` 的 B5 清单逐项检查。
+按仓库 `docs/tech/FLASHING.md` 的 B5 清单逐项检查。
