@@ -6,6 +6,7 @@
 
 ```
 ├── PROJECT_PLAN.md          项目方案与执行手册(唯一事实来源,每阶段更新)
+├── docs/DEV_HANDBOOK.md     软件开发手册(硬件事实/编译环境/踩坑索引)
 ├── NEXT_SESSION_PROMPT.md   下次会话开工提示词
 ├── sdk-guide/               官方 SDK 开发资源指南(必读) + 9 份精选官方文档 PDF
 ├── door-guard/              门禁应用源码(后续创建,WSL 开发 / VM 编译)
