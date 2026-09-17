@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-09-18 Phase 4 配置体系 + Phase 5 UI 框架/PC 模拟器完成
+
+### 完成内容
+- **Phase 4**:cJSON vendored(third_party/cjson,MIT);config/cfg 三层覆盖
+  (默认→device.json→DB device_config),类型错/越界 WARN 回退不崩;cfg_set 校验+
+  持久化;test_cfg 全绿;device.json 补齐任务要求业务键
+- **Phase 5**:LVGL 8.3 vendored 双端同源编译(自定义 lv_conf:CJK 字体+256KB 池);
+  theme token / i18n(_()+双 json+常驻表缓存)/ widgets(dg_btn/dg_popup×4/dg_kbd/
+  dg_list)/ page_mgr / 自定义中文字体(gen.sh 从 lang 字符集生成);
+  hal/display sim=SDL2 自写驱动 720×1280,hal/camera sim=stb_image 图片循环;
+  dg-build-pc 脚本;test_i18n(键覆盖+裸中文=0+字形覆盖)+ test_widgets(无头冒烟)
+- **验收达成**:模拟器 720×1280 稳定运行,截图 docs/img/sim-phase5-widgets.png;
+  dg-build 交叉零警告;dg-test 12/12(常规+tsan)全绿;裸色值=0、裸中文 label=0(自动化)
+
+### 踩坑记录
+- **LVGL lv_conf.h 模板整体包在 `#if 0`**:忘改 `#if 1` 导致全部配置不生效
+  (字体缺符号/定时器异常),pragma message 是线索
+- **include 守卫与 token 同名**:theme.h 的 `#define DG_BTN_H 96`(按钮高度)撞上
+  dg_btn.h 的守卫 DG_BTN_H,头文件被整体跳过 → 隐式声明 → 指针截断段错。
+  守卫一律加模块前缀(DG_WIDGETS_BTN_H)
+- **静态库符号环**:lv_conf LV_TICK_CUSTOM 回引 ui/port.c 而部分 lvgl 成员被 ui 引用,
+  单遍 ld 解析不了 → 应用链接用 `-Wl,--start-group/--end-group`
+- **UTF-8 三字节解码掩码**:第二字节是 0x3F 不是 0x1F(复制 2 字节分支的笔误)
+- tests 配置分支若在目标定义前 return,后面的库对测试不可见——分支必须放最后
+- 字体策略:内置 SIMSUN_16_CJK 是日文/繁体字集(简体几乎全缺),必须自生成;
+  宿主已有 node(lv_font_conv),字体 .c 入库使测试机免 node
+
+### 未完成 / 下一步
+- Phase 6 三页面 + 验证状态机(spec-auth-business §5 边界 ≥15 条用例)
+
+---
+
 ## 2026-09-18 Phase 2 proto 层 + Phase 3 storage 完成
 
 ### 完成内容
