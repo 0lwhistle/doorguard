@@ -57,6 +57,17 @@ add_library(dg_proto STATIC
 target_include_directories(dg_proto PUBLIC proto)
 target_link_libraries(dg_proto PUBLIC dg_event_bus)
 
+# cjson:第三方 JSON 解析(MIT,vendored 于 third_party/cjson)
+add_library(cjson STATIC third_party/cjson/cJSON.c)
+target_include_directories(cjson PUBLIC third_party/cjson)
+# 屏蔽第三方源码的告警(不因 vendored 代码破"零警告"纪律,不修改其内容)
+target_compile_options(cjson PRIVATE -w)
+
+# config:配置体系(默认→device.json→DB device_config)
+add_library(dg_config STATIC config/cfg.c)
+target_include_directories(dg_config PUBLIC config)
+target_link_libraries(dg_config PUBLIC dg_storage cjson)
+
 # storage:SQLite 存储加加密(storage.h API;sysroot 实测有 sqlite3/openssl3)
 add_library(dg_storage STATIC
     hal/storage/storage.c
@@ -86,7 +97,7 @@ link_directories(
 
 add_executable(door-guard app/main.c)
 # 组件链入应用:装配顺序在 app/main.c(architecture.md §1,main.c 头注同步维护)
-target_link_libraries(door-guard PRIVATE dg_event_bus dg_tasker dg_holder dg_proto dg_storage)
+target_link_libraries(door-guard PRIVATE dg_event_bus dg_tasker dg_holder dg_proto dg_storage dg_config)
 # rockiva     # 官方人脸库(B7 阶段启用)
 # sqlite3     # 存储(启用 storage HAL 时)
 # gpiod       # 门控 GPIO
