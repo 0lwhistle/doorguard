@@ -5,6 +5,37 @@
 
 ---
 
+## 2026-09-18 Phase 10 收尾:总验收自测 + 文档
+
+### 总验收清单自测(任务清单§4)
+
+1. ✅ dg-build / dg-build-pc 零警告;dg-test 15 用例全绿(常规+tsan,428 断言)
+2. ✅ 模拟器:三页面+菜单四子页渲染与交互验证(截图 docs/img/);中英切换机制
+   已实现(i18n_set_language → 全页重建),待板上触摸可用后人工复核
+3. ⚠️ 板上:主页可显示(DRM,截图 board-home-phase6.png)、门控/触摸
+   受硬件确认阻塞(见下);数据库落盘可查(板上 storage ready 日志)
+4. ✅/⚠️ web:登录/日志/设备信息/NTP/OTA 全功能验收通过(tests/web/web_test.sh
+   14 项,宿主);板上实测待板恢复;mDNS WSL2 NAT 受限(hosts 兜底)
+5. ✅ OTA:上传→sha256 校验→暂存闭环(脚本 dg-ota-upload);真刷待分区方案
+   (docs/tech/OTA_PLAN.md 已写方案)
+6. ✅ 各模块 README 齐(proto 三组件/config/storage/access/ui/gpio/uart);
+   DEVLOG 条目齐;待硬件确认清单齐;全部工作已 push
+
+### 板失联事故处理记录
+
+- 上午 gpio 对拍未知引脚致板上挂起,需物理断电恢复(操作前已评估并记录风险,
+  但低估了方向写入影响面——后续物理操作一律先查 pinctrl 复用)
+- 板恢复后待办:重推 door-guard → gpio 对拍(确认引脚)→ web/mDNS 板上实测
+
+### 移交说明
+
+- 全部 10 个 Phase 的实现/测试/文档已入库并推送;板上联调仅剩"硬件确认"
+  相关项(引脚/协议/固件),代码侧无阻塞
+- 常用入口:door-guard/README.md(模块索引)/ modules/access/README.md(走查步骤)/
+  docs/tech/OTA_PLAN.md(A/B 方案)
+
+---
+
 ## 2026-09-18 Phase 9 网络功能完成
 
 ### 完成内容

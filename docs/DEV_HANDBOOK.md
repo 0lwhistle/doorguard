@@ -84,6 +84,18 @@ cat /proc/bus/input/devices | grep -iA3 goodix  # 触摸
 
 ---
 
+## 5.5 WSL 宿主开发依赖(闲时任务新增,2026-09-18)
+
+| 依赖 | 用途 | 安装 |
+|---|---|---|
+| libsdl2-dev | PC 模拟器显示(已有) | apt |
+| libsqlite3-dev | 宿主跑 storage 单测 | apt(本次安装) |
+| libssl-dev | 宿主跑加密单测(已有) | apt |
+| sqlite3 CLI | schema/数据校验 | apt(本次安装) |
+| xdotool | 模拟器交互走查(合成点击) | apt(本次安装;LVGL 30ms 采样会丢快点击,分步操作) |
+| node/npx + lv_font_conv | 重新生成中文字体(门禁标签变更后跑 ui/font/gen.sh;生成产物已入库,日常无需 node) | nvm 已有 |
+| 字体源 | /usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf(CJK)+ DejaVuSans(Latin);**Droid 无 ASCII 字形,必须双字体** | 系统自带 |
+
 ## 6. 编译环境(编译 VM)
 
 | 项 | 值 |
@@ -158,6 +170,9 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 |---|---|---|
 | SWT6621S WiFi 驱动编译失败(`skw_platform_data.h` 未拷入内核) | 未修 | 厂家脚本加"先拷头文件"步骤,分支补丁;下一版固件恢复 WiFi |
 | recovery 镜像未构建(独立 buildroot 全量,耗时 1h+) | 延后 | 空闲时段补;不阻塞功能 |
-| LVGL demo 自启占用屏幕 | 未处理 | door-guard 应用就位后替换自启 |
+| LVGL demo 自启占用屏幕(/etc/init.d/S00-lv_demo) | **已禁用**(板上运行 door-guard 前提;mv 为 disabled-S00-lv_demo) | B10 固件收编为 door-guard 自启 |
 | ISP 节点定位 / rkaiq 3A 起流 | 进行中(B6) | 完成 §5 映射后抓 NV12 |
 | ROCKIVA 上板验证 | 待 B7 | 库+模型已在 rootfs |
+| 触摸输入:GT9xx 无输入节点(B4 FTS probe fail) | 待 B5 固件 | door-guard 板上 UI 只显示无触摸 |
+| 门控 GPIO:继电器引脚未确认(勿在未知引脚写 direction,已致板挂起一次) | 待硬件确认 | 引脚确认后 gpio_hal 对拍 |
+| /dev/fb0(rockchipdrmfb)mmap EBUSY | 已绕行 | 显示走 DRM dumb-buffer(lv_drivers) |
