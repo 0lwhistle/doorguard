@@ -5,7 +5,7 @@
 #include "events.h"
 #include "event_bus.h"
 #include "i18n.h"
-#include "page_mgr.h"
+#include "navigator/navigator.h"
 #include "theme.h"
 #include "widgets/dg_btn.h"
 
@@ -20,22 +20,22 @@ static void on_back(lv_event_t *e)
 static void on_users(lv_event_t *e)
 {
     (void)e;
-    page_mgr_open("users");
+    navigator_push("users");
 }
 static void on_device(lv_event_t *e)
 {
     (void)e;
-    page_mgr_open("device");
+    navigator_push("device");
 }
 static void on_access_set(lv_event_t *e)
 {
     (void)e;
-    page_mgr_open("access_set");
+    navigator_push("access_set");
 }
 static void on_logs(lv_event_t *e)
 {
     (void)e;
-    page_mgr_open("logs");
+    navigator_push("logs");
 }
 
 void page_menu_create(lv_obj_t *parent)
@@ -89,10 +89,10 @@ void page_menu_destroy(void)
 
 void page_menu_register(void)
 {
-    static const dg_page_ops_t ops = {
+    static const navigator_page_t ops = {
         .name = "menu",
         .create = page_menu_create,
         .destroy = page_menu_destroy,
     };
-    page_mgr_register(&ops);
+    navigator_register(&ops);
 }

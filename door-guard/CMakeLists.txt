@@ -98,15 +98,16 @@ add_library(dg_ui STATIC
     ui/ui.c
     ui/port.c
     ui/i18n.c
-    ui/page_mgr.c
-    ui/page_home.c
+    ui/navigator/navigator.c
+    ui/bridge/bridge.c
+    ui/pages/page_home.c
+    ui/pages/page_standby.c
+    ui/pages/page_menu.c
+    ui/pages/page_users.c
+    ui/pages/page_device.c
+    ui/pages/page_access_set.c
+    ui/pages/page_logs.c
     ui/ui_events.c
-    ui/page_standby.c
-    ui/page_menu.c
-    ui/page_users.c
-    ui/page_device.c
-    ui/page_access_set.c
-    ui/page_logs.c
     ui/font/dg_font_cn_16.c
     ${DG_WIDGET_SRCS}
 )

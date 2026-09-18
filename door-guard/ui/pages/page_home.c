@@ -12,7 +12,7 @@
 #include "event_bus.h"
 #include "events.h"
 #include "i18n.h"
-#include "page_mgr.h"
+#include "navigator/navigator.h"
 #include "theme.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_popup.h"
@@ -154,7 +154,7 @@ static void render_evt(const ui_evt_t *evt)
     case UI_EVT_HINT: {
         const ev_hint_t *h = &evt->hint;
         if (h->method == -5) {
-            page_mgr_open(page_mgr_current());   /* 整页重建(语言刷新) */
+            navigator_reload();              /* 整页重建(语言刷新) */
             break;
         }
         if (h->method == -3) {
@@ -187,6 +187,8 @@ static void render_evt(const ui_evt_t *evt)
         }
         break;
     }
+    case UI_EVT_GOTO_PAGE:
+        break;                  /* 切页由 ui 层泵直驱 navigator_switch */
     }
 }
 
@@ -278,11 +280,11 @@ void page_home_destroy(void)
 
 void page_home_register(void)
 {
-    static const dg_page_ops_t ops = {
+    static const navigator_page_t ops = {
         .name = "home",
         .create = page_home_create,
         .destroy = page_home_destroy,
         .on_evt = render_evt,
     };
-    page_mgr_register(&ops);
+    navigator_register(&ops);
 }

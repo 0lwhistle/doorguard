@@ -9,7 +9,7 @@
 #include "events.h"
 #include "event_bus.h"
 #include "i18n.h"
-#include "page_mgr.h"
+#include "navigator/navigator.h"
 #include "storage.h"
 #include "theme.h"
 #include "widgets/dg_btn.h"
@@ -201,7 +201,7 @@ static void refresh_list(void)
 static void on_back_page(lv_event_t *e)
 {
     (void)e;
-    page_mgr_back();
+    navigator_back();
 }
 
 void page_users_create(lv_obj_t *parent)
@@ -244,10 +244,10 @@ void page_users_destroy(void)
 
 void page_users_register(void)
 {
-    static const dg_page_ops_t ops = {
+    static const navigator_page_t ops = {
         .name = "users",
         .create = page_users_create,
         .destroy = page_users_destroy,
     };
-    page_mgr_register(&ops);
+    navigator_register(&ops);
 }

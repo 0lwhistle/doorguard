@@ -4,7 +4,7 @@
  */
 #include "dg_log.h"
 #include "i18n.h"
-#include "page_mgr.h"
+#include "navigator/navigator.h"
 #include "storage.h"
 #include "theme.h"
 #include "widgets/dg_btn.h"
@@ -144,7 +144,7 @@ static void on_next(lv_event_t *e)
 static void on_back(lv_event_t *e)
 {
     (void)e;
-    page_mgr_back();
+    navigator_back();
 }
 
 void page_logs_create(lv_obj_t *parent)
@@ -196,10 +196,10 @@ void page_logs_destroy(void)
 
 void page_logs_register(void)
 {
-    static const dg_page_ops_t ops = {
+    static const navigator_page_t ops = {
         .name = "logs",
         .create = page_logs_create,
         .destroy = page_logs_destroy,
     };
-    page_mgr_register(&ops);
+    navigator_register(&ops);
 }

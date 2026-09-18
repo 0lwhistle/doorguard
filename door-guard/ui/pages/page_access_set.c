@@ -5,7 +5,7 @@
 #include "cfg.h"
 #include "dg_log.h"
 #include "i18n.h"
-#include "page_mgr.h"
+#include "navigator/navigator.h"
 #include "theme.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_popup.h"
@@ -15,7 +15,7 @@
 static void on_back(lv_event_t *e)
 {
     (void)e;
-    page_mgr_back();
+    navigator_back();
 }
 
 static void refresh_labels(void);
@@ -127,10 +127,10 @@ void page_access_set_destroy(void)
 
 void page_access_set_register(void)
 {
-    static const dg_page_ops_t ops = {
+    static const navigator_page_t ops = {
         .name = "access_set",
         .create = page_access_set_create,
         .destroy = page_access_set_destroy,
     };
-    page_mgr_register(&ops);
+    navigator_register(&ops);
 }

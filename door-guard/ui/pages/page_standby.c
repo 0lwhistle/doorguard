@@ -5,7 +5,7 @@
 #include "dg_log.h"
 #include "event_bus.h"
 #include "events.h"
-#include "page_mgr.h"
+#include "navigator/navigator.h"
 #include "theme.h"
 
 #include <stdio.h>
@@ -71,10 +71,10 @@ void page_standby_destroy(void)
 
 void page_standby_register(void)
 {
-    static const dg_page_ops_t ops = {
+    static const navigator_page_t ops = {
         .name = "standby",
         .create = page_standby_create,
         .destroy = page_standby_destroy,
     };
-    page_mgr_register(&ops);
+    navigator_register(&ops);
 }

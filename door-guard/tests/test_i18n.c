@@ -128,6 +128,12 @@ static void scan_dir(const char *dir)
             continue;
         char full[512];
         snprintf(full, sizeof(full), "%s/%s", dir, ent->d_name);
+        if (ent->d_type == DT_DIR) {
+            if (!strcmp(ent->d_name, "font"))
+                continue;                     /* 生成的字库:中文字形非文案 */
+            scan_dir(full);                   /* 递归子目录(pages/ 等) */
+            continue;
+        }
         if (strstr(ent->d_name, ".c"))
             scan_file(full);
     }
