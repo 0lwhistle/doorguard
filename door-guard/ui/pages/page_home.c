@@ -1,47 +1,32 @@
 /*
- * page_home.c — 主页(spec-ui §3.1):推流层 + 脸框 overlay + 菜单/验证按钮
+ * page_home.c — 主页视图(spec-ui §3.1):推流画布 + 脸框 + 提示条 + 按钮
  *
- * Phase 7 后本页只做渲染与事件转发:
- *   按钮/触摸 → EV_UI_BTN / EV_UI_TOUCH(请求发服务)
- *   EV_VISION_FACE_BOX/LOST → 脸框渲染(视觉事件直订,纯绘制数据)
- *   EV_AUTH_RESULT → 结果弹窗(文案取自事件字段)
- *   EV_UI_HINT / EV_UI_GOTO_PAGE → 提示条/切页(服务决策)
- * 业务决策在 auth_fsm(access_service 持有)。
+ * 分层(pages 层,纯视图):建控件、33ms 刷画布、按钮点击转 bridge 动作;
+ * 渲染内容事件经 setter 注入(page_home_set_*),业务在 presenter_home。
  */
+#include "page_home.h"
+#include "bridge/bridge.h"
 #include "dg_log.h"
-#include "event_bus.h"
-#include "events.h"
-#include "i18n.h"
-#include "navigator/navigator.h"
 #include "theme.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_popup.h"
 
 #include "hal/camera/camera.h"
-#include "ui_events.h"
 
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 
 static lv_obj_t *s_canvas = NULL;
 static lv_color_t *s_canvas_buf = NULL;
 static lv_obj_t *s_facebox = NULL;
-static lv_coord_t s_box_last[4];
 static lv_obj_t *s_hint = NULL;
 static lv_timer_t *s_pump_timer = NULL;
-static event_subscription_t *s_subs[6];
-static int s_sub_cnt = 0;
-static ev_auth_result_t s_last_result;       /* 最近认证结果(弹窗文案源) */
-
-static void render_evt(const ui_evt_t *evt);
 
 /* ---- 相机帧 → 画布(33ms 轮询,30fps) ---- */
 
 static void canvas_timer_cb(lv_timer_t *t)
 {
     (void)t;
-    /* 事件泵已上移 ui.c(页面无关);本定时器只负责 canvas 刷帧 */
     const camera_frame_t *f = camera_latest();
     if (!f || !s_canvas)
         return;
@@ -60,144 +45,12 @@ static void canvas_timer_cb(lv_timer_t *t)
     }
 }
 
-/* ---- 视觉脸框(纯绘制) ---- */
-
-/* 总线回调(LVGL 禁区):一律入队,LVGL 线程泵出渲染 */
-
-static int on_face_box(const event_t *e, void *ud)
-{
-    (void)ud;
-    ui_evt_t evt;
-    memset(&evt, 0, sizeof(evt));
-    evt.kind = UI_EVT_FACE_BOX;
-    evt.box = *(const ev_face_box_t *)e->data;
-    ui_evt_push(&evt);
-    return 0;
-}
-
-static int on_face_lost(const event_t *e, void *ud)
-{
-    (void)e;
-    (void)ud;
-    ui_evt_t evt;
-    memset(&evt, 0, sizeof(evt));
-    evt.kind = UI_EVT_FACE_LOST;
-    ui_evt_push(&evt);
-    return 0;
-}
-
-static int on_auth_result(const event_t *e, void *ud)
-{
-    (void)ud;
-    ui_evt_t evt;
-    memset(&evt, 0, sizeof(evt));
-    evt.kind = UI_EVT_AUTH_RESULT;
-    evt.result = *(const ev_auth_result_t *)e->data;
-    ui_evt_push(&evt);
-    return 0;
-}
-
-static int on_hint(const event_t *e, void *ud)
-{
-    (void)ud;
-    ui_evt_t evt;
-    memset(&evt, 0, sizeof(evt));
-    evt.kind = UI_EVT_HINT;
-    evt.hint = *(const ev_hint_t *)e->data;
-    ui_evt_push(&evt);
-    return 0;
-}
-
-static int on_refresh_evt(const event_t *e, void *ud)
-{
-    (void)e;
-    (void)ud;
-    /* 语言切换页重建由刷新事件在 LVGL 定时器内执行更简单:走队列 */
-    ui_evt_t evt;
-    memset(&evt, 0, sizeof(evt));
-    evt.kind = UI_EVT_HINT;
-    evt.hint.method = -5;                   /* -5 = 刷新页 */
-    ui_evt_push(&evt);
-    return 0;
-}
-
-/* ---- LVGL 线程:队列泵出渲染 ---- */
-
-static void render_evt(const ui_evt_t *evt)
-{
-    switch (evt->kind) {
-    case UI_EVT_FACE_BOX: {
-        const ev_face_box_t *b = &evt->box;
-        if (!s_facebox)
-            break;
-        s_box_last[0] = (lv_coord_t)b->x;
-        s_box_last[1] = (lv_coord_t)b->y;
-        s_box_last[2] = (lv_coord_t)b->w;
-        s_box_last[3] = (lv_coord_t)b->h;
-        lv_color_t c = (b->state == DG_BOX_MATCHED)  ? DG_COL_OK()
-                       : (b->state == DG_BOX_FAILED) ? DG_COL_ERR()
-                                                     : DG_COL_WARN();
-        lv_obj_clear_flag(s_facebox, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_pos(s_facebox, s_box_last[0], s_box_last[1]);
-        lv_obj_set_size(s_facebox, s_box_last[2], s_box_last[3]);
-        lv_obj_set_style_border_color(s_facebox, c, 0);
-        lv_obj_invalidate(s_facebox);
-        break;
-    }
-    case UI_EVT_FACE_LOST:
-        if (s_facebox)
-            lv_obj_add_flag(s_facebox, LV_OBJ_FLAG_HIDDEN);
-        break;
-    case UI_EVT_AUTH_RESULT:
-        s_last_result = evt->result;
-        break;
-    case UI_EVT_HINT: {
-        const ev_hint_t *h = &evt->hint;
-        if (h->method == -5) {
-            navigator_reload();              /* 整页重建(语言刷新) */
-            break;
-        }
-        if (h->method == -3) {
-            char text[DG_UID_LEN + DG_NAME_LEN + 8];
-            snprintf(text, sizeof(text), "%s %s", _("验证成功"),
-                     s_last_result.has_user ? s_last_result.user_name : "");
-            dg_popup_success(text, 3000, NULL, NULL);
-            break;
-        }
-        if (h->method == -4) {
-            dg_popup_fail(_("验证失败"), 3000, NULL, NULL);
-            break;
-        }
-        if (!s_hint)
-            break;
-        const char *text = NULL;
-        if (h->method == -1)
-            text = _("管理员认证");
-        else if (h->method == DG_METHOD_FACE_11)
-            text = _("请正对摄像头");
-        else if (h->method == DG_METHOD_FINGER)
-            text = _("请按指纹");
-        else if (h->method == DG_METHOD_PWD)
-            text = _("请输入密码");
-        else if (h->method == DG_METHOD_IC)
-            text = _("请刷卡");
-        if (text) {
-            lv_label_set_text(s_hint, text);
-            lv_obj_clear_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
-        }
-        break;
-    }
-    case UI_EVT_GOTO_PAGE:
-        break;                  /* 切页由 ui 层泵直驱 navigator_switch */
-    }
-}
-
-/* ---- UI 输入 → 服务请求 ---- */
+/* ---- 按钮 → bridge 动作 ---- */
 
 static void click_pub(const ev_ui_btn_t *btn)
 {
     dg_popup_close();
-    EVENT_BUS_PUBLISH(EV_UI_BTN, btn);
+    bridge_btn(btn);
 }
 
 static void on_menu_btn(lv_event_t *e)
@@ -219,7 +72,6 @@ static void on_verify_btn(lv_event_t *e)
 void page_home_create(lv_obj_t *parent)
 {
     DG_LOGI("[HOME]", "page create");
-    memset(&s_last_result, 0, sizeof(s_last_result));
 
     s_canvas = lv_canvas_create(parent);
 
@@ -247,24 +99,12 @@ void page_home_create(lv_obj_t *parent)
     lv_obj_align(verify_btn, LV_ALIGN_BOTTOM_RIGHT, -DG_PAD, -DG_PAD);
     lv_obj_add_event_cb(verify_btn, on_verify_btn, LV_EVENT_CLICKED, NULL);
 
-    s_sub_cnt = 0;
-    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_FACE_BOX, on_face_box, NULL);
-    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_FACE_LOST, on_face_lost, NULL);
-    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_AUTH_RESULT, on_auth_result, NULL);
-    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_HINT, on_hint, NULL);
-    s_subs[s_sub_cnt++] = event_bus_subscribe(EVENT_UI_REFRESH_REQUEST, on_refresh_evt, NULL);
-
     s_pump_timer = lv_timer_create(canvas_timer_cb, 33, NULL); /* 30fps:与传感器帧率对齐 */
 }
 
 void page_home_destroy(void)
 {
     DG_LOGI("[HOME]", "page destroy");
-    for (int i = 0; i < s_sub_cnt; i++) {
-        event_bus_unsubscribe(s_subs[i]);
-        s_subs[i] = NULL;
-    }
-    s_sub_cnt = 0;
     if (s_pump_timer) {
         lv_timer_del(s_pump_timer);
         s_pump_timer = NULL;
@@ -278,13 +118,36 @@ void page_home_destroy(void)
     s_hint = NULL;
 }
 
-void page_home_register(void)
+/* ---- setter(presenter 渲染入口) ---- */
+
+void page_home_set_facebox(int state, int32_t x, int32_t y, int32_t w, int32_t h)
 {
-    static const navigator_page_t ops = {
-        .name = "home",
-        .create = page_home_create,
-        .destroy = page_home_destroy,
-        .on_evt = render_evt,
-    };
-    navigator_register(&ops);
+    if (!s_facebox)
+        return;
+    lv_color_t c = (state == DG_BOX_MATCHED)  ? DG_COL_OK()
+                   : (state == DG_BOX_FAILED) ? DG_COL_ERR()
+                                              : DG_COL_WARN();
+    lv_obj_clear_flag(s_facebox, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(s_facebox, (lv_coord_t)x, (lv_coord_t)y);
+    lv_obj_set_size(s_facebox, (lv_coord_t)w, (lv_coord_t)h);
+    lv_obj_set_style_border_color(s_facebox, c, 0);
+    lv_obj_invalidate(s_facebox);
+}
+
+void page_home_clear_facebox(void)
+{
+    if (s_facebox)
+        lv_obj_add_flag(s_facebox, LV_OBJ_FLAG_HIDDEN);
+}
+
+void page_home_set_hint(const char *text)
+{
+    if (!s_hint)
+        return;
+    if (!text) {
+        lv_obj_add_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_label_set_text(s_hint, text);
+    lv_obj_clear_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
 }

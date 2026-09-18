@@ -15,7 +15,6 @@
 
 static int on_face_box(const event_t *e, void *ud)
 {
-    (void)e;
     (void)ud;
     ui_evt_t evt;
     memset(&evt, 0, sizeof(evt));
@@ -27,6 +26,7 @@ static int on_face_box(const event_t *e, void *ud)
 
 static int on_face_lost(const event_t *e, void *ud)
 {
+    (void)e;
     (void)ud;
     ui_evt_t evt;
     memset(&evt, 0, sizeof(evt));

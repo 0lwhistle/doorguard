@@ -193,13 +193,3 @@ void page_logs_destroy(void)
     s_title = NULL;
     DG_LOGI("[LOGS]", "page destroy");
 }
-
-void page_logs_register(void)
-{
-    static const navigator_page_t ops = {
-        .name = "logs",
-        .create = page_logs_create,
-        .destroy = page_logs_destroy,
-    };
-    navigator_register(&ops);
-}

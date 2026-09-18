@@ -241,13 +241,3 @@ void page_users_destroy(void)
     s_title = NULL;
     DG_LOGI("[USERS]", "page destroy");
 }
-
-void page_users_register(void)
-{
-    static const navigator_page_t ops = {
-        .name = "users",
-        .create = page_users_create,
-        .destroy = page_users_destroy,
-    };
-    navigator_register(&ops);
-}

@@ -5,7 +5,7 @@
 #include "dg_log.h"
 #include "event_bus.h"
 #include "events.h"
-#include "navigator/navigator.h"
+#include "bridge/bridge.h"
 #include "theme.h"
 
 #include <stdio.h>
@@ -18,8 +18,7 @@ static void on_touch(lv_event_t *e)
 {
     (void)e;
     DG_LOGI("[STANDBY]", "touch wake");
-    /* 触摸唤醒由 access 服务统一决策(EV_UI_GOTO_PAGE 回 UI) */
-    EVENT_BUS_PUBLISH_EMPTY(EV_UI_TOUCH);
+    bridge_touch();      /* 触摸唤醒由 access 服务统一决策(EV_UI_GOTO_PAGE 回 UI) */
 }
 
 static void clock_timer_cb(lv_timer_t *t)
@@ -69,12 +68,3 @@ void page_standby_destroy(void)
     DG_LOGI("[STANDBY]", "page destroy");
 }
 
-void page_standby_register(void)
-{
-    static const navigator_page_t ops = {
-        .name = "standby",
-        .create = page_standby_create,
-        .destroy = page_standby_destroy,
-    };
-    navigator_register(&ops);
-}

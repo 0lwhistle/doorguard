@@ -8,7 +8,7 @@
  *           实测纯压栈会撑爆页面栈),否则替换栈顶
  *   back    弹栈,重建栈顶
  *   reload  重建当前页(语言热切换)
- * 被"盖住"的页面对象即销毁(door-guard 单屏小内存策略),on_exit 在销毁前、
+ * 被「盖住」的页面对象即销毁(door-guard 单屏小内存策略),on_exit 在销毁前、
  * on_enter 在创建后回调(presenter 在此启停自己的定时器、拉数据)。
  */
 #ifndef DG_NAVIGATOR_H

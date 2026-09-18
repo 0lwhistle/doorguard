@@ -124,13 +124,3 @@ void page_access_set_destroy(void)
     s_labels[0] = s_labels[1] = s_labels[2] = s_labels[3] = NULL;
     DG_LOGI("[ACCESS_SET]", "page destroy");
 }
-
-void page_access_set_register(void)
-{
-    static const navigator_page_t ops = {
-        .name = "access_set",
-        .create = page_access_set_create,
-        .destroy = page_access_set_destroy,
-    };
-    navigator_register(&ops);
-}

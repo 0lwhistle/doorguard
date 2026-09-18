@@ -106,13 +106,3 @@ void page_device_destroy(void)
 {
     DG_LOGI("[DEVICE]", "page destroy");
 }
-
-void page_device_register(void)
-{
-    static const navigator_page_t ops = {
-        .name = "device",
-        .create = page_device_create,
-        .destroy = page_device_destroy,
-    };
-    navigator_register(&ops);
-}

@@ -22,13 +22,13 @@
 
 #include <string.h>
 
-extern void page_home_register(void);
-extern void page_standby_register(void);
-extern void page_menu_register(void);
-extern void page_users_register(void);
-extern void page_device_register(void);
-extern void page_access_set_register(void);
-extern void page_logs_register(void);
+extern void presenter_home_register(void);
+extern void presenter_standby_register(void);
+extern void presenter_menu_register(void);
+extern void presenter_users_register(void);
+extern void presenter_device_register(void);
+extern void presenter_access_set_register(void);
+extern void presenter_logs_register(void);
 
 static lv_obj_t *s_page_root = NULL;
 
@@ -66,13 +66,13 @@ int ui_init(const dg_ui_args_t *args)
     lv_obj_set_size(s_page_root, DG_SCREEN_W, DG_SCREEN_H);
     navigator_init(s_page_root);
 
-    page_home_register();
-    page_standby_register();
-    page_menu_register();
-    page_users_register();
-    page_device_register();
-    page_access_set_register();
-    page_logs_register();
+    presenter_home_register();
+    presenter_standby_register();
+    presenter_menu_register();
+    presenter_users_register();
+    presenter_device_register();
+    presenter_access_set_register();
+    presenter_logs_register();
 
     bridge_init();
     navigator_push("home");

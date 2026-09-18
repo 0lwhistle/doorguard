@@ -1,61 +1,41 @@
-# ui/ — LVGL UI 子系统(蓝白主题,双端同源)
+# ui/ — LVGL UI 子系统(MVP 分层,学自 ESP32 ovs 工程)
 
 > 布局/组件规范见 `.agents/skills/door-guard-dev/references/spec-ui.md`(唯一权威)。
 
-## 结构
+## 分层与事件流向
 
 ```
-ui/
-├── theme.h        色值/字号/间距 token(spec-ui §1;全项目唯一色值来源)
-├── i18n.h/.c      _() 翻译 + 语言表缓存 + 切换事件
-├── lang/          zh-CN.json en-US.json(键=原文,值=译文)
-├── font/
-│   ├── gen.sh     字体生成:收集 lang/*.json 全部字符 → lv_font_conv → dg_font_cn_16.c
-│   └── dg_font_cn_16.c   生成产物(入库,测试机无需 node)
-├── port.c         LVGL 时基(LV_TICK_CUSTOM,dg_ui_tick_ms)
-├── page_mgr.c     栈式页面管理(整建整删;栈深 4)
-├── page_demo.c    组件冒烟页(Phase 6 由真实页面替代)
-├── ui.c           引导:lv_init → display → i18n → 页面注册/打开
-└── widgets/       dg_btn(图标+文本)/ dg_popup(success/fail/input/choice)
-                    dg_kbd(数字键盘)/ dg_list
+入:后端 event_bus → bridge/(入 ui_events 队列)→ ui.c 全局泵(LVGL 线程,33ms)
+      ├─ UI_EVT_GOTO_PAGE → navigator_switch(切页)
+      └─ 其余 → navigator_dispatch_evt → 当前页 presenter.on_evt → pages setter 渲染
+出:pages 点击 → bridge_btn/bridge_touch → event_bus → 服务层(FSM 决策后回流切页)
 ```
 
-## 硬性纪律
+| 目录/文件 | 职责 | 禁止 |
+|---|---|---|
+| `ui.c` | 引导装配(theme→i18n→navigator→presenters→bridge→泵→首页)+ 全局事件泵 | 业务逻辑 |
+| `navigator/` | 页面注册表 + 栈 + on_enter/on_exit/on_evt 生命周期 + reload(语言热切) | 业务 |
+| `bridge/` | 唯一后端入口:事件入站编组、动作出站、_( ) 文案;只有本层 include 后端头 | 总线线程调 LVGL |
+| `presenters/` | 每页一个 presenter:注册页面、on_evt 渲染内容、弹窗文案、导航决策 | — |
+| `pages/` | 纯视图:建控件 + setter;点击转 bridge 动作 | include 后端头 |
+| `widgets/` | 通用控件 dg_btn/dg_popup/dg_kbd/dg_list | 页面私有逻辑 |
+| `theme.h` | 色值/字号/间距 token(spec-ui §1;全项目唯一色值来源) | — |
+| `i18n.h/.c` + `lang/` | _() 翻译;字体经 font/gen.sh 生成(键=原文) | — |
+| `port.c` | LVGL 时基(LV_TICK_CUSTOM) | — |
 
-- 色值只用 theme.h token,裸 0xRRGGBB=0(自动检查进 test_i18n)
-- 所有界面文本一律 `_()`,裸中文 label=0(自动检查)
-- UI 层不做业务决策:动作发事件(EV_*),结果经事件回 UI 渲染
-- 新增/修改标签后:改 lang/*.json → 跑 `ui/font/gen.sh` 重新生成字体 →
-  test_i18n 会强制校验双语言覆盖与字形覆盖
+## 铁律(全部实测教训)
 
-## 双端
+1. **总线线程禁止直接调 LVGL**——只经 bridge 入队(ui_events),泵出渲染;
+   违者堆损坏崩溃(Phase 9 实录)。
+2. **事件泵必须活在页面生命周期之外**(ui.c)——泵长在页面里,页面一销毁
+   泵停,唤醒事件无人处理,屏幕卡死待机(2026-09-18 实录)。
+3. **home↔standby 走 navigator_switch(栈内回退)**——纯压栈反复交替会撑爆
+   页面栈;menu→users 这类前进用 navigator_push。
+4. **ui/ 下注释不得用 ASCII 引号包中文**(`"xx"` 会被 i18n 检查判成字符串
+   字面量),引用词用「xx」;用户可见文案一律 `_()`;页面日志用英文。
+5. 语言热切换:`EV_UI_HINT(method=-5)` → presenter 调 `navigator_reload()`。
 
-- **PC 模拟器**:`dg-build-pc`(DG_SIM=ON,SDL2 720×1280)——调 UI 一律先过模拟器;
-  `dg-build-pc -r [图片目录]` 直接跑,sim/media 为默认素材
-- **板上**:同一份 ui/ 代码,显示走 DRM(Phase 8);LVGL 8.3 源码双端同源编译
-  (third_party/lvgl + 自定义 lv_conf:CJK 字体、256KB 内存池)
+## 已知例外
 
-## 使用示例
-
-```c
-/* 页面:注册 + 创建(对象树建在 parent 上,离页整删) */
-static void page_x_create(lv_obj_t *parent) {
-    lv_obj_t *btn = dg_btn_create(parent, LV_SYMBOL_SETTINGS, _("菜单"));
-    lv_obj_add_event_cb(btn, on_menu, LV_EVENT_CLICKED, NULL);
-    dg_popup_success(_("验证成功"), 3000, NULL, NULL);
-}
-static const dg_page_ops_t ops = { .name = "x", .create = page_x_create,
-                                   .destroy = page_x_destroy };
-page_mgr_register(&ops);
-page_mgr_open("x");
-
-/* 语言切换(立即生效,各页订阅 EVENT_UI_REFRESH_REQUEST 重刷) */
-i18n_set_language("en-US");
-```
-
-## 测试
-
-- `tests/test_i18n.c`:扫描源码 `_()` 键 → 双 json 覆盖 + 裸中文 label=0 +
-  字体字形全覆盖(**此测试不过 Phase 永不通过**)
-- `tests/test_widgets.c`:无头 LVGL 下四类 widget 创建/交互/弹窗生命周期
-- 模拟器截图:docs/img/sim-phase5-widgets.png
+- menu 四入口/子页返回键:纯 UI 导航,视图直调 navigator_push/back
+  (无后端语义);业务返回(DG_BTN_BACK)仍走 bridge。

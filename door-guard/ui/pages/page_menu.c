@@ -86,13 +86,3 @@ void page_menu_destroy(void)
 {
     DG_LOGI("[MENU]", "page destroy");
 }
-
-void page_menu_register(void)
-{
-    static const navigator_page_t ops = {
-        .name = "menu",
-        .create = page_menu_create,
-        .destroy = page_menu_destroy,
-    };
-    navigator_register(&ops);
-}

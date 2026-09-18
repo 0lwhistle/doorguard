@@ -107,6 +107,13 @@ add_library(dg_ui STATIC
     ui/pages/page_device.c
     ui/pages/page_access_set.c
     ui/pages/page_logs.c
+    ui/presenters/presenter_home.c
+    ui/presenters/presenter_standby.c
+    ui/presenters/presenter_menu.c
+    ui/presenters/presenter_users.c
+    ui/presenters/presenter_device.c
+    ui/presenters/presenter_access_set.c
+    ui/presenters/presenter_logs.c
     ui/ui_events.c
     ui/font/dg_font_cn_16.c
     ${DG_WIDGET_SRCS}
