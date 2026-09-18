@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-09-18 目录整理 + 上 GitHub(历史重写,remote 变更)
+
+### 做了什么
+- 清掉空残留目录:根 `hal/`、`door-guard/{env,docs,lang}`;删 Zone.Identifier 垃圾;
+  `NEXT_SESSION_PROMPT/IDLE_TASK_PROMPT` 移入 `docs/prompts/`(README 链接同步)
+- mongoose 7.23 正式 vendor:`third_party/mongoose/`(仅 amalgamated 源+LICENSE,
+  删 13MB zip)。**GPLv2/商业双许可,闭源商用需商业授权,接入前先定许可路线**;
+  现阶段未接线,web 仍是 civetweb
+- 新增根 `.gitignore`;`deliverables/` 大二进制(固件镜像/工具链 tar,~1.2GB)与
+  `sim/data/` 运行时产物(db/-wal/-shm/dg.key 首跑自建)退出跟踪,磁盘保留
+- **git 历史重写**(git-filter-repo 剥离 8 个大 blob):`.git` 708MB→12MB,
+  全部 commit hash 已变(旧头 662515e → 新历史)。仓库仅 40 commits
+- 编译验证全过:dg-build / dg-build-pc / dg-test / dg-test --tsan 均 15/15、零警告
+- remote:**origin = GitHub `git@github.com:0lwhistle/doorguard.git`(master 已推)**;
+  旧 Gitea 改名 `gitea` 保留(旧历史=固件镜像唯一异地副本,勿 force 覆盖)
+
+### 坑
+- GitHub 单文件 100MB 硬上限:不剥历史直接推必被拒(只删工作区文件不够,blob 在史中)
+- filter-repo 结尾会 reset --hard:先 `git rm --cached` 退跟踪再重写,磁盘文件才保得住
+- **Gitea 停在旧历史,VM 勿直接 pull**(会撞回旧史),VM 切换步骤见 DEV_HANDBOOK §7
+
+### 下一步
+1. VM 直连 GitHub 后 `git fetch origin && git reset --hard origin/master`
+2. 板恢复后:重推 door-guard → gpio 对拍 → web/mDNS 板上实测(前次遗留)
+3. mongoose 是否替换 civetweb:先定 GPL/商业许可路线再动
+
+---
+
 ## 2026-09-18 Phase 10 收尾:总验收自测 + 文档
 
 ### 总验收清单自测(任务清单§4)

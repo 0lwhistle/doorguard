@@ -1,6 +1,6 @@
 # RK3576 K7 人脸识别门禁系统 — 项目方案与执行手册
 
-> 更新:2026-09-17(B4 固件产出)。本文档是项目的唯一事实来源(Single Source of Truth)。
+> 更新:2026-09-18(目录整理/上 GitHub)。本文档是项目的唯一事实来源(Single Source of Truth)。
 > 每次会话开工前先读本文档恢复上下文;完成阶段后更新"进度快照"。
 
 ---
@@ -17,7 +17,7 @@
 | Armbian SDK | `Rk3576-SDK/Armbian/kickpi-armbian` 仅作参考,主线用官方 SDK |
 | 编译机 | 同一台 Ubuntu VM:8 核 / 内存 7.2G(编译时 make -j 限 6)/ 磁盘 291G 可用 |
 | 磁盘 | SATA SSD 直连(已通过 6GB×3 写读一致性认证)。**历史教训:USB 桥接时代大文件静默损坏**,大文件纪律见第六节 |
-| 当前进度 | **B1~B4 完成**(2026-09-17 首个固件产出):依赖/分区烧录包见 `deliverables/firmware/20260917-B4/`;待办:B5 烧录验收(需板子)、wifibt 驱动修复(WiFi 暂不可用,用以太网)、recovery 镜像延后 |
+| 当前进度 | **door-guard 软件 Phase 1~10 完成**(2026-09-18 总验收自测过,已上 GitHub);固件 **B5 板上验收大部通过**(串口/屏+触摸/IMX415 出流/SSH ✅,以太网自启联网待修);仓库:origin=GitHub(源码主仓)/ gitea=旧历史归档(固件镜像);待办:B6 ISP 抓帧、B7 ROCKIVA、WiFi 驱动修复、recovery 延后 |
 
 ---
 

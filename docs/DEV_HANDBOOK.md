@@ -107,7 +107,7 @@ cat /proc/bus/input/devices | grep -iA3 goodix  # 触摸
 | Buildroot 输出 | `buildroot/output/rockchip_rk3576_kickpi_k7_doorGuard/` |
 | 产物 | `output/firmware/`(分区镜像);update.img 用 `RK_UPDATE=y ./build.sh firmware` 打包 |
 | ESP32 模板(复用 tasker/event_bus/holder) | `/home/olwhistle/dockerNow/esp32/programs/ovs`(WSL 本地;映射表见 skill references/architecture.md) |
-| 中枢仓库 | Gitea `ssh://git@192.168.2.150:222/olwhistle/k7_rk3576.git`(网页 http://192.168.2.150:3002,WSL 密钥名 wsl 已注册) |
+| 中枢仓库 | **origin** = GitHub `git@github.com:0lwhistle/doorguard.git`(2026-09-18 起,源码主仓);**gitea** = `ssh://git@192.168.2.150:222/olwhistle/k7_rk3576.git`(历史归档,唯一含固件/工具链大文件的远程,勿 force push 覆盖) |
 
 ### 常用命令
 
@@ -152,7 +152,11 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 
 ## 7. 开发工作流
 
-- **代码流转只经 git**:WSL(写代码/单测)→ push → Gitee(`ssh://git@192.168.2.150:222/olwhistle/k7_rk3576.git`)→ VM pull 交叉编译
+- **代码流转只经 git**:WSL(写代码/单测)→ push → **GitHub origin**(`git@github.com:0lwhistle/doorguard.git`)→ VM pull 交叉编译
+- ⚠️ **Gitea 已停更(2026-09-18 历史重写)**:为上 GitHub,固件/工具链大 blob 已从历史剥离,
+  本地与 Gitea 历史分叉。**VM 勿直接 pull gitea**(会撞回旧历史);等 VM 能直连 GitHub 后
+  `git fetch origin && git reset --hard origin/master` 一次性切换。Gitea 旧历史是固件镜像
+  (update/rootfs/boot.img 等)唯一异地副本,保留勿覆盖;换机取镜像从 Gitea 或本地盘
 - **WSL 快速循环**(door-guard 应用):`source env/env.sh` → `dg-build` → `dg-deploy -r <板子IP>`;
   工具链安装/更新 `dg-tc-install`;技术细节见 `docs/tech/TOOLCHAIN.md`
 - SDK(19GB)**只在 VM 存一份**;SDK 改动走分支+补丁(见 §6)
