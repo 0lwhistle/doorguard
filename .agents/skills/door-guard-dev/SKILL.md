@@ -31,7 +31,7 @@ dg-serial             # 串口控制台(1500000 8N1,不是 115200)
 
 - 工具链:`~/dg-toolchain`(gcc-arm-10.3 + 与固件同源 sysroot),细节见 `docs/tech/TOOLCHAIN.md`
 - 板端:SSH root 登录(串口 `passwd` 设密);固件 20260917-B4;WiFi 不可用,用以太网
-- 代码流转只经 git(Gitea 192.168.2.150:3002,SSH 端口 222),禁止跨机复制目录
+- 代码流转只经 git,更改一律推 **origin = GitHub** `git@github.com:0lwhistle/doorguard.git`(master);禁止跨机复制目录。`gitea` remote 是 2026-09-18 历史重写前的旧归档(唯一含固件大文件的远程),平时不推、勿 force 覆盖
 - VM 只做固件/内核/rootfs 全量编译(SDK `./build.sh`);WSL 不碰 SDK
 
 ## 2. 硬性工程纪律
