@@ -52,7 +52,7 @@ void page_standby_create(lv_obj_t *parent)
     /* 整页点击 = 触摸唤醒。两处标志缺一不可(实测):
      * - 容器默认 SCROLLABLE,手指稍动即被判为滚动手势,CLICKED 永不触发;
      * - 用 PRESSED 而非 CLICKED:按下即唤醒,无抬起确认延迟;
-     * - 时钟 label 置为不可点,避免中央区域成"死区"拦截父对象事件 */
+     * - 时钟 label 置为不可点,避免中央时钟 label 拦截父对象事件形成死区 */
     lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(parent, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(parent, on_touch, LV_EVENT_PRESSED, NULL);
