@@ -51,6 +51,7 @@ extern "C" {
 /* NET:网络侧(net → UI/web) */
 #define EV_NET_STATE         EV_DEF(DG_MODULE_ID_NET, 0x0001)    /**< 联网状态变化 */
 #define EV_NET_NTP_RESULT    EV_DEF(DG_MODULE_ID_NET, 0x0002)    /**< NTP 校正结果 */
+#define EV_NET_NTP_TRIGGER   EV_DEF(DG_MODULE_ID_NET, 0x0004)    /**< 请求校正一次(菜单按钮→net) */
 #define EV_NET_OTA_PROGRESS  EV_DEF(DG_MODULE_ID_NET, 0x0003)    /**< OTA 进度/终态 */
 
 /* HAL:硬件事件(HAL → 服务) */
@@ -160,6 +161,11 @@ typedef struct {
 typedef struct {
     bool online;                          /**< 已拿到 IP 且外网可达 */
 } ev_net_state_t;
+
+/** EV_NET_NTP_TRIGGER:请求校正一次(菜单按钮/web 触发;真实结果走 EV_NET_NTP_RESULT) */
+typedef struct {
+    bool manual;                          /**< true=用户手动触发 */
+} ev_ntp_trigger_t;
 
 /** EV_NET_NTP_RESULT */
 typedef struct {
@@ -300,6 +306,7 @@ _Static_assert(sizeof(ev_enroll_request_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_enro
 _Static_assert(sizeof(ev_enroll_progress_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_enroll_progress_t 超限");
 _Static_assert(sizeof(ev_enroll_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_enroll_result_t 超限");
 _Static_assert(sizeof(ev_net_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_state_t 超限");
+_Static_assert(sizeof(ev_ntp_trigger_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ntp_trigger_t 超限");
 _Static_assert(sizeof(ev_ntp_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ntp_result_t 超限");
 _Static_assert(sizeof(ev_ota_progress_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ota_progress_t 超限");
 _Static_assert(sizeof(ev_finger_status_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_finger_status_t 超限");

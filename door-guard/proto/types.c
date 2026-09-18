@@ -24,6 +24,9 @@ const char *dg_err_name(dg_err_t err)
     case DG_ERR_DUP_FACE:       return "DUP_FACE";
     case DG_ERR_DUP_FINGER:     return "DUP_FINGER";
     case DG_ERR_USER_LIMIT:     return "USER_LIMIT";
+    case DG_ERR_BAD_UID:        return "BAD_UID";
+    case DG_ERR_BAD_NAME:       return "BAD_NAME";
+    case DG_ERR_BAD_PWD:        return "BAD_PWD";
     case DG_ERR_WRONG_PASSWORD: return "WRONG_PASSWORD";
     case DG_ERR_LOCKED:         return "LOCKED";
     case DG_ERR_AUTH_DISABLED:  return "AUTH_DISABLED";

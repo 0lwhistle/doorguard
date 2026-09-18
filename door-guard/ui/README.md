@@ -25,7 +25,12 @@
 | `EV_UI_GOTO_PAGE{page}` | `navigator_switch` | — |
 
 弹窗取消统一走 `bridge_cancel()`(发 `EV_UI_BTN{BACK}`)→ FSM 取消流程回普通;
-reason→文案映射与空库引导见 spec-ui §6。
+reason→文案映射、键盘与输入校验见 spec-ui §6。
+
+**输入一律走 `dg_popup_input`**(配置式:标题/掩码/键盘初始页/限长/validate 回调):
+- 合法性规则只在 `proto/valid.h` 定义,UI 侧用 `valid_ui.c` 的三个包装(uid/name/pwd)
+  作为 validate 传入 → 不合格弹窗内红字提示且不提交,存储层同规则再兜底一次
+- 键盘两页(数字/字母,页脚 ABC↔123 切换,⇧ 切大小写);**中文无输入法,设备上不能输入**
 
 | 目录/文件 | 职责 | 禁止 |
 |---|---|---|
@@ -34,7 +39,8 @@ reason→文案映射与空库引导见 spec-ui §6。
 | `bridge/` | 唯一后端入口:事件入站编组、动作出站、_( ) 文案;只有本层 include 后端头 | 总线线程调 LVGL |
 | `presenters/` | 每页一个 presenter:注册页面、on_evt 渲染内容、弹窗文案、导航决策 | — |
 | `pages/` | 纯视图:建控件 + setter;点击转 bridge 动作 | include 后端头 |
-| `widgets/` | 通用控件 dg_btn/dg_popup/dg_kbd/dg_list | 页面私有逻辑 |
+| `widgets/` | 通用控件 dg_btn/dg_popup/dg_kbd(数字+字母两页)/dg_list | 页面私有逻辑 |
+| `valid_ui.c` | 输入校验的文案包装(规则在 proto/valid.h,文案走 _()) | 规则本身 |
 | `theme.h` | 色值/字号/间距 token(spec-ui §1;全项目唯一色值来源) | — |
 | `i18n.h/.c` + `lang/` | _() 翻译;字体经 font/gen.sh 生成(键=原文) | — |
 | `port.c` | LVGL 时基(LV_TICK_CUSTOM) | — |

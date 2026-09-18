@@ -73,5 +73,9 @@
   "最近3天": "Last 3d",
   "全部": "All",
   "非管理员": "Not an admin",
-  "未设置管理员,请先添加管理员": "No admin yet, please add one first"
+  "未设置管理员,请先添加管理员": "No admin yet, please add one first",
+  "ID 需 3~31 位字母、数字、- 或 _，且以字母或数字开头": "ID: 3-31 chars of letters/digits/-/_ , must start with letter or digit",
+  "姓名需 1~63 字节，不能为空或前后带空格": "Name: 1-63 bytes, non-empty, no leading/trailing space",
+  "密码需 4~31 位，不能含空格": "Password: 4-31 chars, no spaces",
+  "NTP 校正中…": "NTP sync in progress…"
 }

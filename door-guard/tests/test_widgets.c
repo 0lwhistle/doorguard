@@ -5,6 +5,7 @@
  * (事件派发)+ 弹窗生命周期,断言对象树与回调,交互过程有日志输出。
  */
 #include "dg_test.h"
+#include "types.h"
 #include "i18n.h"
 #include "lvgl.h"
 #include "widgets/dg_btn.h"
@@ -61,10 +62,35 @@ static void on_btn(lv_event_t *e)
 
 /* ---- 键盘回调计数 ---- */
 static int s_key_hits = 0, s_bs_hits = 0, s_ok_hits = 0;
+/* 递归按"子对象数"找容器(弹窗卡片结构会随实现演进,按数量找比按下标稳) */
+static lv_obj_t *find_by_child_cnt(lv_obj_t *o, uint32_t cnt)
+{
+    if (!o)
+        return NULL;
+    if (lv_obj_get_child_cnt(o) == cnt)
+        return o;
+    uint32_t n = lv_obj_get_child_cnt(o);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *r = find_by_child_cnt(lv_obj_get_child(o, i), cnt);
+        if (r)
+            return r;
+    }
+    return NULL;
+}
+
+/* 恒拒绝的校验器:验证"校验不过就不提交" */
+static const char *always_reject(const char *text)
+{
+    (void)text;
+    return "格式不对";
+}
+
+static char s_last_key[4];
 static void k_on_key(void *ud, const char *sym)
 {
-    (void)ud; (void)sym;
+    (void)ud;
     s_key_hits++;
+    snprintf(s_last_key, sizeof(s_last_key), "%s", sym ? sym : "");
 }
 static void k_on_bs(void *ud)
 {
@@ -135,15 +161,32 @@ int main(void)
     DG_CHECK(lv_obj_get_child_cnt(list) == 0);
     printf("[W] dg_list: create/add/clear OK\n");
 
-    /* ---- 键盘:数字/退格/OK 回调 ---- */
+    /* ---- 键盘:数字页 / 字母页 / 切页 / ⇧ 大小写 ---- */
     dg_kbd_ops_t ops = { .on_key = k_on_key, .on_backspace = k_on_bs,
                          .on_ok = k_on_ok, .user_data = NULL };
-    lv_obj_t *kbd = dg_kbd_create(scr, &ops);
+    lv_obj_t *kbd = dg_kbd_create(scr, false, &ops);
     DG_CHECK(kbd != NULL);
-    DG_CHECK(lv_obj_get_child_cnt(kbd) == 12);  /* 3x4 */
-    click_deep(kbd);
+    DG_CHECK(!dg_kbd_is_alpha(kbd));               /* 默认数字页 */
+    /* 数字页:1-9 + ⌫ + 0 + OK 共 12 键(页脚在根的另一子对象上) */
+    lv_obj_t *num_page = lv_obj_get_child(kbd, 0);
+    DG_CHECK(lv_obj_get_child_cnt(num_page) == 12);
+    click_deep(num_page);
     DG_CHECK(s_key_hits == 10 && s_bs_hits == 1 && s_ok_hits == 1);
-    printf("[W] dg_kbd: 12 keys + callbacks OK\n");
+
+    /* 切到字母页:QWERTY 26 字母 + ⇧ + ⌫ + 空格 + OK */
+    dg_kbd_toggle_layout(kbd);
+    DG_CHECK(dg_kbd_is_alpha(kbd));
+    lv_obj_t *alpha_page = lv_obj_get_child(kbd, 1);
+    lv_obj_t *row1 = lv_obj_get_child(alpha_page, 0);
+    DG_CHECK(lv_obj_get_child_cnt(row1) == 10);    /* q..p */
+
+    /* ⇧ 后点第一个字母应上报大写(键值是 q) */
+    s_last_key[0] = '\0';
+    lv_obj_t *shift = lv_obj_get_child(lv_obj_get_child(alpha_page, 2), 0);
+    lv_event_send(shift, LV_EVENT_CLICKED, NULL);
+    lv_event_send(lv_obj_get_child(row1, 0), LV_EVENT_CLICKED, NULL);
+    DG_CHECK(s_last_key[0] == 'Q');
+    printf("[W] dg_kbd: 数字页 12 键 + 字母页 QWERTY + ⇧ 大小写 OK\n");
 
     /* ---- 弹窗:成功/失败自动关闭 + 单实例 ---- */
     DG_CHECK(!dg_popup_active());
@@ -160,38 +203,58 @@ int main(void)
     printf("[W] dg_popup success/fail: auto close + single instance OK\n");
 
     /* ---- 输入弹窗:键盘输入 → 确认回调携文本 ---- */
-    dg_popup_input(_("请输入密码"), true, on_confirm, NULL, NULL);
+    const dg_popup_input_cfg_t cfg = {
+        .title = _("请输入密码"),
+        .mask_text = true,
+        .max_len = DG_PWD_MAX_LEN - 1,
+        .on_confirm = on_confirm,
+    };
+    dg_popup_input(&cfg);
     DG_CHECK(dg_popup_active());
-    /* 层级:top layer → 遮罩 → 卡片;卡片子对象:标题/textarea/键盘/取消 */
+    /* 层级:top layer → 遮罩 → 卡片;卡片子对象:标题/textarea/错误行/键盘/取消 */
     lv_obj_t *mask = lv_obj_get_child(lv_layer_top(), 0);
     lv_obj_t *card = lv_obj_get_child(mask, 0);
     DG_CHECK(card != NULL);
-    /* 找到键盘(含 12 个键位的容器)并点击 "1","2","3" + OK */
-    lv_obj_t *kbd_in_popup = NULL;
-    uint32_t n = lv_obj_get_child_cnt(card);
-    for (uint32_t i = 0; i < n; i++) {
-        lv_obj_t *c = lv_obj_get_child(card, i);
-        if (lv_obj_get_child_cnt(c) == 12)
-            kbd_in_popup = c;
-    }
-    DG_CHECK(kbd_in_popup != NULL);
-    /* 键序:1 2 3 4 5 6 7 8 9 ⌫ 0 OK → 点 1,2,3,OK(键位按钮在 cell 的 child 0) */
+    /* 数字页 = 含 12 个键(1-9/⌫/0/OK)的容器,在卡片子树里按数量找 */
+    lv_obj_t *np = find_by_child_cnt(card, 12);
+    DG_CHECK(np != NULL);
+    /* 键序:1 2 3 4 5 6 7 8 9 ⌫ 0 OK → 点 1,2,3 + OK(按钮自带回调) */
     static const uint32_t seq[] = { 0, 1, 2, 11 };
     for (size_t i = 0; i < sizeof(seq) / sizeof(seq[0]); i++)
-        lv_event_send(lv_obj_get_child(lv_obj_get_child(kbd_in_popup, seq[i]), 0),
-                      LV_EVENT_CLICKED, NULL);
+        lv_event_send(lv_obj_get_child(np, seq[i]), LV_EVENT_CLICKED, NULL);
     DG_CHECK(s_confirmed == 1);
     DG_CHECK(strcmp(s_conf_text, "123") == 0);
     DG_CHECK(!dg_popup_active());
     printf("[W] dg_popup input: type 123 + confirm OK\n");
+
+    /* ---- 输入合法性:校验不通过 → 不提交、弹窗不关(可就地改) ---- */
+    const dg_popup_input_cfg_t bad = {
+        .title = _("请输入密码"),
+        .max_len = DG_PWD_MAX_LEN - 1,
+        .validate = always_reject,
+        .on_confirm = on_confirm,
+    };
+    s_confirmed = 0;
+    dg_popup_input(&bad);
+    lv_obj_t *mask3 = lv_obj_get_child(lv_layer_top(), 0);
+    lv_obj_t *card3 = lv_obj_get_child(mask3, 0);
+    lv_obj_t *np3 = find_by_child_cnt(card3, 12);
+    DG_CHECK(np3 != NULL);
+    for (size_t i = 0; i < sizeof(seq) / sizeof(seq[0]); i++)
+        lv_event_send(lv_obj_get_child(np3, seq[i]), LV_EVENT_CLICKED, NULL);
+    DG_CHECK(s_confirmed == 0);                 /* 被拦下,没提交 */
+    DG_CHECK(dg_popup_active());                /* 弹窗还在,用户可继续改 */
+    lv_event_send(lv_obj_get_child(card3, lv_obj_get_child_cnt(card3) - 1),
+                  LV_EVENT_CLICKED, NULL);      /* 取消(最后一个子对象) */
+    DG_CHECK(!dg_popup_active());
+    printf("[W] dg_popup input: 校验失败不提交 + 弹窗保留 OK\n");
 
     /* ---- 选择弹窗:选项回调携下标 ---- */
     static const char *const opts[] = { "zh-CN", "en-US" };
     dg_popup_choice(_("语言"), opts, 2, on_pick, NULL, NULL);
     lv_obj_t *mask2 = lv_obj_get_child(lv_layer_top(), 0);
     lv_obj_t *card2 = lv_obj_get_child(mask2, 0);
-    n = lv_obj_get_child_cnt(card2);
-    DG_CHECK(n >= 3);                           /* 标题 + 2 选项 */
+    DG_CHECK(lv_obj_get_child_cnt(card2) >= 3);  /* 标题 + 2 选项 */
     lv_event_send(lv_obj_get_child(card2, 2), LV_EVENT_CLICKED, NULL);
     DG_CHECK(s_picked == 1);
     printf("[W] dg_popup choice: pick idx OK\n");

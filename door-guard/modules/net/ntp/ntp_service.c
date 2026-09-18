@@ -65,6 +65,27 @@ int ntp_service_trigger(void)
     return DG_ERR_NETWORK;
 }
 
+/* 触发请求(菜单按钮)→ 起独立线程执行:trigger 内部 ping + chronyc waitsync
+ * 是秒级阻塞,不能占着总线分发线程(否则 UI/认证事件全卡住) */
+static void *trigger_thread(void *arg)
+{
+    (void)arg;
+    ntp_service_trigger();
+    return NULL;
+}
+
+static int on_trigger_req(const event_t *e, void *ud)
+{
+    (void)e;
+    (void)ud;
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, trigger_thread, NULL) == 0)
+        pthread_detach(tid);
+    else
+        DG_LOGE(TAG, "NTP 触发线程创建失败");
+    return 0;
+}
+
 static void *boot_trigger(void *arg)
 {
     (void)arg;
@@ -83,6 +104,7 @@ int ntp_service_start(void)
     if (s_running)
         return DG_OK;
     s_running = true;
+    event_bus_subscribe(EV_NET_NTP_TRIGGER, on_trigger_req, NULL);
     pthread_t tid;
     if (pthread_create(&tid, NULL, boot_trigger, NULL) == 0)
         pthread_detach(tid);

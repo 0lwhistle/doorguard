@@ -126,6 +126,17 @@ static int on_facebox(const event_t *e, void *ud)
     return 0;
 }
 
+static int on_ntp_result(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_NTP_RESULT;
+    evt.ntp = *(const ev_ntp_result_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
 static int on_hint_clear(const event_t *e, void *ud)
 {
     (void)e;
@@ -150,7 +161,8 @@ void bridge_init(void)
     event_bus_subscribe(EV_UI_RESULT, on_result, NULL);
     event_bus_subscribe(EV_UI_HINT_CLEAR, on_hint_clear, NULL);
     event_bus_subscribe(EV_UI_FACEBOX, on_facebox, NULL);
-    DG_LOGI("[BRIDGE]", "事件桥就绪(11 订阅)");
+    event_bus_subscribe(EV_NET_NTP_RESULT, on_ntp_result, NULL);
+    DG_LOGI("[BRIDGE]", "事件桥就绪(12 订阅)");
 }
 
 void bridge_btn(const ev_ui_btn_t *btn)

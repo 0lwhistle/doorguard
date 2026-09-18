@@ -19,6 +19,9 @@ lv_obj_t *dg_btn_create(lv_obj_t *parent, const char *icon, const char *label);
 /** 蓝白反色变体(次级操作:浅蓝底深色字) */
 lv_obj_t *dg_btn_create_light(lv_obj_t *parent, const char *icon, const char *label);
 
+/** 改按钮文字(字母键盘大小写切换、页脚 ABC↔123 用;图标不动) */
+void dg_btn_set_label(lv_obj_t *btn, const char *label);
+
 #ifdef __cplusplus
 }
 #endif

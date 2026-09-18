@@ -12,6 +12,7 @@
 #include "i18n.h"
 #include "ui_events.h"
 #include "widgets/dg_popup.h"
+#include "valid_ui.h"
 #include "dg_log.h"
 
 #include <stdio.h>
@@ -127,13 +128,32 @@ static void home_on_evt(const ui_evt_t *evt)
             page_home_set_facebox_color(f->state);
         break;
     }
-    case UI_EVT_ASK_UID:
-        dg_popup_input(_("请输入用户ID"), false, on_uid_confirm, on_popup_cancel, NULL);
+    case UI_EVT_ASK_UID: {
+        /* 合法性检测在弹窗内完成:不合格就地红字提示,不提交、不占 5s 超时 */
+        const dg_popup_input_cfg_t cfg = {
+            .title = _("请输入用户ID"),
+            .start_alpha = false,          /* ID 多数是数字,可从数字页起再切字母 */
+            .max_len = DG_UID_LEN - 1,
+            .validate = dg_ui_valid_uid,
+            .on_confirm = on_uid_confirm,
+            .on_cancel = on_popup_cancel,
+        };
+        dg_popup_input(&cfg);
         break;
-    case UI_EVT_INPUT_PWD:
+    }
+    case UI_EVT_INPUT_PWD: {
         snprintf(s_pwd_uid, sizeof(s_pwd_uid), "%s", evt->input_req.uid);
-        dg_popup_input(_("请输入密码"), true, on_pwd_confirm, on_popup_cancel, NULL);
+        const dg_popup_input_cfg_t cfg = {
+            .title = _("请输入密码"),
+            .mask_text = true,
+            .max_len = DG_PWD_MAX_LEN - 1,
+            .validate = dg_ui_valid_pwd,
+            .on_confirm = on_pwd_confirm,
+            .on_cancel = on_popup_cancel,
+        };
+        dg_popup_input(&cfg);
         break;
+    }
     case UI_EVT_PICK_METHOD:
         show_method_picker(evt->methods.auth_flags);
         break;
@@ -179,6 +199,8 @@ static void home_on_evt(const ui_evt_t *evt)
         break;                               /* web/日志侧消费;主页文案走 EV_UI_RESULT */
     case UI_EVT_GOTO_PAGE:
         break;                               /* 切页由 ui 层泵直驱 */
+    case UI_EVT_NTP_RESULT:
+        break;                               /* 设备管理页消费 */
     }
 }
 

@@ -156,6 +156,35 @@ static void test_add(void)
 
 /* ================= 2 密码 ================= */
 
+/* 字段合法性:UI 弹窗已即时拦,存储层是权威兜底(脚本/上位机/API 绕不过) */
+static void test_field_valid(void)
+{
+    printf("[S7] 字段合法性:非法 ID/姓名/密码一律拒(与 proto/valid.h 同规则)\n");
+    fresh_setup();
+
+    /* 非法 ID */
+    user_rec_t u = make_user("12", "张三", "1234");          /* 太短 */
+    DG_CHECK(db_user_add(&u) == DG_ERR_BAD_UID);
+    u = make_user("-abc", "张三", "1234");                    /* 首字符非字母数字 */
+    DG_CHECK(db_user_add(&u) == DG_ERR_BAD_UID);
+    u = make_user("ab cd", "张三", "1234");                   /* 空格 */
+    DG_CHECK(db_user_add(&u) == DG_ERR_BAD_UID);
+
+    /* 非法姓名 */
+    u = make_user("10001", " 张三", "1234");                  /* 前导空格 */
+    DG_CHECK(db_user_add(&u) == DG_ERR_BAD_NAME);
+
+    /* 非法密码(长度/字符集)在 set_password 就拦(故这里不经 make_user) */
+    u = make_user("10002", "李四", NULL);                     /* 太短 */
+    DG_CHECK(db_user_set_password(&u, "123") == DG_ERR_BAD_PWD);
+    DG_CHECK(db_user_set_password(&u, "has space") == DG_ERR_BAD_PWD);
+
+    /* 合法值照常通过(字母/数字/-/_ 混合,x 大小写) */
+    u = make_user("A1-b_2", "Zhang San", "Abc123!@#");
+    DG_CHECK(db_user_add(&u) == DG_OK);
+    DG_CHECK(db_user_count_role(DG_ROLE_NORMAL, &(uint32_t){0}) == DG_OK);
+}
+
 static void test_password(void)
 {
     printf("[S2] password verify / unknown user / PBKDF2 known vectors\n");
@@ -357,14 +386,14 @@ static void test_crypto(void)
     DG_CHECK(memcmp(enc, enc2, enc_len) != 0);
 
     /* 同密码两次加盐:哈希不同;盐不同;验证均通过 */
-    user_rec_t a = make_user("A1", "甲", "samepwd");
-    user_rec_t b = make_user("A2", "乙", "samepwd");
+    user_rec_t a = make_user("A01", "甲", "samepwd");
+    user_rec_t b = make_user("A02", "乙", "samepwd");
     DG_CHECK(memcmp(a.pwd_salt, b.pwd_salt, DG_PWD_SALT_LEN) != 0);
     DG_CHECK(memcmp(a.pwd_hash, b.pwd_hash, DG_PWD_HASH_LEN) != 0);
     DG_CHECK(db_user_add(&a) == DG_OK);
     DG_CHECK(db_user_add(&b) == DG_OK);
-    DG_CHECK(db_verify_password("A1", "samepwd", NULL) == DG_OK);
-    DG_CHECK(db_verify_password("A2", "samepwd", NULL) == DG_OK);
+    DG_CHECK(db_verify_password("A01", "samepwd", NULL) == DG_OK);
+    DG_CHECK(db_verify_password("A02", "samepwd", NULL) == DG_OK);
 
     /* NIST SP 800-38A F.5.5 CTR-AES256 向量(前 16B 分组) */
     static const uint8_t key[32] = {
@@ -446,6 +475,7 @@ int main(void)
 {
     test_add();          /* 含 2000 边界,最慢 */
     test_password();
+    test_field_valid();
     test_logs();
     test_config();
     test_crypto();

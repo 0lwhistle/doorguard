@@ -141,12 +141,17 @@ void dg_popup_fail(const char *text, uint32_t timeout_ms,
 
 /* ---- 输入弹窗 ---- */
 
+#define INPUT_BUF_MAX 64
+
 typedef struct {
     lv_obj_t *ta;
+    lv_obj_t *err;                       /* 合法性提示行(红字,默认隐藏) */
+    const char *(*validate)(const char *);
     void (*on_confirm)(void *, const char *);
     void (*on_cancel)(void *);
     void *ud;
-    char buf[32];
+    char buf[INPUT_BUF_MAX];
+    uint16_t max_len;
 } input_ctx_t;
 
 static input_ctx_t s_input;
@@ -156,13 +161,24 @@ static void input_sync(void)
     lv_textarea_set_text(s_input.ta, s_input.buf);
 }
 
+/* 用户重新编辑 → 收掉上一次的错误提示(不让旧报错留在屏上) */
+static void input_err_clear(void)
+{
+    if (s_input.err)
+        lv_obj_add_flag(s_input.err, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void input_key(void *ud, const char *sym)
 {
     (void)ud;
     size_t len = strlen(s_input.buf);
-    if (len + strlen(sym) < sizeof(s_input.buf))
+    size_t cap = s_input.max_len ? s_input.max_len : (INPUT_BUF_MAX - 1);
+    if (cap > INPUT_BUF_MAX - 1)
+        cap = INPUT_BUF_MAX - 1;
+    if (len + strlen(sym) <= cap)
         strcat(s_input.buf, sym);
     input_sync();
+    input_err_clear();
 }
 
 static void input_backspace(void *ud)
@@ -172,12 +188,25 @@ static void input_backspace(void *ud)
     if (len > 0)
         s_input.buf[len - 1] = '\0';
     input_sync();
+    input_err_clear();
 }
 
 static void input_ok(void *ud)
 {
     (void)ud;
-    char buf[32];
+    /* 合法性检测(spec-ui §6):不合格就地红字提示并保持弹窗,不提交 */
+    if (s_input.validate) {
+        const char *err = s_input.validate(s_input.buf);
+        if (err) {
+            if (s_input.err) {
+                lv_label_set_text(s_input.err, err);
+                lv_obj_clear_flag(s_input.err, LV_OBJ_FLAG_HIDDEN);
+            }
+            DG_LOGI("[POPUP]", "input rejected: %s", err);
+            return;
+        }
+    }
+    char buf[INPUT_BUF_MAX];
     snprintf(buf, sizeof(buf), "%s", s_input.buf);
     void (*cb)(void *, const char *) = s_input.on_confirm;
     void *ud2 = s_input.ud;
@@ -195,25 +224,41 @@ static void input_cancel_click(lv_event_t *e)
         cb(ud2);
 }
 
-void dg_popup_input(const char *title, bool mask_text,
-                    void (*on_confirm)(void *ud, const char *text),
-                    void (*on_cancel)(void *ud), void *ud)
+void dg_popup_input(const dg_popup_input_cfg_t *cfg)
 {
+    if (!cfg || !cfg->title)
+        return;
+
     lv_obj_t *card = base_create(DG_COLOR_PRIM());
-    s_input.on_confirm = on_confirm;
-    s_input.on_cancel = on_cancel;
-    s_input.ud = ud;
+    /* 输入弹窗要放下键盘(数字 4 行 / 字母 4 行 + 页脚),卡片放宽到 660 */
+    lv_obj_set_width(card, 660);
+    s_input.validate = cfg->validate;
+    s_input.on_confirm = cfg->on_confirm;
+    s_input.on_cancel = cfg->on_cancel;
+    s_input.ud = cfg->ud;
+    s_input.max_len = cfg->max_len;
     s_input.buf[0] = '\0';
 
-    msg_create(card, title);
+    msg_create(card, cfg->title);
 
     s_input.ta = lv_textarea_create(card);
     lv_textarea_set_one_line(s_input.ta, true);
-    lv_textarea_set_password_mode(s_input.ta, mask_text);
+    lv_textarea_set_password_mode(s_input.ta, cfg->mask_text);
     lv_textarea_set_text(s_input.ta, "");
+    lv_textarea_set_max_length(s_input.ta,
+                               cfg->max_len ? cfg->max_len : INPUT_BUF_MAX - 1);
     lv_obj_set_style_text_font(s_input.ta, DG_FONT_CN, 0);
     lv_obj_set_width(s_input.ta, LV_PCT(100));
     lv_obj_clear_flag(s_input.ta, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+
+    /* 合法性提示行:默认隐藏,校验失败时红字显示(spec-ui §6) */
+    s_input.err = lv_label_create(card);
+    lv_label_set_text(s_input.err, "");
+    lv_obj_set_style_text_font(s_input.err, DG_FONT_CN, 0);
+    lv_obj_set_style_text_color(s_input.err, DG_COL_ERR(), 0);
+    lv_obj_set_width(s_input.err, LV_PCT(100));
+    lv_label_set_long_mode(s_input.err, LV_LABEL_LONG_WRAP);
+    lv_obj_add_flag(s_input.err, LV_OBJ_FLAG_HIDDEN);
 
     dg_kbd_ops_t ops = {
         .on_key = input_key,
@@ -221,11 +266,11 @@ void dg_popup_input(const char *title, bool mask_text,
         .on_ok = input_ok,
         .user_data = NULL,
     };
-    dg_kbd_create(card, &ops);
+    dg_kbd_create(card, cfg->start_alpha, &ops);
 
     lv_obj_t *cancel = dg_btn_create_light(card, LV_SYMBOL_CLOSE, _("取消"));
-    lv_obj_add_event_cb(cancel, input_cancel_click, LV_EVENT_CLICKED, on_cancel);
-    DG_LOGI("[POPUP]", "input: %s", title);
+    lv_obj_add_event_cb(cancel, input_cancel_click, LV_EVENT_CLICKED, cfg->on_cancel);
+    DG_LOGI("[POPUP]", "input: %s", cfg->title);
 }
 
 /* ---- 选择弹窗 ---- */

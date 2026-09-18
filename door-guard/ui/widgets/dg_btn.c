@@ -63,3 +63,18 @@ lv_obj_t *dg_btn_create_light(lv_obj_t *parent, const char *icon, const char *la
     lv_obj_set_style_text_font(txt, DG_FONT_CN, 0);
     return btn;
 }
+
+void dg_btn_set_label(lv_obj_t *btn, const char *label)
+{
+    if (!btn || !label)
+        return;
+    /* 结构约定(见 dg_btn_create):btn → 行容器 → [图标 label?] + 文本 label,
+     * 文本 label 必是行容器的最后一个子对象 */
+    lv_obj_t *row = lv_obj_get_child(btn, 0);
+    uint32_t n = row ? lv_obj_get_child_cnt(row) : 0;
+    if (n == 0)
+        return;
+    lv_obj_t *txt = lv_obj_get_child(row, n - 1);
+    if (txt && lv_obj_check_type(txt, &lv_label_class))
+        lv_label_set_text(txt, label);
+}

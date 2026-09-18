@@ -39,6 +39,9 @@ typedef enum {
     DG_ERR_DUP_FACE      = -23, /**< 人脸特征 1:N 查重命中 */
     DG_ERR_DUP_FINGER    = -24, /**< 指纹特征 1:N 查重命中 */
     DG_ERR_USER_LIMIT    = -25, /**< 用户数达上限 2000 */
+    DG_ERR_BAD_UID       = -26, /**< user_id 非法(长度/字符集;规则见 proto/valid.h) */
+    DG_ERR_BAD_NAME      = -27, /**< user_name 非法(空/超长/控制字符) */
+    DG_ERR_BAD_PWD       = -28, /**< 密码非法(长度/字符集;规则见 proto/valid.h) */
 
     /* ---- 验证业务(spec-auth-business §5) ---- */
     DG_ERR_WRONG_PASSWORD = -30, /**< 密码错误(计入连错) */

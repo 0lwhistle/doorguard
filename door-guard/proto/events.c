@@ -26,6 +26,7 @@ static const struct {
     { EV_ENROLL_RESULT,    "ENROLL_RESULT" },
     { EV_NET_STATE,        "NET_STATE" },
     { EV_NET_NTP_RESULT,   "NET_NTP_RESULT" },
+    { EV_NET_NTP_TRIGGER,  "NET_NTP_TRIGGER" },
     { EV_NET_OTA_PROGRESS, "NET_OTA_PROGRESS" },
     { EV_FINGER_STATUS,    "FINGER_STATUS" },
     { EV_IC_CARD,          "IC_CARD" },

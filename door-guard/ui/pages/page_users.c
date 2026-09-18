@@ -15,6 +15,7 @@
 #include "widgets/dg_btn.h"
 #include "widgets/dg_list.h"
 #include "widgets/dg_popup.h"
+#include "valid_ui.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -75,20 +76,44 @@ static void add_name_done(void *ud, const char *name)
 {
     (void)ud;
     snprintf(s_add_name, sizeof(s_add_name), "%s", name);
-    dg_popup_input(_("请输入密码"), true, add_pwd_done, NULL, NULL);
+    /* 密码:掩码 + 数字页起(可切字母)+ 4~31 位可见字符 */
+    const dg_popup_input_cfg_t cfg = {
+        .title = _("请输入密码"),
+        .mask_text = true,
+        .start_alpha = false,
+        .max_len = DG_PWD_MAX_LEN - 1,
+        .validate = dg_ui_valid_pwd,
+        .on_confirm = add_pwd_done,
+    };
+    dg_popup_input(&cfg);
 }
 
 static void add_id_done(void *ud, const char *id)
 {
     (void)ud;
     snprintf(s_add_id, sizeof(s_add_id), "%s", id);
-    dg_popup_input(_("姓名"), false, add_name_done, NULL, NULL);
+    /* 姓名:字母页起(可切数字),允许中文但设备端打不出中文(见 spec-ui §6) */
+    const dg_popup_input_cfg_t cfg = {
+        .title = _("姓名"),
+        .start_alpha = true,
+        .max_len = DG_NAME_LEN - 1,
+        .validate = dg_ui_valid_name,
+        .on_confirm = add_name_done,
+    };
+    dg_popup_input(&cfg);
 }
 
 static void on_add(lv_event_t *e)
 {
     (void)e;
-    dg_popup_input(_("请输入用户ID"), false, add_id_done, NULL, NULL);
+    const dg_popup_input_cfg_t cfg = {
+        .title = _("请输入用户ID"),
+        .start_alpha = false,
+        .max_len = DG_UID_LEN - 1,
+        .validate = dg_ui_valid_uid,
+        .on_confirm = add_id_done,
+    };
+    dg_popup_input(&cfg);
 }
 
 /* ---- 行选中后的二级菜单:改权限 / 删除 ---- */

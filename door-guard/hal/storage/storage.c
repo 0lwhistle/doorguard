@@ -10,6 +10,7 @@
  */
 #include "storage.h"
 #include "crypto.h"
+#include "valid.h"
 #include "dg_log.h"
 
 #include <openssl/rand.h>
@@ -298,6 +299,10 @@ int db_user_set_password(user_rec_t *rec, const char *plain_pwd)
 {
     if (!rec || !plain_pwd || !*plain_pwd || strlen(plain_pwd) >= DG_PWD_MAX_LEN)
         return DG_ERR_PARAM;
+    /* 密码合法性(长度/字符集):规则唯一权威见 proto/valid.h */
+    int vrc = dg_valid_pwd(plain_pwd);
+    if (vrc != DG_OK)
+        return vrc;
     if (RAND_bytes(rec->pwd_salt, DG_PWD_SALT_LEN) != 1)
         return DG_ERR_INTERNAL;
     return dg_pbkdf2_sha256(plain_pwd, rec->pwd_salt, DG_PWD_SALT_LEN,
@@ -310,6 +315,14 @@ int db_user_add(const user_rec_t *in)
         return DG_ERR_NOT_INIT;
     if (!in || !in->user_id[0] || !in->user_name[0])
         return DG_ERR_PARAM;
+    /* 字段合法性(ID/姓名):UI 弹窗已即时校验,这里是权威兜底
+     * (上位机/脚本/未来 API 都绕不过) */
+    int vrc = dg_valid_uid(in->user_id);
+    if (vrc != DG_OK)
+        return vrc;
+    vrc = dg_valid_name(in->user_name);
+    if (vrc != DG_OK)
+        return vrc;
 
     pthread_mutex_lock(&s_mtx);
 
@@ -431,6 +444,14 @@ int db_user_update(const user_rec_t *in)
         return DG_ERR_NOT_INIT;
     if (!in || !in->user_id[0])
         return DG_ERR_PARAM;
+    int vrc = dg_valid_uid(in->user_id);
+    if (vrc != DG_OK)
+        return vrc;
+    if (in->user_name[0]) {
+        vrc = dg_valid_name(in->user_name);
+        if (vrc != DG_OK)
+            return vrc;
+    }
 
     pthread_mutex_lock(&s_mtx);
 

@@ -2,12 +2,15 @@
  * page_device.c — 设备管理(spec-ui §3.3):语言切换 / NTP 矫正 / 网络配置
  */
 #include "cfg.h"
+#include "event_bus.h"
+#include "events.h"
 #include "dg_log.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
 #include "theme.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_popup.h"
+#include "ui_events.h"
 
 #include <stdio.h>
 #include <time.h>
@@ -35,19 +38,14 @@ static void on_lang(lv_event_t *e)
     dg_popup_choice(_("语言"), opts, 2, lang_pick, NULL, NULL);
 }
 
-static void ntp_done(void *ud, const char *text)
-{
-    (void)ud;
-    (void)text;
-    /* Phase 9 接入 chronyc;当前占位提示(不阻塞页面) */
-    dg_popup_success(_("NTP同步成功"), 1000, NULL, NULL);
-}
-
 static void on_ntp(lv_event_t *e)
 {
     (void)e;
-    /* 待硬件/网络确认:chronyc burst 4/4 + waitsync 10(spec-network §3) */
-    dg_popup_input(_("NTP时间矫正"), false, ntp_done, NULL, NULL);
+    /* 真触发一次校正(用配置里的 ntp_server),结果经 EV_NET_NTP_RESULT 回来;
+     * 不再弹输入框——服务器地址属设备配置,不该让门禁面板上的人现填 */
+    ev_ntp_trigger_t ev = { .manual = true };
+    EVENT_BUS_PUBLISH(EV_NET_NTP_TRIGGER, &ev);
+    dg_popup_success(_("NTP 校正中…"), 1000, NULL, NULL);
 }
 
 static void on_net(lv_event_t *e)

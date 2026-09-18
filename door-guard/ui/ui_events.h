@@ -25,6 +25,7 @@ typedef enum {
     UI_EVT_RESULT,         /**< 结果弹窗(成功/失败 + 原因文案) */
     UI_EVT_HINT_CLEAR,     /**< 清提示条 */
     UI_EVT_FACEBOX,        /**< 服务侧脸框颜色(绿/红/隐藏) */
+    UI_EVT_NTP_RESULT,     /**< NTP 校正结果(设备管理页显示) */
 } ui_evt_kind_t;
 
 typedef struct {
@@ -37,6 +38,7 @@ typedef struct {
     ev_ui_methods_t methods;       /* UI_EVT_PICK_METHOD */
     ev_ui_result_t result_popup;   /* UI_EVT_RESULT */
     ev_ui_facebox_t facebox;       /* UI_EVT_FACEBOX */
+    ev_ntp_result_t ntp;           /* UI_EVT_NTP_RESULT */
 } ui_evt_t;
 
 /** 入队(任意线程;队满丢弃并计数) */

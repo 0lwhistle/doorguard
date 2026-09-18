@@ -53,10 +53,11 @@ add_library(dg_holder STATIC
 target_include_directories(dg_holder PUBLIC ${CMAKE_SOURCE_DIR}/proto/holder)
 target_link_libraries(dg_holder PUBLIC dg_log)
 
-# proto 契约层:错误码/数据结构/业务事件(types.h err.h events.h,头在 proto/ 根)
+# proto 契约层:错误码/数据结构/业务事件/字段合法性(头在 proto/ 根)
 add_library(dg_proto STATIC
     proto/types.c
     proto/events.c
+    proto/valid.c
 )
 target_include_directories(dg_proto PUBLIC ${CMAKE_SOURCE_DIR}/proto)
 target_link_libraries(dg_proto PUBLIC dg_event_bus)
@@ -94,6 +95,7 @@ add_library(dg_ui STATIC
     ui/ui.c
     ui/port.c
     ui/i18n.c
+    ui/valid_ui.c
     ui/navigator/navigator.c
     ui/bridge/bridge.c
     ui/pages/page_home.c
