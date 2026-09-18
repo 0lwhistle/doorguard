@@ -626,14 +626,16 @@ int mdns_url(char *out, size_t cap)
 {
     if (!out || cap == 0)
         return DG_ERR_PARAM;
+    /* 以"名字形式"为主、IP 作括号补注:名字才是我们做 mDNS 的目的
+     * (换 DHCP 租约/换网段都不用改),IP 只在名字解析不了的旧设备上兜底 */
     char host[96];
     snapshot(host, sizeof(host), NULL, 0, NULL);
-    out[0] = '\0';
+    uint16_t port = s_port;
     char ip[64];
     if (net_info_primary_ipv4(ip, sizeof(ip)) == DG_OK)
-        return snprintf(out, cap, "http://%s:%u", ip, (unsigned)s_port) > 0
+        return snprintf(out, cap, "http://%s:%u (%s)", host, (unsigned)port, ip) > 0
                    ? DG_OK : DG_ERR_NO_MEMORY;
-    return snprintf(out, cap, "http://%s:%u", host, (unsigned)s_port) > 0
+    return snprintf(out, cap, "http://%s:%u", host, (unsigned)port) > 0
                ? DG_OK : DG_ERR_NO_MEMORY;
 }
 
