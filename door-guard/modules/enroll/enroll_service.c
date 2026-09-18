@@ -63,6 +63,9 @@ static int on_feature(const event_t *e, void *ud)
     /* 编排语义:先在用户管理页建用户(含密码),再录特征;未建则报"用户不存在" */
     int rc = db_user_update(&rec);
 
+    if (rc == DG_OK)
+        vision_service_library_add(f->user_id, plain, len);  /* 特征库 INSERT */
+
     memset(plain, 0, sizeof(plain));            /* 明文用后擦除 */
     publish_result(f->user_id, DG_ENROLL_FACE, f->seq, rc);
     return 0;
@@ -75,6 +78,7 @@ static int on_request(const event_t *e, void *ud)
 
     if (r->kind == DG_ENROLL_DELETE) {
         int rc = db_user_del(r->user_id);
+        vision_service_library_remove(r->user_id);   /* 特征库 DELETE */
         publish_result(r->user_id, r->kind, r->seq, rc);
         return 0;
     }

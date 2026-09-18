@@ -25,6 +25,20 @@ void vision_service_stop(void);
 /** 启动后端:PC=vision_sim(mock 可关)/ 板=vision_rockiva(占位) */
 void vision_backend_start(bool enable_mock);
 
+/* ---- 特征库维护(rockiva 后端实现;未就绪返回 DG_ERR_NOT_INIT) ---- */
+typedef int (*vision_lib_add_fn)(const char *user_id, const uint8_t *feature,
+                                 uint16_t len);
+typedef int (*vision_lib_del_fn)(const char *user_id);
+
+/** 后端启动时注册实现 */
+void vision_service_set_lib_ops(vision_lib_add_fn add, vision_lib_del_fn del);
+
+/** 录入成功后调用(后端 INSERT 特征库) */
+int vision_service_library_add(const char *user_id, const uint8_t *feature,
+                               uint16_t len);
+/** 用户删除后调用(后端 DELETE) */
+int vision_service_library_remove(const char *user_id);
+
 /** 特征槽位:视觉后端提交(vision 内部)/ 编排侧按 seq 取(enroll 调用) */
 int vision_service_submit_feature(const char *user_id, uint32_t seq,
                                   const uint8_t *feature, size_t len);

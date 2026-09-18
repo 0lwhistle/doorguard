@@ -80,6 +80,26 @@ int vision_service_fetch_feature(uint32_t seq, uint8_t *out, size_t cap, size_t 
     return DG_ERR_NOT_FOUND;
 }
 
+static vision_lib_add_fn s_lib_add;
+static vision_lib_del_fn s_lib_del;
+
+void vision_service_set_lib_ops(vision_lib_add_fn add, vision_lib_del_fn del)
+{
+    s_lib_add = add;
+    s_lib_del = del;
+}
+
+int vision_service_library_add(const char *user_id, const uint8_t *feature,
+                               uint16_t len)
+{
+    return s_lib_add ? s_lib_add(user_id, feature, len) : DG_ERR_NOT_INIT;
+}
+
+int vision_service_library_remove(const char *user_id)
+{
+    return s_lib_del ? s_lib_del(user_id) : DG_ERR_NOT_INIT;
+}
+
 int vision_service_start(void)
 {
     s_running = true;

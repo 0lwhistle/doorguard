@@ -62,6 +62,10 @@ static uint8_t *s_out[2];
 static int s_out_idx;
 static camera_frame_t s_frame;
 static uint32_t s_seq;
+static camera_nv12_fn s_nv12_fn;             /* 视觉帧监听(可空) */
+static camera_nv12_release_fn s_nv12_rel;
+static bool s_busy[CAM_BUF_CNT];             /* ROCKIVA 占用中,归还待 release */
+static uint32_t s_fid[CAM_BUF_CNT];
 static bool s_ready; /* 取流线程完成 STREAMON 后置位 */
 static int s_cap_w, s_cap_h;
 static int s_nplanes = 1, s_stride;
@@ -308,6 +312,26 @@ static bool convert_frame(int buf_idx)
     return true;
 }
 
+/* 归还缓冲(ROCKIVA 释放回调线程调用;V4L2 ioctl 内核侧串行化) */
+static void qbuf_index(int idx)
+{
+    struct v4l2_buffer buf = { 0 };
+    struct v4l2_plane planes[1] = { 0 };
+    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+    buf.memory = V4L2_MEMORY_MMAP;
+    buf.index = idx;
+    buf.length = s_nplanes;
+    buf.m.planes = planes;
+    xioctl(s_vfd, VIDIOC_QBUF, &buf);
+}
+
+void camera_set_nv12_listener(camera_nv12_fn on_frame,
+                              camera_nv12_release_fn on_release)
+{
+    s_nv12_fn = on_frame;
+    s_nv12_rel = on_release;
+}
+
 void camera_poll(void)
 {
     if (!s_ready || !s_stream_on)
@@ -345,6 +369,13 @@ void camera_poll(void)
         s_out_idx ^= 1;
         s_frame.seq = ++s_seq;
 
+        /* NV12 出口:视觉占用期间不归还,等 release 回调再 QBUF */
+        if (s_nv12_fn) {
+            s_busy[idx] = true;
+            s_fid[idx] = s_frame.seq;
+            s_nv12_fn(s_cap[idx].addr, s_cap_w, s_cap_h, s_frame.seq);
+        }
+
         /* 帧率实测(DG_CAM_FPS_LOG=1):每 5s 报一次实际送达帧率 */
         if (getenv("DG_CAM_FPS_LOG")) {
             static uint32_t win_seq;
@@ -364,12 +395,25 @@ void camera_poll(void)
         }
     }
 
+    if (s_busy[idx])
+        return;                          /* 视觉占用中,on_release 归还 */
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
     buf.memory = V4L2_MEMORY_MMAP;
     buf.index = idx;
     buf.length = s_nplanes;
     buf.m.planes = planes;
     xioctl(s_vfd, VIDIOC_QBUF, &buf);
+}
+
+void camera_nv12_release(uint32_t frame_id)
+{
+    for (int i = 0; i < CAM_BUF_CNT; i++) {
+        if (s_busy[i] && s_fid[i] == frame_id) {
+            s_busy[i] = false;
+            qbuf_index(i);
+            return;
+        }
+    }
 }
 
 const camera_frame_t *camera_latest(void)

@@ -137,7 +137,13 @@ if(DG_SIM)
     target_sources(dg_vision PRIVATE modules/vision/vision_sim.c)
 else()
     target_sources(dg_vision PRIVATE modules/vision/vision_rockiva.c)
+    target_include_directories(dg_vision PRIVATE
+        ${CMAKE_SYSROOT}/usr/include/rockiva
+        ${CMAKE_SOURCE_DIR}/hal/storage
+        ${CMAKE_SOURCE_DIR}/config)
+    # 库链接在 dg_camera 定义之后统一补(见下方"rockiva 链接"块)
 endif()
+
 
 # enroll:录入编排
 add_library(dg_enroll STATIC modules/enroll/enroll_service.c)
@@ -218,6 +224,12 @@ else()
 endif()
 target_link_libraries(dg_display PUBLIC dg_log)
 target_link_libraries(dg_camera PUBLIC dg_log)
+
+# rockiva 视觉链接(dg_vision 引用 camera/storage/cfg 符号;
+# 必须在 dg_camera/dg_storage 定义之后,CMake 才能建立正确的静态链接顺序)
+if(NOT DG_SIM)
+    target_link_libraries(dg_vision PUBLIC rockiva dg_storage dg_config dg_camera)
+endif()
 
 # ---- 应用(交叉编译产物,dg-deploy 推板) ----
 include_directories(

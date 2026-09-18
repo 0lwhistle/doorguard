@@ -42,6 +42,17 @@ const camera_frame_t *camera_latest(void);
 /** sim 后端帧率(ms/帧) */
 void camera_sim_set_interval(uint32_t ms);
 
+/* ---- NV12 出口(板端视觉专用;sim 无实现) ----
+ * on_frame 在相机轮询线程调用,data 指向 V4L2 缓冲(零拷贝),
+ * 消费方异步使用期间驱动不会回填——直到消费方调 on_release(frame_id)。
+ * 未设置监听时缓冲用完立即归还(现状)。 */
+typedef void (*camera_nv12_fn)(const uint8_t *data, int w, int h,
+                               uint32_t frame_id);
+typedef void (*camera_nv12_release_fn)(uint32_t frame_id);
+void camera_set_nv12_listener(camera_nv12_fn on_frame,
+                              camera_nv12_release_fn on_release);
+void camera_nv12_release(uint32_t frame_id);
+
 #ifdef __cplusplus
 }
 #endif

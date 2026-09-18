@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-09-18 B7 人脸识别:代码主体完成,交接续作(上下文压缩)
+
+- **已写完且交叉编译零警告**:vision_rockiva(检测/检索/录入缓存/特征库同步/
+  查重比较器)、camera NV12 出口(延迟归还)、vision_service 库转发、enroll 挂钩、
+  CMake rockiva 链接。PC sim 走 mock 不受影响
+- **待做**(顺序+全部 API 备忘):见 **docs/tech/B7_FACE_HANDOFF.md**(唯一交接源):
+  holder 接入 main.c(已批准)→ mode 切换(DETECT_1N/VERIFY_11/ENROLL/IDLE,
+  access tick 联动 FSM 公开字段)→ 活体留口(liveness_on_face+cfg 门禁)→
+  板上人脸模型(用户从 VM SDK 拷 /usr/lib)→ 部署联调 → 收尾
+- 下次会话:先读 B7_FACE_HANDOFF.md,按 §2 顺序做,勿重踩 §3 的坑
+
+---
+
 ## 2026-09-18 UI 重构:MVP 分层(学 ESP32 ovs 工程)
 
 ### 动机与根因
