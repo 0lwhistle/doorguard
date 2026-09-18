@@ -344,6 +344,24 @@ void camera_poll(void)
         s_frame.h = s_out_h;
         s_out_idx ^= 1;
         s_frame.seq = ++s_seq;
+
+        /* 帧率实测(DG_CAM_FPS_LOG=1):每 5s 报一次实际送达帧率 */
+        if (getenv("DG_CAM_FPS_LOG")) {
+            static uint32_t win_seq;
+            static int64_t win_ms;
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            int64_t ms = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+            if (win_ms == 0) {
+                win_ms = ms;
+                win_seq = s_seq;
+            } else if (ms - win_ms >= 5000) {
+                DG_LOGI(CAM_TAG, "实测帧率 %.1f fps(5s 窗口 %u 帧)",
+                        (s_seq - win_seq) * 1000.0 / (ms - win_ms), s_seq - win_seq);
+                win_ms = ms;
+                win_seq = s_seq;
+            }
+        }
     }
 
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;

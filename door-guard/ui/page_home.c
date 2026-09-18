@@ -36,7 +36,7 @@ static ev_auth_result_t s_last_result;       /* 最近认证结果(弹窗文案�
 
 static void render_evt(const ui_evt_t *evt);
 
-/* ---- 相机帧 → 画布(100ms 轮询) ---- */
+/* ---- 相机帧 → 画布(33ms 轮询,30fps) ---- */
 
 static void canvas_timer_cb(lv_timer_t *t)
 {
@@ -271,7 +271,7 @@ void page_home_create(lv_obj_t *parent)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_GOTO_PAGE, on_goto_page, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EVENT_UI_REFRESH_REQUEST, on_refresh_evt, NULL);
 
-    s_pump_timer = lv_timer_create(canvas_timer_cb, 100, NULL);
+    s_pump_timer = lv_timer_create(canvas_timer_cb, 33, NULL); /* 30fps:与传感器帧率对齐 */
 }
 
 void page_home_destroy(void)
