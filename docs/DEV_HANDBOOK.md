@@ -9,7 +9,7 @@
 ## 1. 项目速览
 
 - **目标**:RK3576 人脸识别门禁(LVGL 界面 + 官方 ROCKIVA 人脸识别 + 动作活体 + 预留指纹/IC 卡)
-- **硬件**:KickPi K7(RK3576,6T NPU)+ 5 寸 MIPI 屏 F050008M01(720×1280,GT9xx 触摸)+ 官方 IMX415 摄像头
+- **硬件**:KickPi K7(RK3576,6T NPU)+ 5 寸 MIPI 屏 F050008M01(720×1280,触摸 IC 随屏组装为 FocalTech/GT9xx)+ 官方 IMX415 摄像头
 - **系统**:Buildroot 无桌面 Linux(内核 6.1,vendor 分支),LVGL 直跑 DRM,无 X11/Wayland
 - **技术栈已定**:UI=LVGL;取流/上屏=RKADK/RGA→DRM;远程推流=GStreamer RTSP;人脸=ROCKIVA;数据库=SQLite;联网=以太网(主)
 
@@ -22,8 +22,8 @@
 | 摄像头接口 | **插在 cam2 口**(I2C 总线 8,地址 0x37,驱动实体名 `m02_b_imx415 8-0037`);cam0/cam1 口未插(探测 ID=0 属正常) |
 | IMX415 输出 | 3864×2192 **RAW10**,4 lane,驱动版本 00.01.08;已确认在出流(曝光寄存器在写) |
 | DPHY | `csi2-dphy3` 与 cam2 的 IMX415 配对 |
-| 屏 | F050008M01 已点亮,DTS 已 include 屏 dtsi(PWM 背光 + GT9xx 触摸 I2C) |
-| 触摸 | `/proc/bus/input/devices` 中 goodix,屏幕+触摸+LVGL demo 实测正常 |
+| 屏 | F050008M01 已点亮,DTS 已 include 屏 dtsi(PWM 背光 + 触摸 I2C) |
+| 触摸 | **IC 随屏组装不同**:当前屏 FocalTech `fts_ts`(I2C0-0038→event1,Type-B MT);早期屏为 GT9xx@0x5D。DTS 两驱动共存自动适配;应用经 touch_evdev 自动探测(2026-09-18 实测) |
 | WiFi/BT | SWT6621S(SDIO);**驱动编译失败(已知问题,见 §8),当前联网用以太网** |
 | 以太网 | GMAC 内核原生,正常 |
 | 串口调试 | **1500000 8N1**(不是 115200) |
@@ -66,7 +66,8 @@ for m in /dev/media*; do echo "== $m"; media-ctl -d $m -p 2>/dev/null | grep -E 
 dmesg | grep -i rknpu         # NPU 驱动
 ip a; ps | grep dropbear      # 网络/SSH
 cat /sys/class/backlight/*/brightness   # 背光
-cat /proc/bus/input/devices | grep -iA3 goodix  # 触摸
+cat /proc/bus/input/devices | grep -iA3 'fts\|goodix'  # 触摸(看实际枚举出的 IC)
+/etc/init.d/S60doorguard {start|stop|restart}  # 应用自启服务;日志 /var/log/door-guard.log
 ```
 
 注意:rootfs 裁剪过,缺什么工具优先想"buildroot defconfig 里没开",回 VM 加配置重编,不要板端乱装。
@@ -177,6 +178,6 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 | LVGL demo 自启占用屏幕(/etc/init.d/S00-lv_demo) | **已禁用**(板上运行 door-guard 前提;mv 为 disabled-S00-lv_demo) | B10 固件收编为 door-guard 自启 |
 | ISP 节点定位 / rkaiq 3A 起流 | 进行中(B6) | 完成 §5 映射后抓 NV12 |
 | ROCKIVA 上板验证 | 待 B7 | 库+模型已在 rootfs |
-| 触摸输入:GT9xx 无输入节点(B4 FTS probe fail) | 待 B5 固件 | door-guard 板上 UI 只显示无触摸 |
+| ~~触摸输入:无输入节点~~ **已解决(2026-09-18)**:touch_evdev 接入,当前屏 fts_ts 工作正常;仅剩方向/灵敏度人工校验(偏转配 DG_TOUCH_* env) | 已闭环 | — |
 | 门控 GPIO:继电器引脚未确认(勿在未知引脚写 direction,已致板挂起一次) | 待硬件确认 | 引脚确认后 gpio_hal 对拍 |
 | /dev/fb0(rockchipdrmfb)mmap EBUSY | 已绕行 | 显示走 DRM dumb-buffer(lv_drivers) |

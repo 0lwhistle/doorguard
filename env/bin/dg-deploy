@@ -19,8 +19,17 @@ bin="$DOORGUARD_ROOT/door-guard/build/door-guard"
 
 scp "$bin" "root@$ip:/root/door-guard"
 
+# 语言包(i18n 依赖 /root/ui/lang;CWD=/root 才能找到)与自启脚本(幂等)
+ssh "root@$ip" 'mkdir -p /root/ui/lang'
+scp "$DOORGUARD_ROOT"/door-guard/ui/lang/*.json "root@$ip:/root/ui/lang/" 2>/dev/null || true
+if [ -f "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" ]; then
+    scp -q "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" "root@$ip:/etc/init.d/S60doorguard"
+    ssh "root@$ip" 'chmod +x /etc/init.d/S60doorguard'
+fi
+
 if [ "$run" = 1 ]; then
-    ssh "root@$ip" '/root/door-guard'
+    # 先停自启服务再前台跑,避免双实例抢 DRM/SQLite;退出后手动 start 恢复
+    ssh "root@$ip" '/etc/init.d/S60doorguard stop >/dev/null 2>&1; cd /root && /root/door-guard'
 else
-    echo "已推送。运行: ssh root@$ip /root/door-guard"
+    echo "已推送(二进制+语言包+自启脚本)。板上运行: /etc/init.d/S60doorguard start"
 fi

@@ -4,12 +4,13 @@
  * 为什么不用 /dev/fb0:B4 固件 rockchipdrmfb 的 mmap 返回 EBUSY(实测,
  * fbdev 仿真层限制);lv_demo 实际走 DRM。本后端经 libdrm 创建 dumb
  * buffer + legacy modeset,与 lv_drivers/display/drm.c 一致。
- * 触摸输入待 B5 固件(GT9xx);接入后经 evdev 注册 lv_indev。
+ * 触摸输入:evdev 自动探测(fts_ts/goodix,见 touch_evdev.c),注册 pointer indev。
  */
 #include "display.h"
 #include "dg_log.h"
 #include "lvgl.h"
 #include "../../third_party/lv_drivers/drm.h"
+#include "touch_evdev.h"
 #include "ui/theme.h"
 
 #include <stdlib.h>
@@ -48,6 +49,10 @@ int display_init(void)
     disp_drv.flush_cb = drm_flush_wrapper;
     disp_drv.full_refresh = 1;
     lv_disp_drv_register(&disp_drv);
+
+    /* 触摸注册失败不阻塞显示:web 上位机路径仍完整可用 */
+    if (touch_evdev_start(w, h) != DG_OK)
+        DG_LOGW("[DISPLAY]", "触摸未注册,UI 需经上位机操作");
 
     DG_LOGI("[DISPLAY]", "DRM 后端就绪 %dx%d flush_cb=%p", w, h,
             (void *)disp_drv.flush_cb);

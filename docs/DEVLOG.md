@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-09-18 板上自启动 + 触摸输入打通
+
+### 根因与修复
+- **程序不自启**:`/etc/init.d/` 里从无 door-guard 脚本(非损坏,是没做过)→
+  新增 `board/rootfs-overlay/etc/init.d/S60doorguard`(S60:udev/dhcpcd/dropbear
+  之后;监督循环崩溃 3s 拉起;日志 /var/log/door-guard.log);dg-deploy 幂等推送
+- **触摸无反应**:display_drm.c 一直没注册任何输入设备(注释"待 B5 接入")。
+  新增 `hal/display/touch_evdev.c`:名字(fts/goodix/gt9)+MT 能力兜底自动探测,
+  Type-B MT slot 与 legacy ABS_X/Y 双协议,abs 范围→屏幕缩放,
+  `DG_TOUCH_SWAP_XY/INVERT_X/INVERT_Y` env 校准(零魔数)
+- **坑1**:当前屏触摸 IC 是 **fts_ts**(FocalTech,I2C0-0038,MT 协议),不是手册
+  早先记录的 goodix——IC 随屏组装不同,DTS 两驱动共存,换屏免改码
+- **坑2**:EVIOCGBIT 成功返回**拷贝字节数>0**,写成 `==0` 致 is_mt 恒假走 legacy,
+  而 fts_ts 无 ABS_X/Y → 范围 0..0;改 `>=0` 后 mt=1,范围 0..720/0..1280
+- **坑3**:板上语言包从未部署(/root/ui/lang 缺失)→ dg-deploy 现随二进制推送;
+  `-r` 前先停 S60 服务,避免双实例抢 DRM/SQLite
+- 顺带确认:以太网开机自启联网正常(S41dhcpcd)——B5 时期"eth0 不自启"结论已过时
+
+### 验证
+- 宿主:dg-test **16/16**(新增 test_touch_evdev 解析单测:MT 按下/移动/抬起、
+  双槽跟随、legacy、缩放、校准、越界钳制、槽号饱和)零警告;dg-build 零警告
+- 板上:远程重启后 door-guard **自启成功**(ps 448)、event1 打开(mt=1)、
+  DRM 渲染、web 8080 OK
+- ⏳ 待人工:手指点按校验坐标方向;若偏转,在 S60 脚本启动前 export DG_TOUCH_*
+
+### 下一步
+1. 手指实测触摸方向/灵敏度,结论回写 DEV_HANDBOOK §2
+2. rootfs-overlay 并入 VM SDK overlay,下版固件自带自启
+3. 门控 GPIO 对拍(仍待引脚确认,悬置)
+
+---
+
 ## 2026-09-18 目录整理 + 上 GitHub(历史重写,remote 变更)
 
 ### 做了什么

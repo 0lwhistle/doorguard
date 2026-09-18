@@ -1,0 +1,47 @@
+#!/bin/sh
+# S60doorguard — door-guard 门禁应用开机自启(buildroot SysV rcS)
+#
+# 序号 60:udev(S10)/dhcpcd(S41)/dropbear(S50) 之后,DRM/输入设备就绪。
+# 带监督循环:应用异常退出 3s 后拉起(门禁常在要求;main.c 崩溃退出即重试)。
+# 应用文件布局(dg-deploy 维护):/root/door-guard + /root/ui/lang/*.json;
+# 运行态:/var/lib/door-guard(db/key) + /etc/door-guard/device.json。
+DAEMON=/root/door-guard
+APPDIR=/root
+LOG=/var/log/door-guard.log
+SUP_PID=/var/run/door-guard-sup.pid
+
+case "$1" in
+  start)
+    [ -x "$DAEMON" ] || { echo "door-guard 不存在($DAEMON),跳过"; exit 0; }
+    mkdir -p /var/lib/door-guard
+    if [ -f "$SUP_PID" ] && kill -0 "$(cat "$SUP_PID")" 2>/dev/null; then
+        echo "door-guard 已在运行"
+        exit 0
+    fi
+    (
+        cd "$APPDIR" || exit 1
+        while :; do
+            "$DAEMON" >>"$LOG" 2>&1
+            echo "$(date '+%F %T') door-guard 退出(code=$?),3s 后拉起" >>"$LOG"
+            sleep 3
+        done
+    ) &
+    echo $! >"$SUP_PID"
+    echo "door-guard 已启动(日志 $LOG)"
+    ;;
+  stop)
+    [ -f "$SUP_PID" ] && kill "$(cat "$SUP_PID")" 2>/dev/null
+    killall door-guard 2>/dev/null
+    rm -f "$SUP_PID"
+    echo "door-guard 已停止"
+    ;;
+  restart)
+    "$0" stop
+    sleep 1
+    "$0" start
+    ;;
+  *)
+    echo "用法: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac

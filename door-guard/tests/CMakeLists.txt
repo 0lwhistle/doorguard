@@ -57,3 +57,13 @@ endmacro()
 dg_add_demo(demo_event_bus ${CMAKE_SOURCE_DIR}/proto/event_bus/demo_event_bus.c dg_event_bus)
 dg_add_demo(demo_tasker ${CMAKE_SOURCE_DIR}/proto/tasker/demo_tasker.c dg_tasker)
 dg_add_demo(demo_holder ${CMAKE_SOURCE_DIR}/proto/holder/demo_holder.c dg_holder)
+
+# 触摸 evdev 解析纯逻辑(板上 fts_ts/goodix 事件协议;宿主无设备直测解析)
+add_executable(test_touch_evdev test_touch_evdev.c
+               ${CMAKE_SOURCE_DIR}/hal/display/touch_evdev.c)
+target_include_directories(test_touch_evdev PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
+    ${CMAKE_SOURCE_DIR}/third_party/lvgl)
+target_link_libraries(test_touch_evdev PRIVATE lvgl dg_ui dg_log)
+add_test(NAME test_touch_evdev COMMAND test_touch_evdev)
+set_tests_properties(test_touch_evdev PROPERTIES TIMEOUT 60)

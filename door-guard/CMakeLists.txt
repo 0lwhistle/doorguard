@@ -193,7 +193,8 @@ if(DG_SIM)
     target_include_directories(dg_camera PRIVATE ${CMAKE_SOURCE_DIR}/third_party/stb)
     target_link_libraries(dg_camera PUBLIC m)   # stb_image 解码用到 pow
 else()
-    add_library(dg_display STATIC hal/display/display_drm.c third_party/lv_drivers/drm.c)
+    add_library(dg_display STATIC hal/display/display_drm.c hal/display/touch_evdev.c
+                                  third_party/lv_drivers/drm.c)
     # 顺序敏感:libdrm 在前——lv_drivers/drm.c 内部 #include <drm.h> 必须解析到
     # libdrm 的 drm.h 而不是本目录同名头(避免 xf86drm 类型未定义)
     target_include_directories(dg_display PRIVATE ${CMAKE_SYSROOT}/usr/include/libdrm)
