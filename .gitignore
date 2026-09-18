@@ -12,3 +12,8 @@ deliverables/wsl-toolchain/*.tar.gz
 
 # 模拟器运行时产物(db/key 自动生成,见 app/main.c)
 door-guard/sim/data/
+
+# 前端工程依赖与本地构建产物(node_modules 不入库;pages/ 才是入库的嵌入资源)
+door-guard/modules/net/web/frontend/node_modules/
+door-guard/modules/net/web/frontend/dist/
+door-guard/modules/net/web/web_pages.c.tmp

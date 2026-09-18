@@ -843,61 +843,44 @@ static int handle_ota(struct mg_connection *conn, void *ud)
     return 200;
 }
 
-/* ---- 静态页 ---- */
+/* ---- 静态资源(内嵌前端产物) ---- */
 
-static int serve_asset(struct mg_connection *conn, const char *ctype,
-                       const char *body)
+/* 按**精确路径**查资源表(pages/ 由 gen_pages.sh 生成,见 web_pages.h) */
+static const dg_web_asset_t *asset_lookup(const char *path)
 {
-    http_send(conn, 200, ctype, body, strlen(body), NULL);
-    return 200;
+    if (!path)
+        return NULL;
+    for (int i = 0; i < DG_WEB_ASSET_COUNT; i++) {
+        if (strcmp(DG_WEB_ASSETS[i].path, path) == 0)
+            return &DG_WEB_ASSETS[i];
+    }
+    return NULL;
 }
 
 /* 兜底路由(注册在 "/"):
  * civetweb 的匹配顺序是"精确 → 路径前缀 → 模式",而 "/" 作为模式能匹配
  * 任何 URI——所以它只能承担兜底,不能用它注册具体接口;反过来也意味着
- * 未知路径都会落到这里,由本函数区分"单页应用"与"接口/资源 404"。
+ * 未知路径都会落到这里,由本函数分派:资源表命中则返回资源,否则单页应用
+ * 回退(hash 路由下前端自己处理路径),/api/ 前缀回 JSON 404。
  * (历史坑:把 /api 前缀当 404 处理器单独注册会永远命中不到,因为 "/" 先命中。) */
-static int handle_index(struct mg_connection *conn, void *ud)
+static int handle_static(struct mg_connection *conn, void *ud)
 {
     (void)ud;
     const struct mg_request_info *ri = mg_get_request_info(conn);
     const char *uri = (ri && ri->local_uri) ? ri->local_uri : "";
-    if (strcmp(uri, "/") == 0 || strcmp(uri, "/index.html") == 0) {
-        serve_asset(conn, "text/html; charset=utf-8", DG_WEB_INDEX_HTML);
+
+    const dg_web_asset_t *asset = asset_lookup(uri);
+    if (asset) {
+        http_send(conn, 200, asset->mime, asset->data, asset->len, NULL);
         return 200;
     }
-    if (strncmp(uri, "/api/", 5) == 0)
+    if (strncmp(uri, "/api/", 5) == 0) {
         json_msg(conn, 404, "接口不存在");
-    else
-        json_msg(conn, 404, "资源不存在");
-    return 200;
-}
-
-static int handle_css(struct mg_connection *conn, void *ud)
-{
-    (void)ud;
-    serve_asset(conn, "text/css; charset=utf-8", DG_WEB_APP_CSS);
-    return 200;
-}
-
-static int handle_js(struct mg_connection *conn, void *ud)
-{
-    (void)ud;
-    serve_asset(conn, "application/javascript; charset=utf-8", DG_WEB_APP_JS);
-    return 200;
-}
-
-static int handle_favicon(struct mg_connection *conn, void *ud)
-{
-    (void)ud;
-    /* 内嵌 SVG 图标(蓝底白门),省一次 404 与外部资源依赖 */
-    static const char ico[] =
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
-        "<rect width='64' height='64' rx='14' fill='#1E88E5'/>"
-        "<path d='M20 14h16a12 12 0 0 1 0 24H20z' fill='#fff'/>"
-        "<circle cx='42' cy='46' r='4' fill='#fff'/></svg>";
-    http_send(conn, 200, "image/svg+xml", ico, strlen(ico),
-              "Cache-Control: max-age=86400\r\n");
+        return 200;
+    }
+    /* 非资源、非接口:交给单页应用(前端 hash 路由自行决定显示什么) */
+    http_send(conn, 200, "text/html; charset=utf-8", DG_WEB_INDEX_HTML,
+              strlen(DG_WEB_INDEX_HTML), NULL);
     return 200;
 }
 
@@ -1043,10 +1026,8 @@ int web_server_start(void)
         return DG_ERR_IO;
     }
 
-    mg_set_request_handler(s_ctx, "/", handle_index, NULL);   /* 兜底,见函数注释 */
-    mg_set_request_handler(s_ctx, "/app.css", handle_css, NULL);
-    mg_set_request_handler(s_ctx, "/app.js", handle_js, NULL);
-    mg_set_request_handler(s_ctx, "/favicon.ico", handle_favicon, NULL);
+    /* 静态资源与单页应用共用 "/" 兜底处理器(见 handle_static 注释) */
+    mg_set_request_handler(s_ctx, "/", handle_static, NULL);
     mg_set_request_handler(s_ctx, "/api/login", handle_login, NULL);
     mg_set_request_handler(s_ctx, "/api/logout", handle_logout, NULL);
     mg_set_request_handler(s_ctx, "/api/device", handle_device, NULL);

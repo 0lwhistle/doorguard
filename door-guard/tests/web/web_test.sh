@@ -57,26 +57,52 @@ if ! kill -0 $SRV_PID 2>/dev/null; then
     echo "服务未起来,日志:"; tail -20 /tmp/dg_webtest/server.log; exit 1
 fi
 
-echo "== 0. 页面静态一致性(不需服务) =="
-if python3 tests/web/ui_static_test.py > /tmp/dg_webtest/ui_static.out 2>&1; then
-    chk "页面 id/路由/括号一致" true
+echo "== 0. 前端静态一致性(不需服务:资源表/路由/分层/体积/离线) =="
+if python3 tests/web/frontend_check.py > /tmp/dg_webtest/frontend_check.out 2>&1; then
+    chk "前端资源表/接口/分层/体积一致" true
 else
-    chk "页面 id/路由/括号一致" false
-    cat /tmp/dg_webtest/ui_static.out
+    chk "前端资源表/接口/分层/体积一致" false
+    cat /tmp/dg_webtest/frontend_check.out
+fi
+
+echo "== 0b. 前端单测(Vue:api/stores/组件/集成/产物冒烟) =="
+if [ "${SKIP_FRONTEND_UNIT:-0}" = "1" ]; then
+    echo "(跳过:已设 SKIP_FRONTEND_UNIT=1)"
+elif [ -d modules/net/web/frontend/node_modules ]; then
+    if (cd modules/net/web/frontend && npx vitest run --silent > /tmp/dg_webtest/vitest.out 2>&1); then
+        chk "前端 44 项单测通过" true
+    else
+        chk "前端 44 项单测通过" false
+        tail -25 /tmp/dg_webtest/vitest.out
+    fi
+else
+    echo "(跳过:前端依赖未安装,跑 ./modules/net/web/build_frontend.sh --install 后可用)"
 fi
 
 echo "== 1. 静态资源 =="
 code=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/")
 chk "首页 200" "[ '$code' = '200' ]"
 curl -s "$BASE/" | grep -q "door-guard" && chk "首页含标题" true || chk "首页含标题" false
-ct=$(curl -s -o /dev/null -w "%{content_type}" "$BASE/app.css")
-chk "app.css 类型正确($ct)" "echo '$ct' | grep -q text/css"
-ct=$(curl -s -o /dev/null -w "%{content_type}" "$BASE/app.js")
-chk "app.js 类型正确($ct)" "echo '$ct' | grep -q javascript"
-code=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/favicon.ico")
-chk "favicon 200" "[ '$code' = '200' ]"
+ct=$(curl -s -o /dev/null -w "%{content_type}" "$BASE/assets/app.css")
+chk "assets/app.css 类型正确($ct)" "echo '$ct' | grep -q text/css"
+ct=$(curl -s -o /dev/null -w "%{content_type}" "$BASE/assets/app.js")
+chk "assets/app.js 类型正确($ct)" "echo '$ct' | grep -q javascript"
+code=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/favicon.svg")
+chk "favicon.svg 200" "[ '$code' = '200' ]"
+# 内嵌资源必须与页面公告的路径一致(Vue 产物改名/忘构建都会在这里露出)
+curl -s "$BASE/" | grep -q '/assets/app.js' && chk "首页引用构建产物" true || chk "首页引用构建产物" false
+# 服务端吐出的字节必须与仓库里内嵌的那份**逐字节一致**(防资源表长度/截断问题)
+js_size=$(curl -s -o /tmp/dg_webtest/app.js -w "%{size_download}" "$BASE/assets/app.js")
+chk "构建产物尺寸合理($js_size)" "[ '$js_size' -gt 1000 ]"
+if cmp -s /tmp/dg_webtest/app.js modules/net/web/pages/assets/app.js; then
+    chk "构建产物与仓库内嵌字节一致" true
+else
+    chk "构建产物与仓库内嵌字节一致" false
+fi
 code=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/nonexistent")
 chk "未知接口 404" "[ '$code' = '404' ]"
+code=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/some/spa/route")
+chk "未知页面回退到单页应用(200)" "[ '$code' = '200' ]"
 
 echo "== 2. 鉴权 =="
 code=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/logs")

@@ -5,8 +5,14 @@
 ## 1. web 上位机(HTTP + WebSocket)
 
 - 板上起内嵌 HTTP 服务(civetweb,单库 vendored;端口默认 **8080**,进 device_config
-  `web_port`)。页面与资源内嵌在固件里(`modules/net/web/pages/` → `gen_pages.sh` →
-  `web_pages.c`,生成物入库,改页面不需要前端工具链)
+  `web_port`)。前端是 **Vue 3 单页应用**(`modules/net/web/frontend/`,Vite 构建),
+  产物同步到 `pages/` 再经 `gen_pages.sh` 生成资源表 `web_pages.c`,**两者都入库**:
+  固件构建机不需要 node,只有改前端时才要 `./build_frontend.sh`
+- 前端分层纪律(由 `tests/web/frontend_check.py` 自动检查):
+  `views → stores → api → components`,组件纯展示(props/emits,不得 import store/api,
+  不得直接 fetch);色值只取 `styles/tokens.css`(与设备端 `ui/theme.h` 同源)
+- 前端用 hash 路由:设备端只提供固定资源表,不需要为前端路由配服务端回退;
+  未知路径回落到单页应用,`/api/` 前缀才回 JSON 404
 - 路由(方法严格校验,改状态接口只接受 POST,不符回 405):
 
   | 方法 | 路径 | 鉴权 | 说明 |

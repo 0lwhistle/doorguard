@@ -1,0 +1,56 @@
+/*
+ * base.css — 复位与排版(不含动效,动效在 animations.css)
+ */
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+h1,
+h2,
+h3 {
+  margin: 0;
+}
+a {
+  color: var(--primary-dark);
+}
+code,
+pre {
+  font-family: var(--mono);
+}
+/* 通用小工具类(跨组件复用的纯排版语义) */
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 12px;
+}
+.mono {
+  font-family: var(--mono);
+}
+.center {
+  text-align: center;
+}
+/* 滚动条:浅色细条,贴合蓝白主题 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: var(--radius-pill);
+}

@@ -25,6 +25,9 @@ HAL 层       camera / display(DRM) / npu(librknnrt) / gpio(libgpiod)
 - 模块间只经 `proto/` 的消息队列与事件总线通信;服务层线程化,互不直接调用
 - 事件命名:`EV_<域>_<动作>`(如 `EV_AUTH_RESULT`、`EV_ENROLL_DONE`、`EV_NET_OTA_PROGRESS`)
 - 新建模块步骤:本文档登记职责 → proto/ 定义接口与事件 → 实现 → 测试 → README + 使用示例
+- **前端子工程**:web 上位机前端是独立 Vue 工程(`modules/net/web/frontend/`),
+  产物入库(`pages/`、`web_pages.c`)。跨层边界是同仓库内最干净的示范:
+  视图不取数、组件纯展示、HTTP 出口唯一 —— 后端 C 侧同理(服务层不碰 UI、UI 不碰 SQL)
 
 ## 2. ESP32 模板复用(模板已到位)
 
