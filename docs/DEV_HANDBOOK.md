@@ -77,11 +77,11 @@ cat /proc/bus/input/devices | grep -iA3 'fts\|goodix'  # 触摸(看实际枚举�
 ## 5. 摄像头子系统现状(重要,接手必读)
 
 - 板上有 **8 个 /dev/mediaX**,是 RK3576 的多 rkcif 实例 + ISP 等混排,**别假设 media0 就是摄像头**
-- IMX415 走 **dphy3**,对应哪个 rkcif 实例/ISP 链路、哪个 /dev/videoX 出 NV12,**尚未最终定位**(映射命令见 §4 第一条,拿到结果后更新本节)
+- **已定位(2026-09-18 B6)**:IMX415(cam2 口,实体名 `m02_b_imx415 8-0037`)→ rkcif → **rkisp-vir2 = /dev/media5**,mainpath = **/dev/video51**;实体名查法 `cat /sys/class/video4linux/v4l-subdev*/name`
 - 两条取流路径:
-  - **rkcif 直采**:RAW10 裸帧(无 3A,画面偏暗/偏绿),仅用于验证传感器出图
-  - **rkisp + rkaiq 3A**:正式成像路径,输出 NV12,门禁用这条;3A 服务(rkaiq)需先起
-- B6 验收:抓到 1920×1080 NV12(3.1MB/帧)+ 帧内容亮度方差正常
+  - **rkcif 直采**:RAW10 裸帧(无 3A),仅用于验证传感器出图
+  - **rkisp + rkaiq 3A**:正式成像路径,**已打通**(door-guard 预览在用):V4L2 单平面 NV12 1280x720 → RGA 旋转90+转 XRGB → LVGL。⚠️ 3 个死坑:uAPI2 参数是传感器实体名(非 media 节点,传错段错误);aiq2.lock 死锁需"取流线程与 prepare 并发会合";librga 成功码有两个——详见 door-guard/hal/camera/README.md
+- door-guard 相机链路开关与环境变量见 `door-guard/hal/camera/README.md`
 
 ---
 

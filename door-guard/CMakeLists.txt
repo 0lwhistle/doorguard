@@ -202,6 +202,11 @@ else()
     set_source_files_properties(third_party/lv_drivers/drm.c PROPERTIES COMPILE_OPTIONS "-w")
     target_link_libraries(dg_display PUBLIC lvgl drm)   # libdrm:sysroot 实测有
     add_library(dg_camera STATIC hal/camera/camera_board.c)
+    target_include_directories(dg_camera PRIVATE
+        ${CMAKE_SYSROOT}/usr/include/rkaiq
+        ${CMAKE_SYSROOT}/usr/include/rga)
+    # rkaiq:3A 经板上 rkaiq_3A_server;librga:NV12→XRGB 硬件旋转转换
+    target_link_libraries(dg_camera PUBLIC rkaiq rga)
 endif()
 target_link_libraries(dg_display PUBLIC dg_log)
 target_link_libraries(dg_camera PUBLIC dg_log)

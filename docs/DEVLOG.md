@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-09-18 B6 预览打通:V4L2+RGA+rkaiq(相机画面上屏)
+
+### 做了什么
+- camera_board 占位桩 → 真实链路:rkisp-vir2 mainpath(/dev/video51)V4L2 MMAP
+  单平面 NV12 1280x720 → RGA 旋转90+转 XRGB → 主页 canvas
+- 相机初始化全量后台线程化(camera_init 立即返回)。**黑屏根因**:camera_init
+  卡在主循环启动前,lv_timer_handler 不跑,屏幕永远停在黑帧
+- 板上无人跑通过此相机(lv_demo 无相机代码),以下全按实测摸索
+
+### 坑(按踩的顺序)
+1. rkaiq uAPI2 `sns_ent_name` 是**传感器实体名** `m02_b_imx415 8-0037`
+   (查 /sys/class/video4linux/v4l-subdev*/name),传 /dev/mediaN 直接段错误
+2. **aiq2.lock 死锁**:server 被 prepare 触发后持锁等"流启动事件",而 client
+   init/prepare 都要这把锁;单线程任何顺序都双等。解法=并发会合:取流线程
+   延迟 500ms STREAMON,server 见流放锁,prepare 返回
+3. cam2 传感器映射**第 3 个虚拟 ISP**(rkisp-vir2=/dev/media5,mainpath=
+   /dev/video51),不是想当然的 vir0;换端口重查 media-ctl
+4. librga 成功码有两个(SUCCESS=1/NOERROR=2),只认一个把成功当失败
+5. V4L2 用 V4L2_PIX_FMT_NV12(单平面);NV12M 是双平面,QUERYBUF EINVAL
+6. S60 管理 3A server 必须连包装 sh 一起清(pidfile 残留会骗过 S40 判重)
+   + 重启后 server 持锁不放 → S60 每次启动前整体重启 server
+
+### 验证
+- 像素级:dump 帧 B/G/R 均值 27.8/54.5/34.6,动态范围 0-255,ASCII 缩略图
+  有场景结构(非噪声非黑帧)
+- 服务:3A 就绪 + 相机状态:就绪;开关 DG_CAM_ROT(方向)/DG_AIQ=0(裸流)/
+  DG_CAM_DUMP(取证),详见 hal/camera/README.md
+
+### 下一步
+1. 人工确认:画面方向(不对改 DG_CAM_ROT=270)、3A 曝光观感
+2. 认证/录入链路接真实帧(B7 ROCKIVA);web 视频推流选型(MJPEG vs gst)
+
+---
+
 ## 2026-09-18 板上自启动 + 触摸输入打通
 
 ### 根因与修复

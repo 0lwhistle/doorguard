@@ -18,11 +18,28 @@ case "$1" in
         echo "door-guard 已在运行"
         exit 0
     fi
+    # 3A server 管理:直接杀进程+清 pidfile/锁文件,再经 S40 拉起并等它就绪。
+    # 不能只调 S40 start——杀进程后残留的包装 sh 会让 S40 误判"已在运行"。
+    aiq_restart() {
+        killall rkaiq_3A_server 2>/dev/null
+        start-stop-daemon -K -p /tmp/.rkaiq_3A 2>/dev/null
+        rm -f /tmp/.rkaiq_3A /tmp/aiq2.lock
+        /etc/init.d/S40rkaiq_3A start >/dev/null 2>&1
+        n=0
+        while [ $n -lt 10 ]; do
+            pidof rkaiq_3A_server >/dev/null 2>&1 && return 0
+            sleep 1
+            n=$((n + 1))
+        done
+        return 1
+    }
+    aiq_restart
     (
         cd "$APPDIR" || exit 1
         while :; do
             "$DAEMON" >>"$LOG" 2>&1
             echo "$(date '+%F %T') door-guard 退出(code=$?),3s 后拉起" >>"$LOG"
+            aiq_restart
             sleep 3
         done
     ) &
@@ -32,6 +49,8 @@ case "$1" in
   stop)
     [ -f "$SUP_PID" ] && kill "$(cat "$SUP_PID")" 2>/dev/null
     killall door-guard 2>/dev/null
+    killall rkaiq_3A_server 2>/dev/null
+    rm -f /tmp/.rkaiq_3A /tmp/aiq2.lock
     rm -f "$SUP_PID"
     echo "door-guard 已停止"
     ;;
