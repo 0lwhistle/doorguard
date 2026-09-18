@@ -9,3 +9,6 @@ deliverables/wsl-toolchain/*.tar.gz
 
 # Windows 复制残留(WSL 挂载 /mnt 或浏览器下载带入)
 **/*:Zone.Identifier
+
+# 模拟器运行时产物(db/key 自动生成,见 app/main.c)
+door-guard/sim/data/
