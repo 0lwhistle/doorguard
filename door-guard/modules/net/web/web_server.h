@@ -2,9 +2,12 @@
  * web_server.h — 内嵌 web 上位机(spec-network §1,civetweb 单库)
  *
  * 端口:device_config web_port(默认 8080)。
- * 功能:登录(token)/ WebSocket 实时事件 / 日志查询 / 设备信息+NTP /
- *       OTA 上传端点 / 视频页(占位)。
- * 安全:除登录与静态页外全部校验 X-Auth-Token;口令 PBKDF2 存储。
+ * 安全(逐条对应实现):
+ *   - 除静态页(/、/app.css、/app.js)与登录外,全部要求 token
+ *     (X-Auth-Token;WebSocket 因浏览器无法自定义头,用 ?token=)
+ *   - 口令 PBKDF2 存储(web_auth),token 表见 web_session
+ *   - 登录失败按来源计数锁定(web_auth 风控),防局域网脚本爆破
+ *   - 改凭据即吊销全部会话(web_auth 内部保证)
  */
 #ifndef DG_WEB_SERVER_H
 #define DG_WEB_SERVER_H

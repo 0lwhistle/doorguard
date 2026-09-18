@@ -11,8 +11,10 @@ ip="${1:-}"; pkg="${2:-}"; ver="${3:-dev}"
 port="${DG_WEB_PORT:-8080}"
 base="http://$ip:$port"
 
+user="${DG_WEB_USER:-admin}"
+pwd="${DG_WEB_PWD:-admin}"
 resp=$(curl -s -H 'Content-Type: application/json' \
-    -d '{"user":"admin","pwd":"admin"}' "$base/api/login")
+    -d "{\"user\":\"$user\",\"pwd\":\"$pwd\"}" "$base/api/login")
 token=$(echo "$resp" | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
 [ -n "$token" ] || { echo "登录失败: $resp"; exit 1; }
 

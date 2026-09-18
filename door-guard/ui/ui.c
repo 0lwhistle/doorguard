@@ -29,6 +29,7 @@ extern void presenter_users_register(void);
 extern void presenter_device_register(void);
 extern void presenter_access_set_register(void);
 extern void presenter_logs_register(void);
+extern void presenter_web_set_register(void);
 
 static lv_obj_t *s_page_root = NULL;
 
@@ -73,6 +74,7 @@ int ui_init(const dg_ui_args_t *args)
     presenter_device_register();
     presenter_access_set_register();
     presenter_logs_register();
+    presenter_web_set_register();
 
     bridge_init();
     navigator_push("home");

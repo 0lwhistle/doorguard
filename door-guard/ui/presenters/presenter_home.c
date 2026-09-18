@@ -200,7 +200,9 @@ static void home_on_evt(const ui_evt_t *evt)
     case UI_EVT_GOTO_PAGE:
         break;                               /* 切页由 ui 层泵直驱 */
     case UI_EVT_NTP_RESULT:
-        break;                               /* 设备管理页消费 */
+    case UI_EVT_WEB_STATE:
+    case UI_EVT_WEB_SET_RESULT:
+        break;                               /* 设备/设备管理子页消费 */
     }
 }
 

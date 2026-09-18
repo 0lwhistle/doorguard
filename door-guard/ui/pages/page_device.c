@@ -55,6 +55,13 @@ static void on_net(lv_event_t *e)
     dg_popup_success(_("网络配置"), 800, NULL, NULL);
 }
 
+/* Web 管理:上位机账号/口令 + 局域网访问地址(spec-network §1) */
+static void on_web(lv_event_t *e)
+{
+    (void)e;
+    navigator_push("web_set");
+}
+
 void page_device_create(lv_obj_t *parent)
 {
     DG_LOGI("[DEVICE]", "page create");
@@ -93,6 +100,11 @@ void page_device_create(lv_obj_t *parent)
     lv_obj_set_size(net, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
     lv_obj_align(net, LV_ALIGN_TOP_MID, 0, 180 + 2 * (DG_BTN_H + DG_PAD));
     lv_obj_add_event_cb(net, on_net, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *web = dg_btn_create(parent, LV_SYMBOL_SETTINGS, _("Web 管理"));
+    lv_obj_set_size(web, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
+    lv_obj_align(web, LV_ALIGN_TOP_MID, 0, 180 + 3 * (DG_BTN_H + DG_PAD));
+    lv_obj_add_event_cb(web, on_web, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));
     lv_obj_set_size(back, 200, DG_BTN_H);

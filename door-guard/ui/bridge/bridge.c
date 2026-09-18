@@ -148,6 +148,30 @@ static int on_hint_clear(const event_t *e, void *ud)
     return 0;
 }
 
+/* ---- web 上位机账号(设备管理 → Web 管理) ---- */
+
+static int on_web_state(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_WEB_STATE;
+    evt.web_state = *(const ev_web_state_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
+static int on_web_set_result(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_WEB_SET_RESULT;
+    evt.web_set_result = *(const ev_web_set_result_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
 void bridge_init(void)
 {
     event_bus_subscribe(EV_VISION_FACE_BOX, on_face_box, NULL);
@@ -162,7 +186,9 @@ void bridge_init(void)
     event_bus_subscribe(EV_UI_HINT_CLEAR, on_hint_clear, NULL);
     event_bus_subscribe(EV_UI_FACEBOX, on_facebox, NULL);
     event_bus_subscribe(EV_NET_NTP_RESULT, on_ntp_result, NULL);
-    DG_LOGI("[BRIDGE]", "事件桥就绪(12 订阅)");
+    event_bus_subscribe(EV_NET_WEB_STATE, on_web_state, NULL);
+    event_bus_subscribe(EV_NET_WEB_SET_RESULT, on_web_set_result, NULL);
+    DG_LOGI("[BRIDGE]", "事件桥就绪(14 订阅)");
 }
 
 void bridge_btn(const ev_ui_btn_t *btn)
@@ -205,4 +231,20 @@ void bridge_cancel(void)
 {
     ev_ui_btn_t b = { .btn = DG_BTN_BACK };
     EVENT_BUS_PUBLISH(EV_UI_BTN, &b);
+}
+
+/* ---- web 上位机账号:动作经 net 模块,UI 不碰凭据存储 ---- */
+
+void bridge_web_state_req(void)
+{
+    EVENT_BUS_PUBLISH_EMPTY(EV_NET_WEB_STATE_REQ);
+}
+
+void bridge_web_set(const char *user, const char *pwd)
+{
+    ev_web_set_t req;
+    memset(&req, 0, sizeof(req));
+    snprintf(req.user, sizeof(req.user), "%s", user ? user : "");
+    snprintf(req.pwd, sizeof(req.pwd), "%s", pwd ? pwd : "");
+    EVENT_BUS_PUBLISH(EV_NET_WEB_SET, &req);
 }

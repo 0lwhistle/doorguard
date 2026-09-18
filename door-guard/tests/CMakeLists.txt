@@ -52,6 +52,23 @@ target_link_libraries(test_verify_flow PRIVATE dg_access dg_vision dg_storage dg
 add_test(NAME test_verify_flow COMMAND test_verify_flow)
 set_tests_properties(test_verify_flow PROPERTIES TIMEOUT 120)
 
+# mDNS 报文编解码(纯函数:名字/压缩指针/记录写入,不对 socket)
+add_executable(test_mdns_wire test_mdns_wire.c
+    ${CMAKE_SOURCE_DIR}/modules/net/mdns/mdns_wire.c)
+target_include_directories(test_mdns_wire PRIVATE
+    ${CMAKE_SOURCE_DIR}/modules/net/mdns ${CMAKE_SOURCE_DIR}/proto)
+add_test(NAME test_mdns_wire COMMAND test_mdns_wire)
+set_tests_properties(test_mdns_wire PROPERTIES TIMEOUT 30)
+
+# web 凭据与会话(直接编入被测源文件:不拉 civetweb,纯逻辑单测)
+add_executable(test_web_auth test_web_auth.c
+    ${CMAKE_SOURCE_DIR}/modules/net/web/web_auth.c
+    ${CMAKE_SOURCE_DIR}/modules/net/web/web_session.c)
+target_include_directories(test_web_auth PRIVATE ${CMAKE_SOURCE_DIR}/modules/net/web)
+target_link_libraries(test_web_auth PRIVATE dg_storage dg_proto crypto pthread)
+add_test(NAME test_web_auth COMMAND test_web_auth)
+set_tests_properties(test_web_auth PROPERTIES TIMEOUT 60)
+
 # i18n 一致性:扫描源码 _() 键 + 双 json 覆盖 + 裸中文检查 + 字体字形覆盖
 add_executable(test_i18n test_i18n.c)
 target_compile_definitions(test_i18n PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

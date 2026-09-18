@@ -5,6 +5,42 @@
 
 ---
 
+## 2026-09-18 web 上位机改造 + mDNS 做实(局域网按名字可用)
+
+**做了什么**
+- **mDNS 重写**(modules/net/mdns):拆出 `mdns_wire.c`(纯函数,可单测)+ 应答器状态机。
+  现在公告 A + `_http._tcp` 的 PTR/SRV/TXT,能做**服务发现**(手机/avahi-browse 能看到设备);
+  探测 3 次防重名(冲突自动改名 `doorguard-2` 并持久化)、通告 2 次、**IP 变化自动重通告**、
+  关机发 goodbye;组播应答带 cache-flush,legacy(非 5353 端口)查询走**单播**应答(回带 ID/问题段、
+  TTL 压到 10s);逐接口入组 + IP_PKTINFO 按来源网口应答。
+- **web 上位机**:业务逻辑与鉴权重做——`web_auth`(凭据 + 登录风控)、`web_session`(token 表
+  滑动续期/容量驱逐/改密即踢下线)、方法严格校验、日志查询加用户过滤与分页校验、
+  NTP 改异步(202 + WS 结果)、`/api/account` 改账号口令(需旧口令)。
+  页面拆成真前端文件 `pages/{index.html,app.css,app.js}` → `gen_pages.sh` → `web_pages.c`
+  (蓝白主题 + 卡片入场/水波纹/toast/数字滚动/直播列表/LIVE 脉冲等动效,零外部依赖)。
+- **设备菜单**:设备管理页新增 **Web 管理** 子页(服务状态、局域网地址 `http://doorguard.local:8080`、
+  当前账号、默认口令告警、改账号/改口令带二次确认);UI 与 net 模块经事件通信
+  (新增 EV_NET_WEB_STATE_REQ/STATE/SET/SET_RESULT),UI 不碰凭据存储。
+
+**踩的坑(已修,勿回退)**
+- **civetweb 在 OpenSSL 3 下 WebSocket 握手必崩**:`NO_SSL=1` 时它不包含 OpenSSL 头,
+  却仍调 `EVP_Digest`/`EVP_get_digestbyname` → 隐式声明把返回指针截成 int → 段错误。
+  修法:`third_party/civetweb/dg_openssl_shim.h` + CMake `-include`(civetweb 带 `-w`,告警全被压掉)。
+- **WS 拒连丢状态行**:`mg_send_http_error` 先置 `conn->status_code`,后续 header 发送被跳过,
+  客户端只收到裸 body → 改自己写完整 401。
+- **`mg_set_request_handler("/")` 在模式匹配阶段匹配一切** `/api/**` 兜底永远不会被命中。
+- **mDNS 线程自死锁**:持 `s_mtx` 时又调 `snapshot()`(非递归锁)→ 连带卡死 web 线程(现象:`/api/device` 永挂)。
+- **NTP 服务从未被装配**(main 里只 include 了头):菜单/上位机的"时间矫正"一直静默无效 → 已补 holder 注册。
+- 原 `/api/device` 的 `uptime_s` 是 `time(NULL)-0`(其实是 epoch);WS 端点原先**完全没鉴权**。
+- 新增测试:test_web_auth(凭据/会话/风控 39 项)、test_mdns_wire(报文 69 项);
+  `tests/web/web_test.sh` 扩到 **57 项**(自起服务、清沙箱库),新增 `ws_test.py`(服务端主动推送)、
+  `mdns_query_test.py`(报文级)、`ui_static_test.py`(页面 id/路由/括号一致性,无浏览器也能查)。
+
+**状态**:PC 端 22 项 ctest 全绿;web 验收 57/57;交叉编译零告警。**未做**:web 页面视觉人工复核
+(本会话无浏览器后端,只做了静态与接口级验证)、监控画面(仍是占位,待接 capture 帧)。
+
+---
+
 ## 2026-09-18 输入体系:字母键盘 + 每个输入都做合法性检测
 
 - **背景**:设备无物理键盘,唯一输入是 5 寸触摸屏;原来只有数字键盘(dg_kbd),

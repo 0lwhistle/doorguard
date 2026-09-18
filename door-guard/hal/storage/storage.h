@@ -74,6 +74,11 @@ int db_log_append(const access_log_t *log);
 /** 时间段+用户过滤分页查询;out->logs/max 由调用方提供 */
 int db_log_query(const log_query_t *q, log_page_t *out);
 
+/* ---- 存储占用(web 上位机设备信息展示;不暴露 SQL/路径给上层) ---- */
+
+/** 库文件字节数与所在分区可用字节数(任一参数可为 NULL) */
+int db_storage_stats(uint64_t *db_bytes, uint64_t *free_bytes);
+
 /* ---- device_config KV(spec-database §5) ---- */
 
 int db_config_set(const char *key, const char *value);

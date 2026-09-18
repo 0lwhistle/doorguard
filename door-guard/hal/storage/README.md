@@ -60,6 +60,8 @@
 - **密码校验恒时比较**(dg_constant_time_cmp)防时序侧信道
 - **WAL + busy_timeout 3s**:断电不损坏主库,并发读不受写阻塞
 - **上限/唯一性先预检后 INSERT**:预检映射业务码,UNIQUE 约束兜底
+- **库路径不外泄**:web 上位机要显示"存储占用",但库路径属本模块的部署细节;
+  所以提供 `db_storage_stats(&db_bytes,&free_bytes)` 而不是把路径交给上层拼 stat
 
 ## 使用示例
 

@@ -20,11 +20,14 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <stdio.h>
 
 static const char *TAG = "[STORAGE]";
 
 static sqlite3 *s_db = NULL;
 static pthread_mutex_t s_mtx = PTHREAD_MUTEX_INITIALIZER;
+static char s_db_path[256];   /* 库文件路径(storage_init 时记下):供占用查询 */
 
 /* 特征查重比较器(缺省逐字节相等;enroll 编排注入相似度算法) */
 static dg_feature_cmp_fn s_face_cmp;
@@ -93,6 +96,8 @@ int storage_init(const char *db_path, const char *key_path)
         return DG_ERR_DB;
     }
 
+    snprintf(s_db_path, sizeof(s_db_path), "%s", db_path);
+
     /* WAL:断电只丢未 checkpoint 的日志,不损坏主库 */
     sqlite3_exec(s_db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
     sqlite3_busy_timeout(s_db, 3000);
@@ -125,6 +130,44 @@ void storage_deinit(void)
     }
     pthread_mutex_unlock(&s_mtx);
     dg_crypto_deinit();
+}
+
+/* ---- 存储占用查询(web 上位机"设备信息";不暴露 SQL) ---- */
+
+int db_storage_stats(uint64_t *db_bytes, uint64_t *free_bytes)
+{
+    pthread_mutex_lock(&s_mtx);
+    char path[sizeof(s_db_path)];
+    snprintf(path, sizeof(path), "%s", s_db_path);
+    pthread_mutex_unlock(&s_mtx);
+
+    if (db_bytes) {
+        uint64_t n = 0;
+        FILE *f = path[0] ? fopen(path, "rb") : NULL;
+        if (f) {
+            if (fseek(f, 0, SEEK_END) == 0) {
+                long sz = ftell(f);
+                if (sz > 0)
+                    n = (uint64_t)sz;
+            }
+            fclose(f);
+        }
+        *db_bytes = n;
+    }
+    if (free_bytes) {
+        /* 库所在目录的可用空间;目录不存在(库未建)时回退根分区 */
+        char dir[sizeof(s_db_path)];
+        snprintf(dir, sizeof(dir), "%s", path);
+        char *slash = strrchr(dir, '/');
+        if (slash)
+            *slash = '\0';
+        struct statvfs vfs;
+        const char *probe = dir[0] ? dir : "/";
+        if (statvfs(probe, &vfs) != 0 && statvfs("/", &vfs) != 0)
+            return DG_ERR_IO;
+        *free_bytes = (uint64_t)vfs.f_bavail * vfs.f_frsize;
+    }
+    return path[0] ? DG_OK : DG_ERR_NOT_INIT;
 }
 
 /* ---- 绑定/读取辅助 ---- */

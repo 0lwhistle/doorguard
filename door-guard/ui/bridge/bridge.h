@@ -33,6 +33,12 @@ void bridge_pwd_submit(const char *uid, const char *pwd); /* 密码框确认 */
 void bridge_method_pick(int32_t method);      /* 方式选择 */
 void bridge_cancel(void);                     /* 弹窗取消 → 放弃当前验证流程 */
 
+/* Web 管理页:状态查询 + 账号/口令修改。
+ * 凭据只由 net 模块读写(UI 不碰存储),动作走事件、结果经
+ * UI_EVT_WEB_STATE / UI_EVT_WEB_SET_RESULT 回来。 */
+void bridge_web_state_req(void);              /* 请 net 回报一次状态快照 */
+void bridge_web_set(const char *user, const char *pwd); /* user 空串 = 只改口令 */
+
 /* ---- 数据快照(presenter 拉取式刷新用) ---- */
 /* cfg 快照经 cfg_get();用户/日志列表经 storage——随页迁移逐步收口到本层 */
 

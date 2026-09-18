@@ -105,6 +105,7 @@ add_library(dg_ui STATIC
     ui/pages/page_device.c
     ui/pages/page_access_set.c
     ui/pages/page_logs.c
+    ui/pages/page_web_set.c
     ui/presenters/presenter_home.c
     ui/presenters/presenter_standby.c
     ui/presenters/presenter_menu.c
@@ -112,6 +113,7 @@ add_library(dg_ui STATIC
     ui/presenters/presenter_device.c
     ui/presenters/presenter_access_set.c
     ui/presenters/presenter_logs.c
+    ui/presenters/presenter_web_set.c
     ui/ui_events.c
     ui/font/dg_font_cn_16.c
     ${DG_WIDGET_SRCS}
@@ -182,17 +184,41 @@ target_compile_definitions(civetweb PRIVATE
     NO_SSL=1 NO_SSL_DL=1 MG_ENABLE_MD5=1 USE_WEBSOCKET=1
     MG_ENABLE_SHA1=1 OPENSSL_API_3_0=1)
 target_compile_definitions(civetweb PUBLIC USE_WEBSOCKET=1)
+# WebSocket 握手应答要用 SHA1:civetweb 在 NO_SSL 下**不**包含 OpenSSL 头,但
+# OPENSSL_API_3_0 分支仍调 EVP_Digest/EVP_get_digestbyname —— 缺原型即隐式声明,
+# 指针返回值被截成 int,握手当场段错误(实测:连上即崩)。civetweb 自身带 -w
+# 把告警全压掉了,所以这个坑只能靠人工发现。这里强制先包含 EVP 头补上原型;
+# 不改 third_party 源码,升级 civetweb 时不必重新打补丁。
+target_compile_options(civetweb PRIVATE
+    -include ${CMAKE_CURRENT_SOURCE_DIR}/third_party/civetweb/dg_openssl_shim.h)
 
 # net:web 上位机 / OTA / NTP / mDNS
 add_library(dg_net STATIC
     modules/net/web/web_server.c
     modules/net/web/web_pages.c
+    modules/net/web/web_auth.c
+    modules/net/web/web_session.c
     modules/net/ota/ota_service.c
     modules/net/ntp/ntp_service.c
     modules/net/mdns/mdns_responder.c
+    modules/net/mdns/mdns_wire.c
+    modules/net/net_info.c
 )
 target_include_directories(dg_net PUBLIC ${CMAKE_SOURCE_DIR}/modules/net)
 target_link_libraries(dg_net PUBLIC dg_access dg_storage civetweb crypto)
+
+# 固件版本号:git describe 注入(上位机"设备概览"与 /api/device 显示)。
+# 无 git / 无 tag 时退化为 unknown——不能因为版本号取不到就让编译失败。
+execute_process(
+    COMMAND git describe --tags --always --dirty
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE DG_GIT_DESC
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT DG_GIT_DESC)
+    set(DG_GIT_DESC "unknown")
+endif()
+target_compile_definitions(dg_net PUBLIC DG_FW_VERSION="${DG_GIT_DESC}")
 
 if(DG_BUILD_TESTS)
     enable_testing()

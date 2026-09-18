@@ -134,6 +134,14 @@ static int mod_liveness(void)
     return liveness_service_start();
 }
 
+/* NTP 服务:订阅 EV_NET_NTP_TRIGGER(菜单/上位机按钮)+ 开机自动校正一次。
+ * 必须真装配:只 include 头不初始化时 running=false,触发请求会被静默丢弃
+ * (表现为"按钮没反应",不报错——曾经的坑) */
+static int mod_ntp(void)
+{
+    return ntp_service_start();
+}
+
 static int mod_web(void)
 {
     return web_server_start();
@@ -181,6 +189,7 @@ static int register_modules(void)
         { "access",         mod_access,         true,  DEP_SVC,       1 },
         { "enroll",         mod_enroll,         false, DEP_SVC,       1 },
         { "liveness",       mod_liveness,       false, DEP_SVC,       1 },
+        { "ntp",            mod_ntp,            false, DEP_EVENT_BUS, 1 },
         { "web",            mod_web,            false, DEP_NET,       1 },
         { "mdns",           mod_mdns,           false, DEP_NET,       1 },
         /* ui 依赖 display:display 由 ui_init 内部初始化(无独立模块),
