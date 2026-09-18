@@ -17,6 +17,7 @@ static lv_timer_t *s_timer = NULL;
 static void on_touch(lv_event_t *e)
 {
     (void)e;
+    DG_LOGI("[STANDBY]", "触摸唤醒");
     /* 触摸唤醒由 access 服务统一决策(EV_UI_GOTO_PAGE 回 UI) */
     EVENT_BUS_PUBLISH_EMPTY(EV_UI_TOUCH);
 }
@@ -48,8 +49,14 @@ void page_standby_create(lv_obj_t *parent)
 
     s_timer = lv_timer_create(clock_timer_cb, 1000, NULL);
 
-    /* 整页点击 = 触摸唤醒 */
-    lv_obj_add_event_cb(parent, on_touch, LV_EVENT_CLICKED, NULL);
+    /* 整页点击 = 触摸唤醒。两处标志缺一不可(实测):
+     * - 容器默认 SCROLLABLE,手指稍动即被判为滚动手势,CLICKED 永不触发;
+     * - 用 PRESSED 而非 CLICKED:按下即唤醒,无抬起确认延迟;
+     * - 时钟 label 置为不可点,避免中央区域成"死区"拦截父对象事件 */
+    lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(parent, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(parent, on_touch, LV_EVENT_PRESSED, NULL);
+    lv_obj_clear_flag(s_clock, LV_OBJ_FLAG_CLICKABLE);
 }
 
 void page_standby_destroy(void)

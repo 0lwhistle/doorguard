@@ -27,6 +27,7 @@
 #include "dg_log.h"
 
 #include "im2d.h"
+#include "uAPI2/rk_aiq_user_api2_imgproc.h"
 #include "uAPI2/rk_aiq_user_api2_sysctl.h"
 
 #include <errno.h>
@@ -230,6 +231,20 @@ static void *cam_init_thread(void *arg)
         DG_LOGW(CAM_TAG, "rkaiq start 失败(裸流继续)");
     } else {
         DG_LOGI(CAM_TAG, "rkaiq 3A 就绪(sensor=%s)", sensor);
+        /* 门禁预览人物在走动:压曝光上限(默认 20ms=1/50s)换更高增益,
+         * 运动模糊显著下降;DG_AE_MAX_MS 可调,0=不限制 */
+        const char *e = getenv("DG_AE_MAX_MS");
+        int max_ms = (e && e[0]) ? atoi(e) : 20;
+        if (max_ms > 0) {
+            paRange_t tr;
+            if (rk_aiq_uapi2_getExpTimeRange(s_aiq, &tr) == 0) {
+                tr.max = max_ms / 1000.0f;
+                if (rk_aiq_uapi2_setExpTimeRange(s_aiq, &tr) == 0)
+                    DG_LOGI(CAM_TAG, "AE 曝光上限 %dms(减运动模糊)", max_ms);
+                else
+                    DG_LOGW(CAM_TAG, "AE 曝光上限设置失败");
+            }
+        }
     }
     pthread_join(tid, NULL);
     return NULL;
