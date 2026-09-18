@@ -23,6 +23,15 @@ DB device_config(用户经菜单/web 的改动,持久)
 | face_dup_threshold | face.face_dup_threshold | 0.50~1.00 | 0.90 |
 | face_match_threshold | face.match_threshold | 0.30~1.00 | 0.42 |
 | liveness_enable | face.liveness_enable | 0/1 | 0(B8 活体算法落地后开) |
+
+视觉后端参数(json-only:换模型/换框架属部署动作,不进 DB,免得被上位机误改;
+逐键说明与换模型流程见 `modules/vision/README.md`):
+
+| cfg 字段 | json 路径 | 默认 | 说明 |
+|---|---|---|---|
+| face_backend | face.backend | 空 | 后端名;空=第一个注册的(PC=sim / 板上=rockiva) |
+| face_model_dir | face.model_dir | /usr/lib | 模型目录;env `DG_IVA_MODEL_DIR` 优先于它 |
+| face_model_tag | face.model_tag | 空 | 特征口径标识;空=后端自带默认。**换模型必须改** |
 | standby_timeout_s | ui.standby_timeout_s | 15~60(spec 上限) | 30 |
 | language | ui.language | zh-CN/en-US | zh-CN |
 | web_port | network.web_port | 1024~65535 | 8080 |

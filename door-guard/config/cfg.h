@@ -29,6 +29,10 @@ typedef struct {
     double face_dup_threshold; /**< 入库人脸查重相似度阈值,0.50~1.00,默认 0.90 */
     double face_match_threshold; /**< 1:N/1:1 命中阈值,0.30~1.00,默认 0.42(ROCKIVA 相似度) */
     int  liveness_enable;      /**< 动作活体开关,0/1,默认 0(B8 算法落地后开启) */
+    /* 视觉后端(json-only,不经 DB:换模型/换后端属部署参数,见 modules/vision/README.md) */
+    char face_backend[16];     /**< 想要的后端名("rockiva"/"rknn"/"sim"),空=第一个注册的 */
+    char face_model_dir[128];  /**< 模型目录,默认 /usr/lib(env DG_IVA_MODEL_DIR 优先) */
+    char face_model_tag[64];   /**< 特征口径标识;换模型必须改它(旧特征作废) */
     /* UI(spec-ui) */
     int  standby_timeout_s;    /**< 待机超时,15~60(spec 上限),默认 30 */
     char language[16];         /**< zh-CN / en-US,默认 zh-CN */

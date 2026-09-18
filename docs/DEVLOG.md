@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-09-18 B7 补:视觉后端做成可插拔(契约/注册表/特征口径)
+
+- **动机**(用户提):后续想换模型,包括 SCRFD+ArcFace 一类开源模型。
+  原来后端由 CMake 编译期写死,换模型只能改代码重编 → 抽出正式契约
+
+- **新增 `modules/vision/vision_backend.h`**:`vision_backend_ops_t`
+  {name / model_tag / has_landmarks / start / lib_add / lib_del / compare /
+  on_mode} + 注册与选择 API + **8 条硬性义务**(特征上限显式报错、出站只走总线、
+  命中前必须查口径一致、帧必须归还缓冲……)。服务层/UI/FSM/存储对后端零依赖
+
+- **vision_service 变纯服务层**:注册表(选择序 env `DG_VISION_BACKEND` >
+  cfg `face.backend` > 第一个注册的)+ 一次性接线(比较器注入 storage、
+  lib ops 转发、模式钩子、口径校验);删掉 `set_lib_ops/set_mode_hook`(旧接缝)
+
+- **口径校验(换模型的安全阀)**:生效 tag = cfg `face.model_tag` > 后端自带
+  `model_tag`;首次启动登记进 `device_config.face_model_tag`,不一致 → ERROR
+  日志 + **屏蔽 1:N/1:1 命中**(宁可不开门不可错开门),提示重录人脸后改该键。
+  换 ROCKIVA 的 .data 文件集属于"同框架换模型",也靠这个 tag 兜住
+
+- **新 cfg(JSON-only,不进 DB)**:`face.backend` / `face.model_dir` /
+  `face.model_tag`(默认空 = 用第一个注册的后端与其自带口径,这样同一份
+  device.json 在 PC(sim)与板上(rockiva)都成立)
+
+- **测试**:新增 `tests/test_vision_backend.c`(假后端驱动:注册/选择/转发/
+  比较器注入/口径拦截/启动失败上报);`dg-test` 18/18,`--tsan` 18/18
+
+- **文档**:`modules/vision/README.md`(契约逐字段义务 + 换模型两条路 +
+  rknn 开源模型清单/差异点:embedding 2048B 要提 DG_FEATURE_MAX、余弦比较器、
+  关键点模型对应 B8 活体)
+
+- **板上实测**:`特征口径登记 face_model_tag=rockiva-face-v1`(sqlite3 查
+  device_config 已见),后端摘要行 `后端 rockiva(model_tag=...,关键点=有)启动失败(降级)`
+
+---
+
 ## 2026-09-18 B7 续作:holder 接入 + 模式联动 + 活体留口(已上板,差人脸模型)
 
 - **① holder 接入**:`app/main.c` 手工装配改注册表(14 模块,`/usr/lib` 相机节点等

@@ -22,6 +22,7 @@
  * (总线队列),禁止在回调里碰 LVGL。
  */
 #include "vision_service.h"
+#include "vision_backend.h"
 #include "dg_log.h"
 #include "event_bus.h"
 #include "events.h"
@@ -182,9 +183,16 @@ static void on_det(const RockIvaFaceDetResult *result,
     feed_liveness(best);                /* 关键点回灌活体(B7 记账 / B8 判定) */
 }
 
-/* 活体门禁(命中发布前):cfg 开活体且未通过 → 不发布(B7 pass 恒真) */
-static bool liveness_gate(void)
+/* 命中发布前的总闸:口径一致(模型没换) + 活体通过(B7 pass 恒真) */
+static bool publish_gate(void)
 {
+    if (!vision_service_features_compatible()) {
+        static int n_stale;
+        if (n_stale++ < 3)
+            DG_LOGW(TAG, "特征口径与当前模型不一致:命中不下发(重新录入人脸后"
+                         "更新 device_config.face_model_tag)");
+        return false;
+    }
     if (!cfg_get()->liveness_enable || liveness_service_pass())
         return true;
     DG_LOGW(TAG, "活体未通过,命中不下发");
@@ -223,7 +231,7 @@ static void verify_against_target(const char *feat, uint16_t flen)
     float score = 0;
     if (ROCKIVA_FACE_FeatureCompare(feat, target, &score) != ROCKIVA_RET_SUCCESS)
         return;
-    if (score < cfg_get()->face_match_threshold || !liveness_gate())
+    if (score < cfg_get()->face_match_threshold || !publish_gate())
         return;
 
     user_rec_t rec;
@@ -274,7 +282,7 @@ static void search_1n(const char *feat, uint16_t flen)
     if (score < cfg_get()->face_match_threshold ||
         db_user_get(best->faceIdInfo, &rec) != DG_OK)
         return;                         /* 分数不足 / 库与 DB 不同步(自愈) */
-    if (!liveness_gate())
+    if (!publish_gate())
         return;
 
     ev_match_t m;
@@ -491,14 +499,12 @@ static int lib_del(const char *user_id)
                ROCKIVA_RET_SUCCESS ? DG_OK : DG_ERR_IO;
 }
 
-int vision_backend_start(bool enable_mock)
+/* 后端私有启动(契约义务与装配接线由服务层统一处理,见 vision_backend.h) */
+static int rockiva_start(bool enable_mock)
 {
     (void)enable_mock;                  /* 板上无 mock;该参数仅 PC sim 语义 */
 
-    /* 服务接缝:库维护句柄 + 模式钩子 + 查重比较器 + 录入抓取订阅 */
-    vision_service_set_lib_ops(lib_add, lib_del);
-    vision_service_set_mode_hook(on_mode_changed);
-    storage_set_feature_cmp(rockiva_cmp, NULL, NULL);
+    /* 本后端私有接线:录入抓取订阅 + 相机 NV12 出口 */
     event_bus_subscribe(EV_VISION_CAPTURE_REQ, on_capture_req, NULL);
     camera_set_nv12_listener(on_frame_push, NULL);   /* 归还走 on_frames_release→camera_nv12_release */
 
@@ -509,8 +515,13 @@ int vision_backend_start(bool enable_mock)
     const char *lv = getenv("DG_IVA_LOG");
     ip.logLevel = (lv && *lv) ? (RockIvaLogLevel)atoi(lv) : ROCKIVA_LOG_WARN;
     ip.cameraType = ROCKIVA_CAMERA_TYPE_ONE;
-    snprintf(ip.modelPath, sizeof(ip.modelPath), "%s",
-             env_or("DG_IVA_MODEL_DIR", "/usr/lib"));
+    /* 模型目录优先级:env DG_IVA_MODEL_DIR > cfg face.model_dir > /usr/lib
+     * (env 留给现场诊断,cfg 是出厂配置;ROCKIVA 的 modelPath 是"目录",
+     *  换模型 = 换该目录下的 .data 文件集,见 modules/vision/README.md) */
+    const char *mdir = env_or("DG_IVA_MODEL_DIR", NULL);
+    if (!mdir || !mdir[0])
+        mdir = cfg_get()->face_model_dir[0] ? cfg_get()->face_model_dir : "/usr/lib";
+    snprintf(ip.modelPath, sizeof(ip.modelPath), "%s", mdir);
     ip.imageInfo.width = 1280;
     ip.imageInfo.height = 720;
     ip.imageInfo.format = ROCKIVA_IMAGE_FORMAT_YUV420SP_NV12;
@@ -558,3 +569,17 @@ int vision_backend_start(bool enable_mock)
             cfg_get()->face_dup_threshold);
     return DG_OK;
 }
+
+/* 后端注册项(装配层 app/main.c 注册;契约见 vision_backend.h)
+ * model_tag:ROCKIVA 人脸的"特征口径"。换 /usr/lib 下的模型文件 = 换特征空间,
+ * 必须同时改 face.model_tag,否则旧特征被静默当成可比 → 由此 tag 拦下。 */
+const vision_backend_ops_t vision_backend_rockiva = {
+    .name = "rockiva",
+    .model_tag = "rockiva-face-v1",
+    .has_landmarks = true,               /* faceLandmarkEnable=2 → 106 点给 B8 活体 */
+    .start = rockiva_start,
+    .lib_add = lib_add,
+    .lib_del = lib_del,
+    .compare = rockiva_cmp,
+    .on_mode = on_mode_changed,
+};

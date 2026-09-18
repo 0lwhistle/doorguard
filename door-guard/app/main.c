@@ -31,6 +31,7 @@
 #include "storage.h"
 #include "tasker.h"
 #include "ui.h"
+#include "vision_backend.h"
 #include "vision_service.h"
 
 
@@ -103,16 +104,22 @@ static int mod_capture(void)
     return capture_service_start();
 }
 
-/* 视觉后端:init_fn 返回非 0 → holder 置 ERROR(缺模型时降级为无检测,
- * 不阻塞其余业务;失败原因见 [VISION] 日志行) */
+/* 视觉后端:注册进服务层注册表(契约 vision_backend.h)。
+ * 编进哪个后端由 CMake 决定,装配层是唯一知道"具体是哪个"的地方(#ifdef 纪律)。
+ * 失败返回非 0 → holder 置 ERROR(缺模型时降级为无检测,不阻塞其余业务;
+ * 失败原因见 [VISION] 日志行) */
 static int mod_vision_backend(void)
 {
 #ifdef DG_SIM
     /* 模拟器默认开 mock(DG_SIM_VISION=0 关);板上恒 false */
     bool enable_mock = (getenv("DG_SIM_VISION") == NULL ||
                         strcmp(getenv("DG_SIM_VISION"), "0") != 0);
+    extern const vision_backend_ops_t vision_backend_sim;
+    vision_backend_register(&vision_backend_sim);
     return vision_backend_start(enable_mock);
 #else
+    extern const vision_backend_ops_t vision_backend_rockiva;
+    vision_backend_register(&vision_backend_rockiva);
     return vision_backend_start(false);
 #endif
 }

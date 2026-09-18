@@ -151,8 +151,20 @@ main.c 手工装配 → holder 注册表(`proto/holder/holder.h`,README 有用�
 - **hal/camera**(camera.h/.c):`camera_set_nv12_listener(on_frame, NULL)` +
   `camera_nv12_release(frame_id)`;帧给视觉后标 busy,release 回调里延迟 QBUF
   (4 缓冲,ROCKIVA 持有期间驱动不回填)。
-- **vision_service.h/.c**:`vision_service_set_lib_ops/add/remove`(库维护转发,
-  未注册返回 DG_ERR_NOT_INIT)。
+- **modules/vision/vision_backend.h**(新增,2026-09-18 晚):视觉后端**契约**
+  (ops:name/model_tag/has_landmarks/start/lib_add/lib_del/compare/on_mode)。
+  服务层不再认识 ROCKIVA:`vision_backend_register()` 由 app/main.c 在装配时调用
+  (DG_SIM 分支注册 sim,否则注册 rockiva),`vision_backend_start()` 按
+  env `DG_VISION_BACKEND` > cfg `face.backend` > 第一个注册的选择,并统一
+  注入比较器/库转发/模式钩子/口径校验。**旧接口 `vision_service_set_lib_ops`
+  与 `vision_service_set_mode_hook` 已删除**(改由 ops 提供),新写后端只看
+  `modules/vision/README.md` 的契约表与"新增后端 4 步"。
+- **特征口径(model_tag)**:换模型 = 换特征空间,库里旧特征不可比。生效 tag =
+  cfg `face.model_tag` > 后端自带;首次启动登记进 `device_config.face_model_tag`,
+  不一致 → ERROR 日志 + **屏蔽命中**(宁不开门不错开门),直到重录人脸并把该键
+  改成新值。板上已实测登记行 `特征口径登记 face_model_tag=rockiva-face-v1`。
+- **modules/vision/vision_service.c**:后端注册表 + 选择 + 一次性接线 + 口径校验
+  (服务层与模型彻底解耦)。
 - **enroll_service.c**:录入入库成功后 `vision_service_library_add`;删除后
   `vision_service_library_remove`。
 - **CMake**:dg_vision(非 sim)的 rockiva/dg_storage/dg_config/dg_camera/dg_liveness
@@ -164,7 +176,7 @@ main.c 手工装配 → holder 注册表(`proto/holder/holder.h`,README 有用�
 - **holder 接入**(§2.1):`app/main.c` 重写为注册表装配(14 模块),
   `vision_backend_start` / `vision_service_set_mode` 等接口齐备。
 - **mode 联动**(§2.2):`EV_VISION_SET_MODE` 事件 + `vision_service_set_mode`
-  + 后端钩子 `vision_service_set_mode_hook`(VERIFY_11 时装目标特征);
+  + 后端钩子 `ops->on_mode`(VERIFY_11 时装目标特征;原 `set_mode_hook` 已并入契约);
   access 侧 `sync_vision_mode()` 由 `fsm_feed()` 每次 FSM 事件后调用。
   **关键补线**:此前没有任何地方把 `EV_VISION_VERIFY_11` 送进 FSM
   (FSM 的 `FSM_EV_VERIFY_11` 分支早就写好了)→ access_service 新增
@@ -218,6 +230,11 @@ main.c 手工装配 → holder 注册表(`proto/holder/holder.h`,README 有用�
 10. **用户回归清单**(§0.3):待机唤醒/菜单四入口/用户管理/中英切换 + B7 新流程。
 
 ## 3. API/坑备忘(新会话勿重踩)
+
+- **后端可插拔**:服务层只认 `vision_backend.h` 的 ops;要换/加后端(ROCKIVA→
+  rknn 开源模型等)看 `modules/vision/README.md`,别去改 vision_service/FSM/存储。
+  换模型(含同框架换 .data 文件集)必须同时改 `face.model_tag`,否则命中被屏蔽
+  (这是有意的安全阀,不是 bug)。
 
 - **两个枚举**:函数返回 `RockIvaRetCode`(成功=**ROCKIVA_RET_SUCCESS**);
   回调 status `RockIvaExecuteStatus`(成功=**ROCKIVA_SUCCESS**)。混用

@@ -126,10 +126,11 @@ target_include_directories(dg_access PUBLIC ${CMAKE_SOURCE_DIR}/modules/access
                                             ${CMAKE_SOURCE_DIR}/modules/vision)
 target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker dg_gpio)
 
-# vision:视觉服务(槽位句柄 + sim mock / rockiva 板上后端)
+# vision:视觉服务(槽位/模式/后端注册表 + sim mock / rockiva 板上后端)
 add_library(dg_vision STATIC modules/vision/vision_service.c)
 target_include_directories(dg_vision PUBLIC ${CMAKE_SOURCE_DIR}/modules/vision)
-target_link_libraries(dg_vision PUBLIC dg_proto)
+# 服务层要注入 storage 查重比较器 + 登记特征口径(device_config),并读 cfg
+target_link_libraries(dg_vision PUBLIC dg_proto dg_storage dg_config)
 # 测试构建走 sim 后端:测试是宿主 gcc 无 rockiva 头/库(板上后端只在交叉编译里编)
 if(DG_SIM OR DG_BUILD_TESTS)
     target_sources(dg_vision PRIVATE modules/vision/vision_sim.c)

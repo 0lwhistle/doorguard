@@ -19,6 +19,7 @@
 #include "events.h"
 #include "storage.h"
 #include "tasker.h"
+#include "vision_backend.h"
 #include "vision_service.h"
 
 #include <stdio.h>
@@ -65,7 +66,10 @@ int main(void)
 
     DG_CHECK(access_service_start() == DG_OK);
     DG_CHECK(vision_service_start() == DG_OK);
-    DG_CHECK(vision_backend_start(false) == DG_OK);   /* sim 后端:仅订阅录入抓取 */
+    /* 后端:测试构建里编入的是 sim(装配层在 main.c 注册,测试自己注册) */
+    extern const vision_backend_ops_t vision_backend_sim;
+    DG_CHECK(vision_backend_register(&vision_backend_sim) == DG_OK);
+    DG_CHECK(vision_backend_start(false) == DG_OK);   /* 仅订阅录入抓取 */
 
     /* ---- 1. 直接 API:默认 1:N(与 FSM 开机态一致) ---- */
     DG_CHECK(vision_service_get_mode() == DG_VMODE_DETECT_1N);

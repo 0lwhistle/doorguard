@@ -37,6 +37,13 @@ target_link_libraries(test_vision_mode PRIVATE dg_access dg_vision dg_storage dg
 add_test(NAME test_vision_mode COMMAND test_vision_mode)
 set_tests_properties(test_vision_mode PROPERTIES TIMEOUT 60)
 
+# 视觉后端契约(可插拔:换模型/换框架不改服务层;假后端驱动)
+add_executable(test_vision_backend test_vision_backend.c)
+target_include_directories(test_vision_backend PRIVATE ${CMAKE_SOURCE_DIR}/modules/vision)
+target_link_libraries(test_vision_backend PRIVATE dg_vision dg_storage dg_config dg_tasker dg_event_bus dg_proto cjson)
+add_test(NAME test_vision_backend COMMAND test_vision_backend)
+set_tests_properties(test_vision_backend PROPERTIES TIMEOUT 60)
+
 # i18n 一致性:扫描源码 _() 键 + 双 json 覆盖 + 裸中文检查 + 字体字形覆盖
 add_executable(test_i18n test_i18n.c)
 target_compile_definitions(test_i18n PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

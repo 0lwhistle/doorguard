@@ -5,11 +5,15 @@
  *    超时失败交替,驱动主页全流程演示;
  * 2. 录入抓取:响应 EV_VISION_CAPTURE_REQ,提交确定性伪特征
  *    (user_id 哈希派生:同人同特征 → 重录查重命中;异人不同特征)。
+ *
+ * 契约实现见文件尾 vision_backend_sim:model_tag 留空(伪特征没有"口径"一说,
+ * 服务层因此不做口径校验),库维护不提供(PC 只验 UI/FSM 链路)。
  */
 #include "dg_log.h"
 #include "event_bus.h"
 #include "events.h"
 #include "vision_service.h"
+#include "vision_backend.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -71,9 +75,9 @@ static int on_capture_req(const event_t *e, void *ud)
     return 0;
 }
 
-/* 后端启动:PC 恒成功(mock 与摄像头 sim 解耦;工作模式由服务层持有,
+/* 后端私有启动:PC 恒成功(mock 与摄像头 sim 解耦;工作模式由服务层持有,
  * 本后端不按模式分支:PC 只验证 UI/FSM 链路,人脸口径以板上 ROCKIVA 为准) */
-int vision_backend_start(bool enable_mock)
+static int sim_start(bool enable_mock)
 {
     if (s_started)
         return DG_OK;
@@ -90,3 +94,15 @@ int vision_backend_start(bool enable_mock)
     }
     return DG_OK;
 }
+
+/* 后端注册项(装配层 app/main.c 在 DG_SIM 构建下注册) */
+const vision_backend_ops_t vision_backend_sim = {
+    .name = "sim",
+    .model_tag = NULL,          /* 伪特征无口径:服务层不校验 */
+    .has_landmarks = false,     /* 不做活体(PC 只验链路) */
+    .start = sim_start,
+    .lib_add = NULL,            /* 不提供特征库:PC 端 enroll 只走槽位/查重 */
+    .lib_del = NULL,
+    .compare = NULL,            /* NULL = storage 默认逐字节相等 */
+    .on_mode = NULL,
+};

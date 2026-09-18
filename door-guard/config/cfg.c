@@ -32,6 +32,11 @@ static void defaults_apply(dg_cfg_t *c)
     c->face_dup_threshold = 0.90;
     c->face_match_threshold = 0.42;      /* 与 configs/device.json face.match_threshold 一致 */
     c->liveness_enable = 0;              /* 活体算法 B8 落地前默认关 */
+    /* 后端名/口径留空 = 用"第一个注册的后端"+该后端自带口径:这样同一份
+     * device.json 在 PC(sim)与板上(rockiva)都成立,不用两套配置 */
+    c->face_backend[0] = '\0';
+    snprintf(c->face_model_dir, sizeof(c->face_model_dir), "/usr/lib");
+    c->face_model_tag[0] = '\0';
     c->standby_timeout_s = 30;
     snprintf(c->language, sizeof(c->language), "zh-CN");
     c->web_port = 8080;
@@ -124,6 +129,21 @@ static void json_apply(dg_cfg_t *c, const cJSON *root)
             c->liveness_enable = item->valueint ? 1 : 0;
         else
             DG_LOGW(TAG, "face.liveness_enable 类型错,回退默认 0");
+    }
+    /* 后端/模型参数(json-only:换模型/换框架属部署动作,不进 DB 免被误改) */
+    if ((item = json_path(root, "face.backend"))) {
+        if (cJSON_IsString(item) && item->valuestring)
+            copy_cstr(c->face_backend, sizeof(c->face_backend), item->valuestring);
+    }
+    if ((item = json_path(root, "face.model_dir"))) {
+        if (cJSON_IsString(item) && item->valuestring)
+            copy_cstr(c->face_model_dir, sizeof(c->face_model_dir),
+                      item->valuestring);
+    }
+    if ((item = json_path(root, "face.model_tag"))) {
+        if (cJSON_IsString(item) && item->valuestring)
+            copy_cstr(c->face_model_tag, sizeof(c->face_model_tag),
+                      item->valuestring);
     }
     if ((item = json_path(root, "ui.standby_timeout_s"))) {
         if (cJSON_IsNumber(item))

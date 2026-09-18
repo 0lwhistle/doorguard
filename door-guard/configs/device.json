@@ -18,6 +18,7 @@
   },
   "face": {
     "provider": "rockiva",
+    "model_dir": "/usr/lib",
     "detect_interval_ms": 200,
     "liveness_enable": false,
     "liveness_actions_min": 2,

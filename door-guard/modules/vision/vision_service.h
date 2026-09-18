@@ -22,10 +22,6 @@ extern "C" {
 int vision_service_start(void);
 void vision_service_stop(void);
 
-/** 启动后端:PC=vision_sim(mock 可关)/ 板=vision_rockiva
- *  @return DG_OK 成功;非 0 = 后端不可用(板上缺模型等,降级不阻塞其余业务) */
-int vision_backend_start(bool enable_mock);
-
 /* ---- 工作模式(B7 交接 §0.1:FSM 状态 → vision 模式,access 1s tick 联动)
  *
  * 模式决定"帧要不要喂后端、要不要检索"——双重门禁的第二道:
@@ -54,17 +50,10 @@ const char *vision_mode_name(dg_vision_mode_t mode);
 /** VERIFY_11 目标用户(拷贝语义;非 VERIFY_11/未指定 → 空串) */
 void vision_service_get_verify_uid(char *out, size_t cap);
 
-/** 后端注册模式变更钩子(VERIFY_11 时装载目标特征等);单实例,后注册覆盖前值 */
-typedef void (*vision_mode_hook_fn)(dg_vision_mode_t mode, const char *user_id);
-void vision_service_set_mode_hook(vision_mode_hook_fn fn);
-
-/* ---- 特征库维护(rockiva 后端实现;未就绪返回 DG_ERR_NOT_INIT) ---- */
+/* ---- 特征库维护(后端实现,见 vision_backend.h 契约;未就绪返回 DG_ERR_NOT_INIT) ---- */
 typedef int (*vision_lib_add_fn)(const char *user_id, const uint8_t *feature,
                                  uint16_t len);
 typedef int (*vision_lib_del_fn)(const char *user_id);
-
-/** 后端启动时注册实现 */
-void vision_service_set_lib_ops(vision_lib_add_fn add, vision_lib_del_fn del);
 
 /** 录入成功后调用(后端 INSERT 特征库) */
 int vision_service_library_add(const char *user_id, const uint8_t *feature,
