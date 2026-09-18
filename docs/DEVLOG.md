@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-09-18 UI 重构:MVP 分层(学 ESP32 ovs 工程)
+
+### 动机与根因
+- 用户报"待机点击不回主页":事件泵长在 page_home 定时器里,进待机→home 销毁
+  →泵停→唤醒事件(EV_UI_GOTO_PAGE)无人处理,FSM 醒了页面永远不切(日志实锤:
+  有触摸唤醒/有待机唤醒回普通模式,但全日志无一条 open home)
+- 结构性缺陷,补丁无解 → 参照用户 ESP32 工程(dockerNow/esp32/programs/ovs)
+  的 navigator/bridge/presenters/pages 分层整体重构
+
+### 新结构(细节见 door-guard/ui/README.md)
+- **navigator/**:注册表+栈;push(前进)/switch(栈内回退/平级,防 home↔standby
+  压爆栈)/back/reload(语言热切);页面描述符含 on_enter/on_exit/on_evt 生命周期
+- **bridge/**:唯一后端入口——5 个事件订阅编组进 ui_events 队列;动作出站
+  bridge_btn/bridge_touch;只有本层可 include 后端头
+- **presenters/**:每页注册+on_evt 渲染+弹窗文案;home 的脸框/提示/结果弹窗逻辑
+  从视图剥离
+- **pages/**:纯视图(home 只剩画布 33ms 刷帧+setter);ui.c 只做引导+全局泵
+
+### 坑
+1. navigator_page_t 初版漏 destroy 字段(实现留了调用,编译才暴露)
+2. 事件枚举真名 EV_VISION_FACE_BOX(非 EV_FACE_BOX),想当然必错
+3. test_i18n 递归扫描后:①ui/ 注释里 ASCII 引号包中文("死区")被判字面量,
+   引用词用「」;②生成的字库 font/ 目录必须排除
+
+### 验证
+- dg-build(交叉)/dg-build-pc 零警告;dg-test 16/16;板上部署:BRIDGE 就绪、
+  open home depth=1、相机就绪;待机唤醒完整链路待人工最终确认
+
+### 下一步
+- 板上人工回归:待机唤醒/菜单四入口/用户管理/中英切换
+- B7 ROCKIVA(人脸唤醒链路已备好)
+
+---
+
 ## 2026-09-18 应用级 OTA 落地(A/B 槽位 + bash 监听/切换/回滚)
 
 ### 做了什么(用户定调:不做系统固件升级,只做应用 OTA)
