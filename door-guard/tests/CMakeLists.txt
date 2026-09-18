@@ -30,6 +30,13 @@ target_link_libraries(test_e2e PRIVATE dg_access dg_enroll dg_vision dg_capture 
 add_test(NAME test_e2e COMMAND test_e2e)
 set_tests_properties(test_e2e PROPERTIES TIMEOUT 120)
 
+# 视觉工作模式联动(FSM 状态 → mode:误触发开门的第二道门禁)
+add_executable(test_vision_mode test_vision_mode.c)
+target_include_directories(test_vision_mode PRIVATE ${CMAKE_SOURCE_DIR}/modules/access ${CMAKE_SOURCE_DIR}/modules/vision)
+target_link_libraries(test_vision_mode PRIVATE dg_access dg_vision dg_storage dg_config dg_tasker dg_event_bus dg_proto cjson)
+add_test(NAME test_vision_mode COMMAND test_vision_mode)
+set_tests_properties(test_vision_mode PROPERTIES TIMEOUT 60)
+
 # i18n 一致性:扫描源码 _() 键 + 双 json 覆盖 + 裸中文检查 + 字体字形覆盖
 add_executable(test_i18n test_i18n.c)
 target_compile_definitions(test_i18n PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

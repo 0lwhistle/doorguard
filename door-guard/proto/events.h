@@ -38,6 +38,7 @@ extern "C" {
 #define EV_VISION_FACE_LOST  EV_DEF(DG_MODULE_ID_VISION, 0x0002) /**< 人脸离开 */
 #define EV_VISION_MATCH_1N   EV_DEF(DG_MODULE_ID_VISION, 0x0003) /**< 1:N 检索结果 */
 #define EV_VISION_VERIFY_11  EV_DEF(DG_MODULE_ID_VISION, 0x0004) /**< 1:1 比对结果 */
+#define EV_VISION_SET_MODE   EV_DEF(DG_MODULE_ID_VISION, 0x0005) /**< 工作模式切换(access→vision) */
 
 /* CAPTURE:取流状态(capture → UI/服务) */
 #define EV_CAPTURE_STATE     EV_DEF(DG_MODULE_ID_CAPTURE, 0x0001) /**< 就绪/断流 */
@@ -114,6 +115,13 @@ typedef struct {
 typedef struct {
     bool ready;                           /**< false = 断流/未就绪 */
 } ev_capture_state_t;
+
+/** EV_VISION_SET_MODE:模式枚举与语义见 vision_service.h dg_vision_mode_t
+ *  (业务层不 include 视觉头也能发;uid 仅 VERIFY_11 有意义) */
+typedef struct {
+    int32_t mode;                         /**< dg_vision_mode_t */
+    char    user_id[DG_UID_LEN];          /**< VERIFY_11:比对目标用户 */
+} ev_vision_mode_t;
 
 /** EV_ENROLL_REQUEST:op 决定语义 */
 typedef enum {
@@ -244,6 +252,7 @@ typedef struct {
 _Static_assert(sizeof(ev_auth_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_auth_result_t 超限");
 _Static_assert(sizeof(ev_face_box_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_face_box_t 超限");
 _Static_assert(sizeof(ev_match_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_match_t 超限");
+_Static_assert(sizeof(ev_vision_mode_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_vision_mode_t 超限");
 _Static_assert(sizeof(ev_capture_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_capture_state_t 超限");
 _Static_assert(sizeof(ev_enroll_request_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_enroll_request_t 超限");
 _Static_assert(sizeof(ev_enroll_progress_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_enroll_progress_t 超限");

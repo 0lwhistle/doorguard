@@ -3,16 +3,20 @@
  *
  * 链路:camera NV12 帧(零拷贝包 RockIvaImage)→ ROCKIVA_PushFrame(异步)
  *   ├─ detCallback:人脸框(万分比)→ 旋转映射到竖屏坐标 → EV_VISION_FACE_BOX
- *   └─ analyseCallback:质量合格的人脸特征 →
- *        ├─ 特征库检索 SearchFeature → 命中≥阈值 → EV_VISION_MATCH_1N(走既有 FSM)
- *        └─ 缓存最新特征;EV_VISION_CAPTURE_REQ(录入)到达时提交近 3s 内特征
+ *   │    + 106 点关键点回灌 liveness_service_on_face
+ *   └─ analyseCallback:质量合格的人脸特征 → 录入缓存(近 3s)+ 按模式分支:
+ *        DETECT_1N  → FeatureLibraryControl 检索 → 命中≥cfg face_match_threshold
+ *                     → EV_VISION_MATCH_1N(走既有 FSM)
+ *        VERIFY_11  → 与 mode 目标用户特征 FeatureCompare → 命中 → EV_VISION_VERIFY_11
+ *        DETECT_ONLY→ 不检索(菜单/待机/验证子步;录入照常取缓存)
+ *        IDLE       → 不推帧(帧在入口即归还)
  * 库同步:启动时 db_user_iter_face 全量装载;录入成功 INSERT;删除 DELETE;
  *   检索命中后再查 DB 确认用户仍存在(自愈库/DB 不同步)。
  * 查重比较器:storage_set_feature_cmp 注入 ROCKIVA_FACE_FeatureCompare(1:1)。
  *
  * 模型:ROCKIVA_Init 的 modelPath 默认 /usr/lib(DG_IVA_MODEL_DIR 可改)。
- * 板上缺人脸模型时 Init 失败,本后端降级为"无检测"(日志 ERROR 明示),
- * 录入/识别不可用但不影响其余业务。
+ * 板上缺人脸模型时 Init 失败,本后端返回非 0(holder 记为 ERROR,降级为
+ * "无检测"),录入/识别不可用但不影响其余业务。
  *
  * 线程:camera 线程喂帧;ROCKIVA 内部线程回调——出站一律 EVENT_BUS_PUBLISH
  * (总线队列),禁止在回调里碰 LVGL。
@@ -23,6 +27,7 @@
 #include "events.h"
 #include "storage.h"
 #include "cfg.h"
+#include "liveness_service.h"
 #include "hal/camera/camera.h"
 
 #include <rockiva_face_api.h>
@@ -38,6 +43,7 @@ static const char *TAG = "[VISION]";
 #define IVA_LIB_NAME   "dg_users"
 #define IVA_FEATURE_MIN 16                  /* 小于视为无效特征 */
 #define IVA_CAPTURE_FRESH_MS 3000           /* 录入取特征的新鲜度窗 */
+#define IVA_SCORE_LOG_MS 2000               /* 检索最高分日志节流(联调调阈值用) */
 
 static RockIvaHandle s_handle;
 static bool s_ready;                        /* Init+FACE_Init 成功 */
@@ -54,6 +60,14 @@ static struct {
     uint16_t len;
     int64_t ms;
 } s_cap = { .mtx = PTHREAD_MUTEX_INITIALIZER };
+
+/* VERIFY_11 目标用户特征(模式切换钩子装载;analyse 回调读) */
+static struct {
+    pthread_mutex_t mtx;
+    uint8_t data[DG_FEATURE_MAX];
+    uint16_t len;
+    char uid[DG_UID_LEN];
+} s_target = { .mtx = PTHREAD_MUTEX_INITIALIZER };
 
 static int64_t now_ms(void)
 {
@@ -80,8 +94,9 @@ static void rect_to_screen(const RockIvaRectangle *r, int src_w, int src_h,
 /* ---- 喂帧(camera 线程):零拷贝包 NV12,ROCKIVA 异步消费 ---- */
 static void on_frame_push(const uint8_t *data, int w, int h, uint32_t frame_id)
 {
-    /* 未就绪/推送失败必须立即归还缓冲:否则 4 缓冲耗尽 → 相机永久断流 */
-    if (!s_ready) {
+    /* 未就绪/推不了必须立即归还缓冲:否则 4 缓冲耗尽 → 相机永久断流。
+     * IDLE(系统级关人脸)同样在此挡掉,不做 NPU 推理。 */
+    if (!s_ready || vision_service_get_mode() == DG_VMODE_IDLE) {
         camera_nv12_release(frame_id);
         return;
     }
@@ -101,19 +116,51 @@ static void on_frame_push(const uint8_t *data, int w, int h, uint32_t frame_id)
     }
 }
 
-/* ---- 检测回调:脸框 → EV_VISION_FACE_BOX(150ms 节流) ---- */
+/* 关键点回灌活体(万分比 int16 → 后端无关的 dg_face_pt_t;ROCKIVA 给 106 点) */
+static void feed_liveness(const RockIvaFaceInfo *f)
+{
+    if (!f || f->landmarksNum == 0)
+        return;
+    uint32_t n = f->landmarksNum;
+    if (n > DG_LANDMARK_MAX)
+        n = DG_LANDMARK_MAX;
+    dg_face_pt_t pts[DG_LANDMARK_MAX];
+    for (uint32_t i = 0; i < n; i++) {
+        pts[i].x = f->landmarks[i].x;
+        pts[i].y = f->landmarks[i].y;
+    }
+    liveness_service_on_face(pts, n, (int32_t)f->faceQuality.score);
+}
+
+/* ---- 检测回调:脸框 → EV_VISION_FACE_BOX(150ms 节流)/ 离开 → FACE_LOST ---- */
+static bool s_face_present;                 /* 边沿检测:只在"有→无"时发 LOST */
+
+static void pub_face_lost(void)
+{
+    if (!s_face_present)
+        return;
+    s_face_present = false;
+    EVENT_BUS_PUBLISH_EMPTY(EV_VISION_FACE_LOST);
+}
+
 static void on_det(const RockIvaFaceDetResult *result,
                    const RockIvaExecuteStatus status, void *ud)
 {
     (void)ud;
-    if ((int)status != ROCKIVA_RET_SUCCESS || !result || result->objNum == 0)
+    if ((int)status != ROCKIVA_RET_SUCCESS || !result)
         return;
+    if (result->objNum == 0) {
+        /* 人脸离开:立即发(不节流),否则主页黄框会一直挂在屏上 */
+        pub_face_lost();
+        return;
+    }
 
     static int64_t last_ms;
     int64_t now = now_ms();
     if (now - last_ms < 150)
         return;
     last_ms = now;
+    s_face_present = true;
 
     /* 取最大脸(门口场景通常单脸) */
     const RockIvaFaceInfo *best = &result->faceInfo[0];
@@ -131,14 +178,127 @@ static void on_det(const RockIvaFaceDetResult *result,
     box.state = DG_BOX_DETECTED;
     rect_to_screen(&best->faceRect, 1280, 720, &box.x, &box.y, &box.w, &box.h);
     EVENT_BUS_PUBLISH(EV_VISION_FACE_BOX, &box);
+
+    feed_liveness(best);                /* 关键点回灌活体(B7 记账 / B8 判定) */
 }
 
-/* ---- 分析回调:特征 → 1:N 检索 + 录入缓存 ---- */
+/* 活体门禁(命中发布前):cfg 开活体且未通过 → 不发布(B7 pass 恒真) */
+static bool liveness_gate(void)
+{
+    if (!cfg_get()->liveness_enable || liveness_service_pass())
+        return true;
+    DG_LOGW(TAG, "活体未通过,命中不下发");
+    return false;
+}
+
+/* 1:1 比对(VERIFY_11):与模式目标特征比 → 命中发 EV_VISION_VERIFY_11
+ * 只发成功:失败由 FSM 子步 5s 超时收口(spec-auth §4.4),
+ * 否则同一段视频里逐帧的瞬时低分会把流程提前打死 */
+static void verify_against_target(const char *feat, uint16_t flen)
+{
+    char uid[DG_UID_LEN];
+    uint8_t target[DG_FEATURE_MAX];
+    uint16_t tlen;
+    vision_service_get_verify_uid(uid, sizeof(uid));
+    if (!uid[0])
+        return;                         /* 未指定目标:不比对 */
+
+    pthread_mutex_lock(&s_target.mtx);
+    tlen = (strcmp(s_target.uid, uid) == 0) ? s_target.len : 0;
+    if (tlen)
+        memcpy(target, s_target.data, tlen);
+    pthread_mutex_unlock(&s_target.mtx);
+    if (tlen < IVA_FEATURE_MIN)
+        return;                         /* 目标无特征/未装载:等 FSM 5s 超时 */
+    if (tlen != flen) {
+        /* FeatureCompare 不接长度:不同长(换过模型/旧库残留)不可比,
+         * 宁可比不出来也不读越界 */
+        static int n_mismatch;
+        if (n_mismatch++ < 3)
+            DG_LOGW(TAG, "1:1 特征长度不一致(目标 %u B / 当前 %u B),跳过比对",
+                    tlen, flen);
+        return;
+    }
+
+    float score = 0;
+    if (ROCKIVA_FACE_FeatureCompare(feat, target, &score) != ROCKIVA_RET_SUCCESS)
+        return;
+    if (score < cfg_get()->face_match_threshold || !liveness_gate())
+        return;
+
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    if (db_user_get(uid, &rec) != DG_OK)
+        return;
+    if (rec.role == DG_ROLE_BLACKLIST)
+        return;                         /* 黑名单任何路径都失败(spec-auth §5) */
+
+    ev_match_t m;
+    memset(&m, 0, sizeof(m));
+    m.matched = true;
+    snprintf(m.user_id, sizeof(m.user_id), "%s", rec.user_id);
+    snprintf(m.user_name, sizeof(m.user_name), "%s", rec.user_name);
+    m.role = rec.role;
+    m.score_permille = (int32_t)(score * 1000.0f + 0.5f);
+    EVENT_BUS_PUBLISH(EV_VISION_VERIFY_11, &m);
+    DG_LOGI(TAG, "1:1 通过 %s(%s) %.3f", rec.user_id, rec.user_name, score);
+}
+
+/* 1:N 检索(DETECT_1N):库检索 → 阈值 + DB 存在性双确认 → EV_VISION_MATCH_1N */
+static void search_1n(const char *feat, uint16_t flen)
+{
+    RockIvaFaceSearchResults sr;
+    memset(&sr, 0, sizeof(sr));
+    if (ROCKIVA_FACE_SearchFeature(IVA_LIB_NAME, feat, flen, 1, 1, &sr) !=
+        ROCKIVA_RET_SUCCESS)
+        return;
+    if (sr.num < 1)
+        return;
+    const RockIvaFaceSearchResult *best = &sr.faceIdScore[0];
+    float score = best->score;
+
+    /* 最高分节流日志:板上调 face_match_threshold 的唯一依据(先看分再改值) */
+    static int64_t last_log_ms;
+    static float last_score = -1.0f;
+    int64_t t = now_ms();
+    if (t - last_log_ms >= IVA_SCORE_LOG_MS &&
+        (score != last_score || score >= cfg_get()->face_match_threshold * 0.8f)) {
+        last_log_ms = t;
+        last_score = score;
+        DG_LOGI(TAG, "1:N 最高分 %.3f(阈值 %.2f) 最近 %s", score,
+                cfg_get()->face_match_threshold, best->faceIdInfo);
+    }
+
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    if (score < cfg_get()->face_match_threshold ||
+        db_user_get(best->faceIdInfo, &rec) != DG_OK)
+        return;                         /* 分数不足 / 库与 DB 不同步(自愈) */
+    if (!liveness_gate())
+        return;
+
+    ev_match_t m;
+    memset(&m, 0, sizeof(m));
+    m.matched = true;
+    snprintf(m.user_id, sizeof(m.user_id), "%s", rec.user_id);
+    snprintf(m.user_name, sizeof(m.user_name), "%s", rec.user_name);
+    m.role = rec.role;
+    m.score_permille = (int32_t)(score * 1000.0f + 0.5f);
+    EVENT_BUS_PUBLISH(EV_VISION_MATCH_1N, &m);
+    DG_LOGI(TAG, "1:N 命中 %s(%s) %d‰", rec.user_id, rec.user_name,
+            m.score_permille);
+}
+
+/* ---- 分析回调:特征 → 录入缓存 + 按模式检索/比对 ---- */
 static void on_analyse(const RockIvaFaceCapResults *result,
                        const RockIvaExecuteStatus status, void *ud)
 {
     (void)ud;
     if ((int)status != ROCKIVA_RET_SUCCESS || !result)
+        return;
+
+    dg_vision_mode_t mode = vision_service_get_mode();
+    if (mode == DG_VMODE_IDLE)
         return;
 
     for (uint32_t i = 0; i < result->num; i++) {
@@ -147,43 +307,38 @@ static void on_analyse(const RockIvaFaceCapResults *result,
             continue;
         uint16_t flen = (uint16_t)r->faceAnalyseInfo.featureSize;
         const char *feat = r->faceAnalyseInfo.feature;
-        if (flen < IVA_FEATURE_MIN || flen > DG_FEATURE_MAX)
+        if (flen < IVA_FEATURE_MIN)
             continue;
+        /* 交接 §1.1:上板第一件事是确认实际特征长度。超限时明确报错,
+         * 不静默丢弃(提高 proto/types.h DG_FEATURE_MAX 后重编译即可) */
+        if (flen > DG_FEATURE_MAX) {
+            static int n_over;
+            if (n_over++ < 3)
+                DG_LOGE(TAG, "特征 %u B > DG_FEATURE_MAX(%d),已丢弃——"
+                             "请提高 proto/types.h DG_FEATURE_MAX 后重编译",
+                        flen, DG_FEATURE_MAX);
+            continue;
+        }
+        {
+            static int logged_len;
+            if (logged_len != (int)flen) {   /* 首次/变化时记录,联调可见 */
+                logged_len = (int)flen;
+                DG_LOGI(TAG, "人脸特征长度 %u B(上限 %d)", flen, DG_FEATURE_MAX);
+            }
+        }
 
-        /* 缓存最新特征(录入取用) */
+        /* 缓存最新特征(录入取用;DETECT_ONLY 下也照常) */
         pthread_mutex_lock(&s_cap.mtx);
         memcpy(s_cap.data, feat, flen);
         s_cap.len = flen;
         s_cap.ms = now_ms();
         pthread_mutex_unlock(&s_cap.mtx);
 
-        /* 1:N 检索 */
-        RockIvaFaceSearchResults sr;
-        memset(&sr, 0, sizeof(sr));
-        if (ROCKIVA_FACE_SearchFeature(IVA_LIB_NAME, feat, flen, 1, 1, &sr) !=
-            ROCKIVA_RET_SUCCESS)
-            continue;
-        if (sr.num < 1)
-            continue;
-        const RockIvaFaceSearchResult *best = &sr.faceIdScore[0];
-        int32_t permille = (int32_t)(best->score * 1000.0f + 0.5f);
-
-        user_rec_t rec;
-        memset(&rec, 0, sizeof(rec));
-        if (best->score < cfg_get()->face_dup_threshold ||
-            db_user_get(best->faceIdInfo, &rec) != DG_OK)
-            continue;                        /* 分数不足 / 库与 DB 不同步(自愈) */
-
-        ev_match_t m;
-        memset(&m, 0, sizeof(m));
-        m.matched = true;
-        snprintf(m.user_id, sizeof(m.user_id), "%s", rec.user_id);
-        snprintf(m.user_name, sizeof(m.user_name), "%s", rec.user_name);
-        m.role = rec.role;
-        m.score_permille = permille;
-        EVENT_BUS_PUBLISH(EV_VISION_MATCH_1N, &m);
-        DG_LOGI(TAG, "1:N 命中 %s(%s) %d‰", rec.user_id, rec.user_name,
-                permille);
+        if (mode == DG_VMODE_VERIFY_11)
+            verify_against_target(feat, flen);
+        else if (mode == DG_VMODE_DETECT_1N)
+            search_1n(feat, flen);
+        /* DETECT_ONLY:只缓存,不检索(菜单/待机/验证子步) */
     }
 }
 
@@ -222,6 +377,58 @@ static int on_capture_req(const event_t *e, void *ud)
     return 0;
 }
 
+/* ---- 1:1 目标特征装载(模式钩子,总线线程调用) ---- */
+
+static const char *s_target_want;           /* 遍历过滤器:目标 uid */
+
+static int target_iter_cb(const char *user_id, const uint8_t *plain,
+                          uint16_t len, void *ud)
+{
+    (void)ud;
+    if (!s_target_want || strcmp(user_id, s_target_want) != 0)
+        return 0;                           /* 继续找 */
+    if (len < IVA_FEATURE_MIN || len > DG_FEATURE_MAX)
+        return 1;                           /* 命中但特征不可用,中止 */
+    pthread_mutex_lock(&s_target.mtx);
+    memcpy(s_target.data, plain, len);
+    s_target.len = len;
+    snprintf(s_target.uid, sizeof(s_target.uid), "%s", user_id);
+    pthread_mutex_unlock(&s_target.mtx);
+    return 1;                               /* 已命中,中止遍历 */
+}
+
+static void clear_target(void)
+{
+    pthread_mutex_lock(&s_target.mtx);
+    s_target.len = 0;
+    s_target.uid[0] = '\0';
+    memset(s_target.data, 0, sizeof(s_target.data));
+    pthread_mutex_unlock(&s_target.mtx);
+}
+
+/* 模式变更:进入 VERIFY_11 时装目标特征,离开时清(明文不常驻) */
+static void on_mode_changed(dg_vision_mode_t mode, const char *user_id)
+{
+    clear_target();
+    if (mode == DG_VMODE_IDLE) {
+        /* 关人脸后不再有回调:主动收掉主页脸框(无条件发,UI 收到即隐藏)。
+         * 不动 s_face_present——它归检测回调线程独有(跨线程写会引入竞争) */
+        EVENT_BUS_PUBLISH_EMPTY(EV_VISION_FACE_LOST);
+    }
+    if (mode != DG_VMODE_VERIFY_11 || !user_id || !user_id[0])
+        return;
+    s_target_want = user_id;
+    int rc = db_user_iter_face(target_iter_cb, NULL);
+    s_target_want = NULL;
+    pthread_mutex_lock(&s_target.mtx);
+    uint16_t tlen = s_target.len;
+    pthread_mutex_unlock(&s_target.mtx);
+    if (rc != DG_OK || tlen == 0)
+        DG_LOGW(TAG, "1:1 目标 %s 无可用人脸特征(等 FSM 5s 超时)", user_id);
+    else
+        DG_LOGI(TAG, "1:1 目标特征已装载 %s(%u B)", user_id, tlen);
+}
+
 /* ---- 查重比较器:1=重复 0=不重复 <0=错误(storage 契约) ---- */
 static int rockiva_cmp(const uint8_t *a, uint16_t alen,
                        const uint8_t *b, uint16_t blen, void *ud)
@@ -229,6 +436,14 @@ static int rockiva_cmp(const uint8_t *a, uint16_t alen,
     (void)ud;
     if (!a || !b || alen < IVA_FEATURE_MIN || blen < IVA_FEATURE_MIN)
         return -1;
+    if (alen != blen) {
+        /* FeatureCompare 不接长度;不同长(换过模型)不可比 → 不判重并告警,
+         * 否则等于拿越界内存比对(误判重 = 用户录不进去) */
+        static int n_mismatch;
+        if (n_mismatch++ < 3)
+            DG_LOGW(TAG, "查重特征长度不一致(%u B / %u B),跳过该行", alen, blen);
+        return 0;
+    }
     float score = 0;
     if (ROCKIVA_FACE_FeatureCompare(a, b, &score) != ROCKIVA_RET_SUCCESS)
         return -1;
@@ -276,19 +491,23 @@ static int lib_del(const char *user_id)
                ROCKIVA_RET_SUCCESS ? DG_OK : DG_ERR_IO;
 }
 
-void vision_backend_start(bool enable_mock)
+int vision_backend_start(bool enable_mock)
 {
     (void)enable_mock;                  /* 板上无 mock;该参数仅 PC sim 语义 */
 
-    /* 服务接缝:库维护句柄 + 查重比较器 + 录入抓取订阅 */
+    /* 服务接缝:库维护句柄 + 模式钩子 + 查重比较器 + 录入抓取订阅 */
     vision_service_set_lib_ops(lib_add, lib_del);
+    vision_service_set_mode_hook(on_mode_changed);
     storage_set_feature_cmp(rockiva_cmp, NULL, NULL);
     event_bus_subscribe(EV_VISION_CAPTURE_REQ, on_capture_req, NULL);
     camera_set_nv12_listener(on_frame_push, NULL);   /* 归还走 on_frames_release→camera_nv12_release */
 
     RockIvaInitParam ip;
     memset(&ip, 0, sizeof(ip));
-    ip.logLevel = ROCKIVA_LOG_WARN;
+    /* 日志级别:DG_IVA_LOG=<0 ERROR|1 WARN|2 DEBUG|3 INFO|4 TRACE>
+     * 缺模型时用它看 ROCKIVA 到底想开哪些文件(联调/现场诊断) */
+    const char *lv = getenv("DG_IVA_LOG");
+    ip.logLevel = (lv && *lv) ? (RockIvaLogLevel)atoi(lv) : ROCKIVA_LOG_WARN;
     ip.cameraType = ROCKIVA_CAMERA_TYPE_ONE;
     snprintf(ip.modelPath, sizeof(ip.modelPath), "%s",
              env_or("DG_IVA_MODEL_DIR", "/usr/lib"));
@@ -300,7 +519,7 @@ void vision_backend_start(bool enable_mock)
     if (rc != ROCKIVA_RET_SUCCESS) {
         DG_LOGE(TAG, "ROCKIVA_Init 失败(%d):模型目录 %s 缺人脸模型?"
                      "从 SDK external/iva/.../model 拷板后重启", rc, ip.modelPath);
-        return;
+        return DG_ERR_IO;               /* holder 依返回码置 ERROR(required=false 不退出) */
     }
     ROCKIVA_SetFrameReleaseCallback(s_handle, on_frames_release);
 
@@ -309,7 +528,7 @@ void vision_backend_start(bool enable_mock)
     fp.mode = ROCKIVA_FACE_MODE_NORMAL;
     fp.faceTaskType.faceCaptureEnable = 1;
     fp.faceTaskType.faceRecognizeEnable = 1;
-    fp.faceTaskType.faceLandmarkEnable = 1;
+    fp.faceTaskType.faceLandmarkEnable = 2;  /* 5 点 + 106 点(B8 活体几何量) */
     fp.faceCaptureRule.detectScore = 60;
     fp.faceCaptureRule.optType = ROCKIVA_FACE_OPT_FAST;
     fp.faceCaptureRule.faceQualityThrehold = 60;
@@ -319,14 +538,23 @@ void vision_backend_start(bool enable_mock)
                                 .postureCallback = NULL };
     rc = ROCKIVA_FACE_Init(s_handle, &fp, cbs);
     if (rc != ROCKIVA_RET_SUCCESS) {
-        DG_LOGE(TAG, "ROCKIVA_FACE_Init 失败(%d)", rc);
+        /* 实测(2026-09-18 板上 strace):FACE_Init 在 modelPath 下找
+         * face_landmark5.data / face_quality_v2.data(以及识别模型),
+         * 缺一个即失败——SDK 的 models/rockiva_data_rk3576 需整目录拷入 */
+        DG_LOGE(TAG, "ROCKIVA_FACE_Init 失败(%d):人脸模型缺失?"
+                     "%s 下需 face_landmark5.data / face_quality_v2.data 等"
+                     "(把 SDK models/rockiva_data_rk3576/*.data 全量拷入;"
+                     "DG_IVA_LOG=3 可看 ROCKIVA 找文件过程)", rc, ip.modelPath);
         ROCKIVA_Release(s_handle);
-        return;
+        s_handle = NULL;
+        return DG_ERR_IO;
     }
 
     db_user_iter_face(lib_iter_cb, NULL);   /* 全量装载 DB 人脸特征 */
 
     s_ready = true;
-    DG_LOGI(TAG, "ROCKIVA 就绪(model=%s,检索阈值 %.2f)", ip.modelPath,
+    DG_LOGI(TAG, "ROCKIVA 就绪(model=%s,命中阈值 %.2f,查重阈值 %.2f)",
+            ip.modelPath, cfg_get()->face_match_threshold,
             cfg_get()->face_dup_threshold);
+    return DG_OK;
 }

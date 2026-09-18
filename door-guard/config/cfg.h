@@ -27,6 +27,8 @@ typedef struct {
     int  pwd_fail_lock_n;      /**< 密码连错锁定次数,1~10,默认 5 */
     int  pwd_fail_lock_s;      /**< 密码锁定时长,10~3600,默认 60 */
     double face_dup_threshold; /**< 入库人脸查重相似度阈值,0.50~1.00,默认 0.90 */
+    double face_match_threshold; /**< 1:N/1:1 命中阈值,0.30~1.00,默认 0.42(ROCKIVA 相似度) */
+    int  liveness_enable;      /**< 动作活体开关,0/1,默认 0(B8 算法落地后开启) */
     /* UI(spec-ui) */
     int  standby_timeout_s;    /**< 待机超时,15~60(spec 上限),默认 30 */
     char language[16];         /**< zh-CN / en-US,默认 zh-CN */

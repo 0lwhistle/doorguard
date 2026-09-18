@@ -9,6 +9,8 @@
  *                                      GOTO_PAGE/HINT→EV_UI_*  (UI 渲染)
  *   UID 提交:本服务 db_user_get 解析(spec: FSM 不碰 DB)
  *   密码提交:db_verify_password + 连错锁定预检
+ *   视觉工作模式:每次 FSM 状态变化后由 fsm_feed 派生 → EV_VISION_SET_MODE
+ *   (双重门禁的第二道:不进 DETECT_1N 模式则后端根本不检索)
  */
 #include "access_service.h"
 #include "auth_fsm.h"
@@ -19,6 +21,7 @@
 #include "events.h"
 #include "storage.h"
 #include "tasker.h"
+#include "vision_service.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -36,10 +39,56 @@ static void copy_cstr(char *dst, size_t cap, const char *src)
 static const char *TAG = "[ACCESS]";
 
 static auth_fsm_t s_fsm;
-static event_subscription_t *s_subs[8];
+static event_subscription_t *s_subs[12];
 static int s_sub_cnt = 0;
 static struct task_node s_tick_node;
 static bool s_running = false;
+
+/* ---- FSM 入口:处理后派生视觉工作模式(状态一变即下发,不等 1s tick) ----
+ *
+ * 模式表(交接 §0.1 定稿;视觉得到的只有一个 mode,门禁语义仍归 FSM):
+ *   ST_NORMAL + match_enabled → DETECT_1N   (普通模式 1:N)
+ *   ST_ADMIN_AUTH             → DETECT_1N   (spec-auth §3:管理员人脸也在
+ *                              1:N 中检索,role 过滤/红弹窗由 FSM on_match_1n 收口)
+ *   ST_VERIFY + V_FACE_1V1    → VERIFY_11(cur_uid)
+ *   其余(菜单/待机/结果/其它子步)→ DETECT_ONLY:画框+录入缓存照常,不检索,
+ *                              避免菜单/待机页误触发开门 */
+static void sync_vision_mode(void)
+{
+    dg_vision_mode_t mode;
+    const char *uid = "";
+
+    if (s_fsm.state == ST_ADMIN_AUTH) {
+        mode = DG_VMODE_DETECT_1N;
+    } else if (s_fsm.state == ST_NORMAL && s_fsm.match_enabled) {
+        mode = DG_VMODE_DETECT_1N;
+    } else if (s_fsm.state == ST_VERIFY && s_fsm.step == V_FACE_1V1) {
+        mode = DG_VMODE_VERIFY_11;
+        uid = s_fsm.cur_uid;
+    } else {
+        mode = DG_VMODE_DETECT_ONLY;
+    }
+
+    /* 只在变化时发:1s tick 每次都发会把总线刷满 */
+    static dg_vision_mode_t last_mode = DG_VMODE_MAX;
+    static char last_uid[DG_UID_LEN];
+    if (mode == last_mode && !strcmp(uid, last_uid))
+        return;
+    last_mode = mode;
+    snprintf(last_uid, sizeof(last_uid), "%s", uid);
+
+    ev_vision_mode_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.mode = mode;
+    snprintf(ev.user_id, sizeof(ev.user_id), "%s", uid);
+    EVENT_BUS_PUBLISH(EV_VISION_SET_MODE, &ev);
+}
+
+static void fsm_feed(fsm_event_t ev, const fsm_event_data_t *data)
+{
+    auth_fsm_handle(&s_fsm, ev, data);
+    sync_vision_mode();
+}
 
 /* ---- 动作执行 ---- */
 
@@ -187,7 +236,7 @@ static int on_match(const event_t *e, void *ud)
     fsm_event_data_t d;
     memset(&d, 0, sizeof(d));
     d.match = *(const ev_match_t *)e->data;
-    auth_fsm_handle(&s_fsm, FSM_EV_MATCH_1N, &d);
+    fsm_feed(FSM_EV_MATCH_1N, &d);
     return 0;
 }
 
@@ -198,7 +247,19 @@ static int on_face_box(const event_t *e, void *ud)
     fsm_event_data_t d;
     memset(&d, 0, sizeof(d));
     d.box.x = b->x; d.box.y = b->y; d.box.w = b->w; d.box.h = b->h;
-    auth_fsm_handle(&s_fsm, FSM_EV_FACE_DETECTED, &d);
+    fsm_feed(FSM_EV_FACE_DETECTED, &d);
+    return 0;
+}
+
+/* 1:1 比对结果(vision 只在通过时发布)→ FSM 统一结果处理
+ * (auth_fsm.c 的 FSM_EV_VERIFY_11 分支;FSM 不重复实现,只做搬运) */
+static int on_verify_11(const event_t *e, void *ud)
+{
+    (void)ud;
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.match = *(const ev_match_t *)e->data;
+    fsm_feed(FSM_EV_VERIFY_11, &d);
     return 0;
 }
 
@@ -211,7 +272,7 @@ static int on_btn(const event_t *e, void *ud)
     fsm_event_t ev = (b->btn == DG_BTN_MENU)    ? FSM_EV_MENU_BTN
                      : (b->btn == DG_BTN_VERIFY) ? FSM_EV_VERIFY_BTN
                                                  : FSM_EV_BACK;
-    auth_fsm_handle(&s_fsm, ev, NULL);
+    fsm_feed(ev, NULL);
     return 0;
 }
 
@@ -224,7 +285,7 @@ static int on_text_input(const event_t *e, void *ud)
         fsm_event_data_t d;
         memset(&d, 0, sizeof(d));
         copy_cstr(d.uid, sizeof(d.uid), t->text);
-        auth_fsm_handle(&s_fsm, FSM_EV_UID_SUBMIT, &d);
+        fsm_feed(FSM_EV_UID_SUBMIT, &d);
 
         /* 服务层解析 ID(FSM 不碰 DB) */
         user_rec_t rec;
@@ -239,7 +300,7 @@ static int on_text_input(const event_t *e, void *ud)
             snprintf(rd.uid_res.user_name, sizeof(rd.uid_res.user_name), "%s",
                      rec.user_name);
         }
-        auth_fsm_handle(&s_fsm, FSM_EV_UID_RESOLVED, &rd);
+        fsm_feed(FSM_EV_UID_RESOLVED, &rd);
         return 0;
     }
 
@@ -266,7 +327,7 @@ static int on_text_input(const event_t *e, void *ud)
                          rec.user_name);
             }
         }
-        auth_fsm_handle(&s_fsm, FSM_EV_VERIFY_RESULT, &d);
+        fsm_feed(FSM_EV_VERIFY_RESULT, &d);
     }
     return 0;
 }
@@ -277,7 +338,7 @@ static int on_method_pick(const event_t *e, void *ud)
     fsm_event_data_t d;
     memset(&d, 0, sizeof(d));
     d.method = ((const ev_method_pick_t *)e->data)->method;
-    auth_fsm_handle(&s_fsm, FSM_EV_METHOD_PICK, &d);
+    fsm_feed(FSM_EV_METHOD_PICK, &d);
     return 0;
 }
 
@@ -285,7 +346,7 @@ static int on_touch(const event_t *e, void *ud)
 {
     (void)e;
     (void)ud;
-    auth_fsm_handle(&s_fsm, FSM_EV_TOUCH, NULL);
+    fsm_feed(FSM_EV_TOUCH, NULL);
     return 0;
 }
 
@@ -293,7 +354,7 @@ static int on_access_tick(const event_t *e, void *ud)
 {
     (void)e;
     (void)ud;
-    auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
+    fsm_feed(FSM_EV_TICK, NULL);
     return 0;
 }
 
@@ -306,7 +367,7 @@ static int on_access_timer(const event_t *e, void *ud)
     memset(&d, 0, sizeof(d));
     d.timer.timer_id = (int32_t)t->timer_id;
     d.timer.seq = t->seq;
-    auth_fsm_handle(&s_fsm, FSM_EV_TIMER, &d);
+    fsm_feed(FSM_EV_TIMER, &d);
     return 0;
 }
 
@@ -331,6 +392,7 @@ int access_service_start(void)
 
     s_sub_cnt = 0;
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_MATCH_1N, on_match, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_VERIFY_11, on_verify_11, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_FACE_BOX, on_face_box, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_BTN, on_btn, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_TEXT_INPUT, on_text_input, NULL);

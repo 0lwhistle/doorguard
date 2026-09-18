@@ -21,6 +21,8 @@ DB device_config(用户经菜单/web 的改动,持久)
 | pwd_fail_lock_n | access.pwd_fail_lock_n | 1~10 | 5 |
 | pwd_fail_lock_s | access.pwd_fail_lock_s | 10~3600 | 60 |
 | face_dup_threshold | face.face_dup_threshold | 0.50~1.00 | 0.90 |
+| face_match_threshold | face.match_threshold | 0.30~1.00 | 0.42 |
+| liveness_enable | face.liveness_enable | 0/1 | 0(B8 活体算法落地后开) |
 | standby_timeout_s | ui.standby_timeout_s | 15~60(spec 上限) | 30 |
 | language | ui.language | zh-CN/en-US | zh-CN |
 | web_port | network.web_port | 1024~65535 | 8080 |

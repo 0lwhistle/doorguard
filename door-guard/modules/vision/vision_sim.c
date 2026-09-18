@@ -71,10 +71,12 @@ static int on_capture_req(const event_t *e, void *ud)
     return 0;
 }
 
-void vision_backend_start(bool enable_mock)
+/* 后端启动:PC 恒成功(mock 与摄像头 sim 解耦;工作模式由服务层持有,
+ * 本后端不按模式分支:PC 只验证 UI/FSM 链路,人脸口径以板上 ROCKIVA 为准) */
+int vision_backend_start(bool enable_mock)
 {
     if (s_started)
-        return;
+        return DG_OK;
     s_started = true;
 
     /* 录入抓取订阅:bus 分发线程回调,无需独立线程 */
@@ -86,4 +88,5 @@ void vision_backend_start(bool enable_mock)
             pthread_detach(tid);
         DG_LOGI("[VISION]", "mock 周期事件已启动");
     }
+    return DG_OK;
 }

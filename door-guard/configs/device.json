@@ -19,7 +19,7 @@
   "face": {
     "provider": "rockiva",
     "detect_interval_ms": 200,
-    "liveness_enable": true,
+    "liveness_enable": false,
     "liveness_actions_min": 2,
     "liveness_actions_max": 3,
     "liveness_timeout_ms": 2000,

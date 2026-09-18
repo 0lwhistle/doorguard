@@ -22,8 +22,41 @@ extern "C" {
 int vision_service_start(void);
 void vision_service_stop(void);
 
-/** 启动后端:PC=vision_sim(mock 可关)/ 板=vision_rockiva(占位) */
-void vision_backend_start(bool enable_mock);
+/** 启动后端:PC=vision_sim(mock 可关)/ 板=vision_rockiva
+ *  @return DG_OK 成功;非 0 = 后端不可用(板上缺模型等,降级不阻塞其余业务) */
+int vision_backend_start(bool enable_mock);
+
+/* ---- 工作模式(B7 交接 §0.1:FSM 状态 → vision 模式,access 1s tick 联动)
+ *
+ * 模式决定"帧要不要喂后端、要不要检索"——双重门禁的第二道:
+ *   后端口径 = 命中阈值过滤,本层口径 = 只在允许检索的模式下检索,
+ *   最终开门仍由 FSM(match_enabled/黑名单/per-user 开关)裁决。
+ * access_service 经 EV_VISION_SET_MODE 下发,不直接调本模块(模块间只走总线)。
+ */
+typedef enum {
+    DG_VMODE_IDLE = 0,      /**< 关人脸:不推帧(省 NPU;UI 预览走 RGA 通路不受影响) */
+    DG_VMODE_DETECT_ONLY,   /**< 检测/画框 + 录入特征缓存,不检索(菜单/待机/结果/验证子步) */
+    DG_VMODE_DETECT_1N,     /**< 上述 + 1:N 检索(普通态与管理员认证态;开机默认) */
+    DG_VMODE_VERIFY_11,     /**< 与指定用户特征 1:1 比对,不检索 */
+    DG_VMODE_MAX,
+} dg_vision_mode_t;
+
+/** 设工作模式(幂等;uid 仅 VERIFY_11 使用,NULL/空串=不指定)
+ *  @return DG_OK / DG_ERR_PARAM(模式越界) */
+int vision_service_set_mode(dg_vision_mode_t mode, const char *user_id);
+
+/** 当前模式(后端每帧/每回调读;线程安全) */
+dg_vision_mode_t vision_service_get_mode(void);
+
+/** 模式名(日志/上位机;未知返回 "?") */
+const char *vision_mode_name(dg_vision_mode_t mode);
+
+/** VERIFY_11 目标用户(拷贝语义;非 VERIFY_11/未指定 → 空串) */
+void vision_service_get_verify_uid(char *out, size_t cap);
+
+/** 后端注册模式变更钩子(VERIFY_11 时装载目标特征等);单实例,后注册覆盖前值 */
+typedef void (*vision_mode_hook_fn)(dg_vision_mode_t mode, const char *user_id);
+void vision_service_set_mode_hook(vision_mode_hook_fn fn);
 
 /* ---- 特征库维护(rockiva 后端实现;未就绪返回 DG_ERR_NOT_INIT) ---- */
 typedef int (*vision_lib_add_fn)(const char *user_id, const uint8_t *feature,

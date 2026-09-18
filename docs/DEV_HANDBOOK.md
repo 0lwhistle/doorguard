@@ -38,6 +38,12 @@
 - **本版已知缺口**:
   1. recovery 分区为空(构建耗时长已延后)
   2. 板载 WiFi 驱动缺失(厂家 wifibt 脚本 bug,见 §8;联网用以太网)
+  3. **ROCKIVA 只带了前级检测模型**(`/usr/lib/object_detection_v3_cls8.data`),
+     人脸模型缺失 → `ROCKIVA_FACE_Init` 返回 -1。实测(2026-09-18,板上 strace)
+     它要 `/usr/lib/face_landmark5.data`、`face_quality_v2.data`(之后还有识别模型);
+     从 SDK `external/iva/librockiva/rockiva-rk3576-Linux/models/rockiva_data_rk3576/`
+     拷入 /usr/lib 即可(应用降级不崩,只记 `vision_backend=ERROR` 继续跑)。
+     **下一版固件(B10)应在 buildroot IVA 包里补全,别让运维手工拷模型**
 - rootfs 内已预置:LVGL(+demo 自启,后续换 door-guard)、ROCKIVA(含模型)、RKADK、rkaiq、rknpu2、GStreamer+RTSP server、SQLite、dropbear、chrony、gdb 调试链
 
 ### B5 验收状态
@@ -68,6 +74,9 @@ ip a; ps | grep dropbear      # 网络/SSH
 cat /sys/class/backlight/*/brightness   # 背光
 cat /proc/bus/input/devices | grep -iA3 'fts\|goodix'  # 触摸(看实际枚举出的 IC)
 /etc/init.d/S60doorguard {start|stop|restart}  # 应用自启服务;日志 /var/log/door-guard.log
+grep -E "HOLDER|VISION" /var/log/door-guard.log | tail -30   # 模块状态表 + 视觉后端
+DG_IVA_LOG=3 /root/door-guard     # 前台跑并开 ROCKIVA 日志(看它找哪个模型文件)
+ls /usr/lib/*.data                # ROCKIVA 模型(缺人脸模型时 FACE_Init 返 -1)
 ```
 
 注意:rootfs 裁剪过,缺什么工具优先想"buildroot defconfig 里没开",回 VM 加配置重编,不要板端乱装。

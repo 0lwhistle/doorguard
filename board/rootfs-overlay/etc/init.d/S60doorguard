@@ -19,6 +19,11 @@ STAGED=$STATE/ota_staged.bin
 STAGED_SHA=$STATE/ota_staged.bin.sha256
 STAGED_VER=$STATE/ota_staged.ver
 
+# ROCKIVA 人脸模型目录(B7):板上 /usr/lib 放模型文件——从 SDK
+# external/iva/librockiva/rockiva-rk3576-Linux/*/model 拷入;缺模型时
+# 应用降级为"无人脸检测"(日志 ERROR 明示),其余业务照常
+export DG_IVA_MODEL_DIR="${DG_IVA_MODEL_DIR:-/usr/lib}"
+
 log() { echo "$(date '+%F %T') $*" >>"$LOG"; }
 
 aiq_restart() {

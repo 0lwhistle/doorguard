@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-09-18 B7 续作:holder 接入 + 模式联动 + 活体留口(已上板,差人脸模型)
+
+- **① holder 接入**:`app/main.c` 手工装配改注册表(14 模块,`/usr/lib` 相机节点等
+  参数走静态变量)。板上实测:必需模块全 READY,`vision_backend` = ERROR 时
+  系统照常起(摄像头/UI/web 都在)——降级路径就是设计要的样子
+- **② mode 联动**:新事件 `EV_VISION_SET_MODE`(access → vision,模块间仍只走总线);
+  `vision_service_set_mode(DETECT_1N/DETECT_ONLY/VERIFY_11/IDLE)` + 后端钩子;
+  access 每次 FSM 事件后派生模式(普通/管理员态 1:N,1:1 子步带 cur_uid,
+  其余 DETECT_ONLY)。**补了一处漏线**:没人把 `EV_VISION_VERIFY_11` 送进 FSM
+  (FSM 侧分支早就有),现由 access 订阅搬运——test_vision_mode 抓出来的
+- **③ 活体留口**:`liveness_service_on_face`(106 点)+`liveness_service_pass`;
+  `cfg liveness_enable`(默认 0)门禁挂在两处命中发布前。B7 pass 恒 true
+  (cfg 开着会打一条"未实现,本次放行"的告警,不静默)
+- **坑/发现**:
+  1. **test 构建本来就是坏的**:`dg-test` 里 dg_vision 编 rockiva 后端(宿主无
+     rockiva 头)→ 改 `if(DG_SIM OR DG_BUILD_TESTS)` 走 sim;dg-test 现 17/17
+  2. `sed` 批量替换 `auth_fsm_handle(&s_fsm,` → `fsm_feed(` 把 `fsm_feed` 自己
+     的函数体也换了 → 无限递归 SEGFAULT(test_e2e 当场抓到)
+  3. strace 板上跑:**ROCKIVA 人脸模型缺 `face_landmark5.data` /
+     `face_quality_v2.data`**(B4 rootfs 只装了 object_detection_v3_cls8.data)
+     → `ROCKIVA_FACE_Init` 返回 -1;`DG_IVA_LOG=3` 可看它找文件的路径
+  4. 清掉 CMake 里 SDK_ROOT 残留(-L/external/iva/...),二进制里烧进的
+     `RPATH=/external/iva/...` 一并消失(板上曾见 ENOENT 打开,无害但难看)
+- **未做**:板上人脸模型要用户从 VM `models/rockiva_data_rk3576` 拷 /usr/lib,
+  之后才算完成 §2.5 联调(录入人脸 / 1:N 命中 / faceSize 确认)
+
+---
+
 ## 2026-09-18 B7 人脸识别:代码主体完成,交接续作(上下文压缩)
 
 - **已写完且交叉编译零警告**:vision_rockiva(检测/检索/录入缓存/特征库同步/

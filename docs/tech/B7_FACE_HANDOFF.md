@@ -2,12 +2,15 @@
 
 > 读本文前先读 `docs/DEVLOG.md` 顶部两条(B6 相机/OTA 已完成)。
 > 本文是 B7 的唯一交接事实源:已完成/待做/坑/API 备忘全在此。
+> **2026-09-18 晚更新**:§2 的 ①②③⑤(S60 env)⑦⑧⑨ 已完成并上板;
+> 板上 `vision_backend` 因缺人脸模型 = ERROR(降级正常),模型拷入后即可联调。
 
 ## 0. 一句话状态
 
-B7 代码主体已写完且**交叉编译零警告**(rockiva 后端、相机 NV12 出口、
-特征库同步、录入挂钩、CMake),**未推板未实测**;剩:holder 接入、
-mode 切换、活体留口、板上模型文件(需用户从 VM 拷)、部署联调。
+B7 代码全部完成(holder 接入 / mode 联动 / 活体留口 / 相机 NV12 出口 /
+特征库同步),**已推板**:14 模块 holder 注册表全 READY(除 vision_backend
+因缺人脸模型 ERROR),相机/UI/web/触摸正常。**只剩**:用户从 VM 拷人脸模型
+→ 联调(录入人脸 / 1:N 命中 / 特征长度确认)。
 
 ## 0.1 技术架构(定稿)
 
@@ -44,14 +47,20 @@ mode 切换、活体留口、板上模型文件(需用户从 VM 拷)、部署联
    └──────────────────────────────────────────────────────────────────┘
 ```
 
-### mode 状态机(FSM 状态 → vision 模式,access tick 1s 联动)
+### mode 状态机(FSM 状态 → vision 模式,access 每次 FSM 事件后派生并下发)
 
 | FSM 状态 | vision mode | 检索 | 录入缓存 | 脸框 |
 |---|---|---|---|---|
 | ST_NORMAL 且 match_enabled | DETECT_1N | ✅ | ✅ | ✅ |
+| ST_ADMIN_AUTH(菜单入口认证) | DETECT_1N | ✅(role 过滤在 FSM) | ✅ | ✅ |
 | ST_VERIFY(选了人脸 1:1) | VERIFY_11(cur_uid) | ❌(1:1 比) | ✅ | ✅ |
-| 菜单/用户/待机/结果 | DETECT_ONLY | ❌ | ✅ | 发布但当前页不渲染 |
+| 菜单/用户/待机/结果/其它验证子步 | DETECT_ONLY | ❌ | ✅ | 发布但当前页不渲染 |
 | 系统级关人脸(后续接 access_set) | IDLE(不推帧) | ❌ | ❌ | ❌ |
+
+> ST_ADMIN_AUTH 用 DETECT_1N 是落地时的修正:spec-auth §3 要求管理员人脸
+> 也能在管理员中 1:N 检索,而 FSM 的 `on_match_1n` 本来就处理 ST_ADMIN_AUTH
+> (role≠1 红弹窗 + 5s 重来)。若按"只有 ST_NORMAL 才 1:N",管理员刷脸进
+> 菜单这条产品路径会永远走不通,FSM 里那段也成死代码。
 
 双重门禁:vision 层阈值过滤 + FSM 层 match_enabled/黑名单/per-user 开关——
 误触发开门在语义上不可能。
@@ -66,9 +75,15 @@ mode 切换、活体留口、板上模型文件(需用户从 VM 拷)、部署联
 
 1. liveness_service.h 增 `liveness_service_on_face(landmarks[], n, quality)`
    (B7 空实现);vision_rockiva 开 106 关键点后在 analyse/det 调用;
-2. cfg 增 `liveness_enable`(默认 0);1:N 命中发布处门禁;
+2. cfg 增 `liveness_enable`(默认 0);命中发布处门禁;
 3. B8:动作状态机(眨眼=EAR 边沿/点头=纵向位移比/摇头·转头=yaw 往返),
    随机 2~3 指令序列,UI 动作引导页,每步 5s 超时,全过置 pass。
+
+> **B7 已落地版本**(2026-09-18):`liveness_service_on_face/pts/quality` +
+> `liveness_service_pass()`(恒 true,cfg 开着会打一条"未实现,本次放行"的告警,
+> 不静默失效)+ `liveness_service_last_face_age_ms()`(联调观测)。
+> 关键点用与后端解耦的 `dg_face_pt_t{int32 x,y}` 万分比坐标传。
+> 门禁挂在 1:N 与 1:1 两处发布前(B8 直接换 pass 的实现即可)。
 
 ## 0.2 holder 移植方案(已批准)
 
@@ -94,19 +109,33 @@ main.c 手工装配 → holder 注册表(`proto/holder/holder.h`,README 有用�
 - 运行期健康:web 后续可加 /api/health 遍历 `holder_get_module_info`。
 - 主循环(camera_poll + ui_poll)保持不变。
 
-## 0.3 当前快照(交接时刻)
+**落地差异(2026-09-18 实施,已上板验证)**:
 
-- 工作树干净,HEAD=本文件所在提交;交叉编译零警告(22 目标)
-- **板上跑的是 UI 重构版二进制(不含 B7 代码)**,B7 完成后需 dg-deploy
-- 板上服务/相机/3A/触摸/OTA(A/B 槽)均正常;模型缺人脸(见 §2.4)
+- 表里"camera 依赖 config"写成 `{config}`;"ui 依赖 display"改成 `{config}`——
+  display 由 `ui_init` 内部初始化、没有独立模块,若声明依赖不存在的模块名,
+  holder 会把 ui 直接判 ERROR(依赖未满足)。ui 的真实依赖只有 cfg(语言/主题)。
+- `vision_backend` 内部**不再**调 `holder_set_module_state`:holder_init_module
+  会拿 init_fn 的返回值覆盖状态与 last_error(源码:ret==0 → READY,非 0 → ERROR
+  + "Initialization failed"),模块里自我注册是冗余的双层耦合。失败细节留在
+  `[VISION]` 的 DG_LOGE 里(实测会打出缺哪些模型文件)。
+- 板上实测状态表:14 模块,必需全 READY;`vision_backend = ERROR(Errors: 1)`
+  时应用照常运行(相机/UI/web/触摸都起)——降级语义符合设计。
+
+## 0.3 当前快照(2026-09-18 晚,§2 ①②③⑤⑦⑧⑨ 已完成并上板)
+
+- 交叉编译零警告;`dg-test` 17/17(含新增 `test_vision_mode`);`--tsan` 17/17
+- 板上跑的是本次 B7 二进制:`/etc/init.d/S60doorguard` 已带
+  `export DG_IVA_MODEL_DIR=/usr/lib`(dg-deploy 自动同步)
+- 板上模块状态:全 READY,**除 vision_backend = ERROR**(人脸模型缺失,见 §2.4)
 - 待用户人工回归:UI 待机唤醒/菜单四入口/用户管理/中英切换(UI 重构后未全测)
 
-## 1.1 首个验证点(上板第一件事!)
+## 1.1 首个验证点(人脸模型到位后第一件事!)
 
 **DG_FEATURE_MAX=512,而 ROCKIVA_FACE_FEATURE_SIZE_MAX=4096**——若实际特征
-超过 512B,当前代码会静默丢弃特征(录入/检索全废)。上板先看日志确认
-analyse 特征的 featureSize:超过 512 就把 proto/types.h 的 DG_FEATURE_MAX
-提到实际值(表是 BLOB,免迁移),重编译。
+超过 512B,当前代码**不再静默丢弃**:analyse 回调会打
+`特征 N B > DG_FEATURE_MAX(512),已丢弃——请提高 proto/types.h DG_FEATURE_MAX 后重编译`
+(每进程最多 3 条)。正常路径也会打一条 `人脸特征长度 N B(上限 512)`(长度变化时再打),
+所以**上板看这一行就知道是否要提 DG_FEATURE_MAX**(表是 BLOB,提了免迁移)。
 
 ## 1. 已完成(代码在工作树/已提交)
 
@@ -126,53 +155,66 @@ analyse 特征的 featureSize:超过 512 就把 proto/types.h 的 DG_FEATURE_MAX
   未注册返回 DG_ERR_NOT_INIT)。
 - **enroll_service.c**:录入入库成功后 `vision_service_library_add`;删除后
   `vision_service_library_remove`。
-- **CMake**:dg_vision(非 sim)的 rockiva/dg_storage/dg_config/dg_camera 链接块
-  放在 dg_camera 定义**之后**(CMake 目标顺序:放前面会退化为 -l 直链失败)。
-- 交叉编译:零警告,22 目标全过。**PC sim 不受影响**(mock 后端)。
+- **CMake**:dg_vision(非 sim)的 rockiva/dg_storage/dg_config/dg_camera/dg_liveness
+  链接块放在 dg_camera 定义**之后**(CMake 目标顺序:放前面会退化为 -l 直链失败)。
+- 交叉编译:零警告。**PC sim 不受影响**(mock 后端)。
+
+### 本轮补完(2026-09-18 晚)
+
+- **holder 接入**(§2.1):`app/main.c` 重写为注册表装配(14 模块),
+  `vision_backend_start` / `vision_service_set_mode` 等接口齐备。
+- **mode 联动**(§2.2):`EV_VISION_SET_MODE` 事件 + `vision_service_set_mode`
+  + 后端钩子 `vision_service_set_mode_hook`(VERIFY_11 时装目标特征);
+  access 侧 `sync_vision_mode()` 由 `fsm_feed()` 每次 FSM 事件后调用。
+  **关键补线**:此前没有任何地方把 `EV_VISION_VERIFY_11` 送进 FSM
+  (FSM 的 `FSM_EV_VERIFY_11` 分支早就写好了)→ access_service 新增
+  `on_verify_11` 订阅搬运。1:1 **只在通过时发布**(失败由 FSM 子步 5s 超时收口,
+  避免逐帧低分把流程提前打死)。
+- **活体留口**(§2.3):`liveness_service_on_face/pass/last_face_age_ms` 实现;
+  det/analyse 两侧回灌 106 点;两处命中发布前门禁 `liveness_enable && !pass → 不发`;
+  模块 README 记录 B7 语义与 B8 计划。
+- **人脸长度自诊断**(§1.1):正常打 `人脸特征长度 N B`,超限打 ERROR 提示提宏。
+- **EV_VISION_FACE_LOST**(新增):原来板上后端从不发它,人走开后主页黄框会一直
+  挂着(FSM 的 `FSM_EV_FACE_LOST` 与 UI 的 `page_home_clear_facebox` 都在等它)。
+  现按"有→无"边沿发;IDLE 切换时也补发一次(此后没有回调了)。
+- **0.1:N/1:1 用两个阈值**:检索/比对接受用 cfg `face_match_threshold`
+  (json `face.match_threshold`,默认 0.42),录入查重用 cfg `face_dup_threshold`
+  (0.90)。此前用 0.90 当检索阈值太严,1:N 基本不可能命中;
+  `device.json` 里 team 早就写了 `match_threshold: 0.42`。
+  板上调阈值依据:analyse 里每 2s 一条 `1:N 最高分 X.XXX(阈值 Y)` 节流日志。
+- **测试**:新增 `tests/test_vision_mode.c`(模式联动回归,抓出了上面那条漏线);
+  `dg-test` 修好(测试构建走 sim 视觉后端)。
+- **CMake 清理**(§2.9):删掉 SDK_ROOT 的 include/lib64 残留,可执行文件里
+  不再烧 `RPATH=/external/iva/...`(readelf 已验证);旧的 `-L/external/...`
+  在板上会触发一次 ENOENT open(无害但难看)。
 
 ## 2. 待做(按序)
 
-1. **holder 接入**(用户已批准):main.c 手工装配改 holder 注册表
-   (`proto/holder/holder.h`,README 有完整用法)。模块与依赖:
-   event_bus → tasker → storage → config(cfg_load 的 json 路径按 DG_SIM 分支,
-   包一层 int(void) init_fn)→ capture → vision_service → vision_backend
-   (vision_backend_start 改 int 返回,内部成功/失败调
-   holder_set_module_state("vision_backend", READY/ERROR),required=false
-   ——缺模型降级不阻塞)→ access/enroll/liveness → web → mdns → ui(required=false)。
-   `holder_init_all(true)`;主循环(camera_poll+ui_poll)保持不变。
-2. **mode 切换**(接口已在方案定稿):vision_service 增
-   `vision_service_set_mode(mode, uid)`;枚举
-   DETECT_1N / DETECT_ONLY(脸框+录入缓存,不检索)/ VERIFY_11(uid)/
-   ENROLL_CAPTURE / IDLE(不推帧)。vision_rockiva 每帧/每回调按 mode 分支。
-   **联动点**:access_service 的 on_access_tick(1s,已有)读公开字段
-   s_fsm.state / match_enabled / cur_uid:
-   - ST_NORMAL 且 match_enabled → DETECT_1N
-   - ST_VERIFY(FACE_1V1 步)→ VERIFY_11(cur_uid);检索命中改发
-     EV_VISION_VERIFY_11(**FSM 已预留该事件**,auth_fsm.c:273 直接转
-     FSM_EV_VERIFY_RESULT,勿重复实现)
-   - 其他页(菜单/用户/待机)→ DETECT_ONLY(录入照常,检索关,无误触发)
-   - 系统级关人脸(后续接 access_set)→ IDLE
-3. **活体留口**(B8 实现算法):liveness_service.h 增
-   `liveness_service_on_face(landmarks, n, quality)`(B7 空实现);
-   vision_rockiva analyse/det 处调用(landmarks 已在 faceInfo,开 106 点
-   faceLandmarkEnable=2);cfg 加 liveness_enable(默认 0);
-   1:N 命中发布处加门禁 `cfg liveness_enable && !pass → 不发`。
-4. **板上人脸模型**(需用户操作):板上只有 /usr/lib/object_detection_v3_cls8.data
-   (前级检测),**无人脸模型**。VM:
+1. ~~holder 接入~~ **✅ 完成**(见 §1 本轮补完;落地差异见 §0.2)。
+2. ~~mode 切换~~ **✅ 完成**(4 模式;ENROLL_CAPTURE 未做——录入取缓存与
+   DETECT_ONLY/DETECT_1N 并存,不需要单独模式)。
+3. ~~活体留口~~ **✅ 完成**(B8 只填算法)。
+4. **板上人脸模型**(需用户操作,唯一阻塞项):板上只有 /usr/lib/object_detection_v3_cls8.data
+   (前级检测,ROCKIVA_Init 靠它成功),**人脸模型缺失**。strace 实测 FACE_Init
+   会找:`/usr/lib/face_landmark5.data`(或 `.rknn` / `libface_landmark5.so`)、
+   `/usr/lib/face_quality_v2.data`(或 `.rknn` / `libface_quality_v2.so`),
+   后续还会要识别模型。VM:
    `~/Linux/rk3576/Rk3576-SDK/rk3576_data/rk3576-linux-2026091008/external/iva/
-   librockiva/rockiva-rk3576-Linux/` 下 model 目录 → scp 到板 /usr/lib/。
-   缺模型时 ROCKIVA_Init 失败,日志 ERROR 明示,系统降级不崩。
-5. **部署联调**:`source env/env.sh && dg-build && dg-deploy`(自动停服务推送
-   拉起)。看板日志(/var/log/door-guard.log):`ROCKIVA 就绪` → 用户管理页录入
-   人脸(正对镜头 3s 内)→ 日志 `特征库装载` → 主页举脸:脸框跟随(yellow)→
-   命中(green+开门+日志 1:N 命中 x‰)。脸框方向不对改 rect_to_screen
-   (90↔270 公式);相似度偏高/偏低调 cfg face_dup_threshold。
-6. **收尾**:DEVLOG B7 条目 + PROJECT_PLAN 进度行 + 本文件更新为"已完成" + push。
-7. **S60 加 env**:启动循环前 export DG_IVA_MODEL_DIR=/usr/lib(未做,§2.4 依赖)。
-8. **vision_backend_start 签名改 int 的涉及面**(3 文件+调用点):
-   vision_service.h 声明 / vision_sim.c / vision_rockiva.c / main.c 调用处。
-9. **链接残留清理(非阻塞)**:链接行有 `-L/external/iva/...`(SDK_ROOT 空导致),
-   清掉 CMakeLists 226-241 的 SDK_ROOT include/lib64 旧注释块或给 SDK_ROOT 默认值。
+   librockiva/rockiva-rk3576-Linux/models/rockiva_data_rk3576/*.data`
+   → 整目录 `scp` 到板 `/usr/lib/`(至少 face_landmark5.data、face_quality_v2.data,
+   建议全拷)。缺模型时 FACE_Init 返回 -1,日志 ERROR 明示,**系统降级不崩**。
+   后续固件(B10)应在 buildroot 的 IVA 包里带上这些模型,不再手工拷。
+5. **部署联调**(模型到位后):`source env/env.sh && dg-build && dg-deploy`。
+   看板日志(/var/log/door-guard.log):`ROCKIVA 就绪` + `人脸特征长度 N B` →
+   用户管理页录入人脸(正对镜头 3s 内)→ 日志 `特征库装载` → 主页举脸:
+   脸框跟随(yellow)→ 命中(green+开门+日志 `1:N 命中 x‰`)。脸框方向不对改
+   rect_to_screen(90↔270 公式);分数偏高/偏低调 cfg `face_match_threshold`。
+   排查工具:`DG_IVA_LOG=3 /root/door-guard` 看 ROCKIVA 找模型的路径。
+6. **收尾**:DEVLOG/PROJECT_PLAN 已更新;本文件已改为"完成待联调";push 见 git log。
+7. ~~S60 加 env~~ **✅ 完成**(`export DG_IVA_MODEL_DIR="${DG_IVA_MODEL_DIR:-/usr/lib}"`)。
+8. ~~vision_backend_start 改 int~~ **✅ 完成**(4 处:vision_service.h / vision_sim.c /
+   vision_rockiva.c / main.c 包装)。
+9. ~~链接残留清理~~ **✅ 完成**(RPATH 已清,见 §1 本轮补完)。
 10. **用户回归清单**(§0.3):待机唤醒/菜单四入口/用户管理/中英切换 + B7 新流程。
 
 ## 3. API/坑备忘(新会话勿重踩)
@@ -206,7 +248,22 @@ analyse 特征的 featureSize:超过 512 就把 proto/types.h 的 DG_FEATURE_MAX
 - 链接顺序坑(已修):dg_vision 的 target_link_libraries 若放在 dg_camera
   定义之前,CMake 退化为 -l 直链,undefined reference。
 - EV_VISION_VERIFY_11:FSM 侧已备好(auth_fsm.c:273 转 VERIFY_RESULT),
-  vision 的发布路径随 §2.2 mode 切换实现,勿在 FSM 里加东西。
-- 链接行残留 `-L/external/iva/...` 无害(SDK_ROOT 空导致),见 §2.9。
+  vision 的发布路径见 §1;access 侧必须有人把它转成 FSM_EV_VERIFY_11
+  (现已由 access_service `on_verify_11` 订阅搬运)。**勿在 FSM 里加东西**。
+- 链接行残留 `-L/external/iva/...` 已清(§2.9),readelf 确认无 RPATH 残留。
 - PC 端(sim):vision_sim mock 不依赖 camera NV12 出口;camera_set_nv12_listener
   在 sim 的 camera_sim.c 无实现——sim 不调它即可,勿在公共路径调用。
+  测试构建(`DG_BUILD_TESTS`)走 sim 视觉后端:**板上后端只在交叉编译里编**
+  (宿主没有 rockiva 头,曾因此让 dg-test 整体编不过)。
+- **人脸模型文件清单(板上实测 2026-09-18,strace 得来)**:FACE_Init 在
+  modelPath 下依次找 `face_landmark5.data`(.rknn / libface_landmark5.so 备选)、
+  `face_quality_v2.data`(.rknn / libface_quality_v2.so 备选),之后还有识别模型;
+  缺任一 → 返回 -1。`object_detection_v3_cls8.data` 只够 ROCKIVA_Init 成功。
+- **批量改代码的坑**:`sed -i 's/auth_fsm_handle(&s_fsm, /fsm_feed(/g'` 会把
+  包装函数 `fsm_feed` 自己的函数体也替换掉 → 无限递归 SEGFAULT(靠 test_e2e 抓到)。
+  批量替换后务必回看被改函数本身。
+- **holder 语义**:`holder_init_module` **用 init_fn 的返回值覆盖**状态与
+  last_error(ret==0 → READY,非 0 → ERROR + "Initialization failed"),
+  所以模块内部再调 `holder_set_module_state` 是冗余的;依赖未满足的模块在
+  `holder_init_all` 收尾时统一置 ERROR(依赖模块名写错 = 该模块永远 ERROR,
+  例如 ui 声明依赖不存在的 "display")。

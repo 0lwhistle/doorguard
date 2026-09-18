@@ -30,6 +30,8 @@ static void defaults_apply(dg_cfg_t *c)
     c->pwd_fail_lock_n = 5;
     c->pwd_fail_lock_s = 60;
     c->face_dup_threshold = 0.90;
+    c->face_match_threshold = 0.42;      /* 与 configs/device.json face.match_threshold 一致 */
+    c->liveness_enable = 0;              /* 活体算法 B8 落地前默认关 */
     c->standby_timeout_s = 30;
     snprintf(c->language, sizeof(c->language), "zh-CN");
     c->web_port = 8080;
@@ -109,6 +111,19 @@ static void json_apply(dg_cfg_t *c, const cJSON *root)
         if (cJSON_IsNumber(item))
             c->face_dup_threshold = clamp_dbl(item->valuedouble, 0.50, 1.00, 0.90,
                                               "face.face_dup_threshold");
+    }
+    if ((item = json_path(root, "face.match_threshold"))) {
+        if (cJSON_IsNumber(item))
+            c->face_match_threshold = clamp_dbl(item->valuedouble, 0.30, 1.00, 0.42,
+                                                "face.match_threshold");
+    }
+    if ((item = json_path(root, "face.liveness_enable"))) {
+        if (cJSON_IsBool(item))
+            c->liveness_enable = cJSON_IsTrue(item) ? 1 : 0;
+        else if (cJSON_IsNumber(item))
+            c->liveness_enable = item->valueint ? 1 : 0;
+        else
+            DG_LOGW(TAG, "face.liveness_enable 类型错,回退默认 0");
     }
     if ((item = json_path(root, "ui.standby_timeout_s"))) {
         if (cJSON_IsNumber(item))
@@ -204,6 +219,16 @@ int cfg_load(const char *json_path_str)
         else
             DG_LOGW(TAG, "DB face_dup_threshold='%s' 非数字,忽略", v);
     }
+    if (db_config_get("face_match_threshold", v, sizeof(v)) == DG_OK) {
+        double d;
+        if (sscanf(v, "%lf", &d) == 1)
+            s_cfg.face_match_threshold = clamp_dbl(d, 0.30, 1.00,
+                                                   s_cfg.face_match_threshold,
+                                                   "face_match_threshold");
+        else
+            DG_LOGW(TAG, "DB face_match_threshold='%s' 非数字,忽略", v);
+    }
+    db_apply_int("liveness_enable", &s_cfg.liveness_enable, 0, 1, "liveness_enable");
     if (db_config_get("language", v, sizeof(v)) == DG_OK && v[0])
         copy_cstr(s_cfg.language, sizeof(s_cfg.language), v);
     if (db_config_get("ntp_server", v, sizeof(v)) == DG_OK && v[0])
@@ -211,8 +236,10 @@ int cfg_load(const char *json_path_str)
     if (db_config_get("ota_url", v, sizeof(v)) == DG_OK)
         copy_cstr(s_cfg.ota_url, sizeof(s_cfg.ota_url), v);
 
-    DG_LOGI(TAG, "配置就绪: door=%dms standby=%ds face_dup=%.2f web=%d ota=%d lang=%s",
+    DG_LOGI(TAG, "配置就绪: door=%dms standby=%ds face_dup=%.2f face_match=%.2f "
+                 "liveness=%d web=%d ota=%d lang=%s",
             s_cfg.door_open_ms, s_cfg.standby_timeout_s, s_cfg.face_dup_threshold,
+            s_cfg.face_match_threshold, s_cfg.liveness_enable,
             s_cfg.web_port, s_cfg.ota_port, s_cfg.language);
     return DG_OK;
 }

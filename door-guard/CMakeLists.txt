@@ -20,10 +20,6 @@ add_compile_options(-Wall -Wextra)
 # 根目录相对头文件(如 ui/theme.h)对所有子目标可见
 include_directories(${CMAKE_SOURCE_DIR})
 
-# ---- 交叉编译变量(由工具链文件或环境提供) ----
-# SDK_ROOT 指向官方 SDK 根目录
-set(SDK_ROOT "$ENV{SDK_ROOT}" CACHE PATH "Rockchip SDK root")
-
 find_package(Threads REQUIRED)
 
 # ---- 基础组件(板上与测试同一份源码) ----
@@ -126,21 +122,24 @@ add_library(dg_access STATIC
     modules/access/auth_fsm.c
     modules/access/access_service.c
 )
-target_include_directories(dg_access PUBLIC ${CMAKE_SOURCE_DIR}/modules/access)
+target_include_directories(dg_access PUBLIC ${CMAKE_SOURCE_DIR}/modules/access
+                                            ${CMAKE_SOURCE_DIR}/modules/vision)
 target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker dg_gpio)
 
-# vision:视觉服务(槽位句柄 + sim mock / rockiva 占位)
+# vision:视觉服务(槽位句柄 + sim mock / rockiva 板上后端)
 add_library(dg_vision STATIC modules/vision/vision_service.c)
 target_include_directories(dg_vision PUBLIC ${CMAKE_SOURCE_DIR}/modules/vision)
 target_link_libraries(dg_vision PUBLIC dg_proto)
-if(DG_SIM)
+# 测试构建走 sim 后端:测试是宿主 gcc 无 rockiva 头/库(板上后端只在交叉编译里编)
+if(DG_SIM OR DG_BUILD_TESTS)
     target_sources(dg_vision PRIVATE modules/vision/vision_sim.c)
 else()
     target_sources(dg_vision PRIVATE modules/vision/vision_rockiva.c)
     target_include_directories(dg_vision PRIVATE
         ${CMAKE_SYSROOT}/usr/include/rockiva
         ${CMAKE_SOURCE_DIR}/hal/storage
-        ${CMAKE_SOURCE_DIR}/config)
+        ${CMAKE_SOURCE_DIR}/config
+        ${CMAKE_SOURCE_DIR}/modules/liveness)
     # 库链接在 dg_camera 定义之后统一补(见下方"rockiva 链接"块)
 endif()
 
@@ -165,10 +164,10 @@ add_library(dg_uart STATIC hal/uart/uart_hal.c)
 target_include_directories(dg_uart PUBLIC ${CMAKE_SOURCE_DIR}/hal/uart)
 target_link_libraries(dg_uart PUBLIC dg_log)
 
-# liveness:活体占位
+# liveness:动作活体(B7 留口 on_face/pass;B8 状态机)
 add_library(dg_liveness STATIC modules/liveness/liveness_service.c)
 target_include_directories(dg_liveness PUBLIC ${CMAKE_SOURCE_DIR}/modules/liveness)
-target_link_libraries(dg_liveness PUBLIC dg_proto)
+target_link_libraries(dg_liveness PUBLIC dg_proto dg_config)
 
 # civetweb:第三方 HTTP/WebSocket 单库(MIT,vendored)
 add_library(civetweb STATIC third_party/civetweb/civetweb.c)
@@ -225,24 +224,19 @@ endif()
 target_link_libraries(dg_display PUBLIC dg_log)
 target_link_libraries(dg_camera PUBLIC dg_log)
 
-# rockiva 视觉链接(dg_vision 引用 camera/storage/cfg 符号;
-# 必须在 dg_camera/dg_storage 定义之后,CMake 才能建立正确的静态链接顺序)
+# rockiva 视觉链接(dg_vision 引用 camera/storage/cfg/liveness 符号;
+# 必须在这些库定义之后,CMake 才能建立正确的静态链接顺序)
 if(NOT DG_SIM)
-    target_link_libraries(dg_vision PUBLIC rockiva dg_storage dg_config dg_camera)
+    target_link_libraries(dg_vision PUBLIC rockiva dg_storage dg_config dg_camera
+                                           dg_liveness)
 endif()
 
 # ---- 应用(交叉编译产物,dg-deploy 推板) ----
-include_directories(
-    ${CMAKE_SOURCE_DIR}
-    # ROCKIVA(官方人脸方案,B7 阶段启用)
-    ${SDK_ROOT}/external/iva/librockiva/rockiva-rk3576-Linux/include
-    # LVGL
-    # ${SDK_ROOT}/app/lvgl_demo/lvgl
-)
-# 库路径(启用 rockiva 时打开)
-link_directories(
-    ${SDK_ROOT}/external/iva/librockiva/rockiva-rk3576-Linux/lib64
-)
+# ROCKIVA 的头与库都取自 sysroot(与板上 .so 同源):
+#   ${CMAKE_SYSROOT}/usr/include/rockiva、${CMAKE_SYSROOT}/usr/lib/librockiva.so
+# 曾用 SDK_ROOT/external/iva/... 的 include/lib64 路径——SDK_ROOT 为空时会在
+# 可执行文件里烧进 RPATH=/external/iva/...(板上实测 ENOENT 但无害);已移除。
+include_directories(${CMAKE_SOURCE_DIR})
 
 add_executable(door-guard app/main.c)
 # 组件链入应用:装配顺序在 app/main.c(architecture.md §1,main.c 头注同步维护)。
