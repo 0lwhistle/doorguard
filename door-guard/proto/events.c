@@ -31,6 +31,12 @@ static const struct {
     { EV_IC_CARD,          "IC_CARD" },
     { EV_DOOR_STATE,       "DOOR_STATE" },
     { EV_UI_STANDBY,       "UI_STANDBY" },
+    { EV_UI_ASK_UID,       "UI_ASK_UID" },
+    { EV_UI_INPUT_PWD,     "UI_INPUT_PWD" },
+    { EV_UI_PICK_METHOD,   "UI_PICK_METHOD" },
+    { EV_UI_RESULT,        "UI_RESULT" },
+    { EV_UI_HINT_CLEAR,    "UI_HINT_CLEAR" },
+    { EV_UI_FACEBOX,       "UI_FACEBOX" },
     { 0, NULL },
 };
 

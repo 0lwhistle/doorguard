@@ -134,6 +134,18 @@ void page_home_set_facebox(int state, int32_t x, int32_t y, int32_t w, int32_t h
     lv_obj_invalidate(s_facebox);
 }
 
+/* 只改颜色不挪位置:FSM 命中/失败时框位置沿用检测框(框由视觉后端逐帧刷新) */
+void page_home_set_facebox_color(int state)
+{
+    if (!s_facebox)
+        return;
+    lv_color_t c = (state == DG_BOX_MATCHED)  ? DG_COL_OK()
+                   : (state == DG_BOX_FAILED) ? DG_COL_ERR()
+                                              : DG_COL_WARN();
+    lv_obj_set_style_border_color(s_facebox, c, 0);
+    lv_obj_invalidate(s_facebox);
+}
+
 void page_home_clear_facebox(void)
 {
     if (s_facebox)

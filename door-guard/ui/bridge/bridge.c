@@ -11,6 +11,7 @@
 #include "event_bus.h"
 #include "dg_log.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static int on_face_box(const event_t *e, void *ud)
@@ -68,6 +69,74 @@ static int on_goto_page(const event_t *e, void *ud)
     return 0;
 }
 
+/* ---- 服务层请求 UI 弹窗/改框(验证流程;UI 只渲染不决策) ---- */
+
+static int on_ask_uid(const event_t *e, void *ud)
+{
+    (void)e;
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_ASK_UID;
+    ui_evt_push(&evt);
+    return 0;
+}
+
+static int on_input_pwd(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_INPUT_PWD;
+    evt.input_req = *(const ev_ui_input_req_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
+static int on_pick_method(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_PICK_METHOD;
+    evt.methods = *(const ev_ui_methods_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
+static int on_result(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_RESULT;
+    evt.result_popup = *(const ev_ui_result_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
+static int on_facebox(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_FACEBOX;
+    evt.facebox = *(const ev_ui_facebox_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
+static int on_hint_clear(const event_t *e, void *ud)
+{
+    (void)e;
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_HINT_CLEAR;
+    ui_evt_push(&evt);
+    return 0;
+}
+
 void bridge_init(void)
 {
     event_bus_subscribe(EV_VISION_FACE_BOX, on_face_box, NULL);
@@ -75,7 +144,13 @@ void bridge_init(void)
     event_bus_subscribe(EV_AUTH_RESULT, on_auth_result, NULL);
     event_bus_subscribe(EV_UI_HINT, on_hint, NULL);
     event_bus_subscribe(EV_UI_GOTO_PAGE, on_goto_page, NULL);
-    DG_LOGI("[BRIDGE]", "事件桥就绪(5 订阅)");
+    event_bus_subscribe(EV_UI_ASK_UID, on_ask_uid, NULL);
+    event_bus_subscribe(EV_UI_INPUT_PWD, on_input_pwd, NULL);
+    event_bus_subscribe(EV_UI_PICK_METHOD, on_pick_method, NULL);
+    event_bus_subscribe(EV_UI_RESULT, on_result, NULL);
+    event_bus_subscribe(EV_UI_HINT_CLEAR, on_hint_clear, NULL);
+    event_bus_subscribe(EV_UI_FACEBOX, on_facebox, NULL);
+    DG_LOGI("[BRIDGE]", "事件桥就绪(11 订阅)");
 }
 
 void bridge_btn(const ev_ui_btn_t *btn)
@@ -87,4 +162,35 @@ void bridge_btn(const ev_ui_btn_t *btn)
 void bridge_touch(void)
 {
     EVENT_BUS_PUBLISH_EMPTY(EV_UI_TOUCH);
+}
+
+void bridge_uid_submit(const char *uid)
+{
+    ev_text_input_t in;
+    memset(&in, 0, sizeof(in));
+    in.kind = DG_INPUT_UID;
+    snprintf(in.text, sizeof(in.text), "%s", uid ? uid : "");
+    EVENT_BUS_PUBLISH(EV_UI_TEXT_INPUT, &in);
+}
+
+void bridge_pwd_submit(const char *uid, const char *pwd)
+{
+    ev_text_input_t in;
+    memset(&in, 0, sizeof(in));
+    in.kind = DG_INPUT_PWD;
+    snprintf(in.uid, sizeof(in.uid), "%s", uid ? uid : "");
+    snprintf(in.text, sizeof(in.text), "%s", pwd ? pwd : "");
+    EVENT_BUS_PUBLISH(EV_UI_TEXT_INPUT, &in);
+}
+
+void bridge_method_pick(int32_t method)
+{
+    ev_method_pick_t mp = { .method = method };
+    EVENT_BUS_PUBLISH(EV_UI_METHOD_PICK, &mp);
+}
+
+void bridge_cancel(void)
+{
+    ev_ui_btn_t b = { .btn = DG_BTN_BACK };
+    EVENT_BUS_PUBLISH(EV_UI_BTN, &b);
 }

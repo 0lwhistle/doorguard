@@ -44,6 +44,13 @@ target_link_libraries(test_vision_backend PRIVATE dg_vision dg_storage dg_config
 add_test(NAME test_vision_backend COMMAND test_vision_backend)
 set_tests_properties(test_vision_backend PROPERTIES TIMEOUT 60)
 
+# 验证按钮全流程(UI 可见事件序列:ID 框→方式选择→密码框→结果弹窗;含菜单入口)
+add_executable(test_verify_flow test_verify_flow.c)
+target_include_directories(test_verify_flow PRIVATE ${CMAKE_SOURCE_DIR}/modules/access ${CMAKE_SOURCE_DIR}/modules/vision)
+target_link_libraries(test_verify_flow PRIVATE dg_access dg_vision dg_storage dg_config dg_tasker dg_event_bus dg_proto cjson)
+add_test(NAME test_verify_flow COMMAND test_verify_flow)
+set_tests_properties(test_verify_flow PROPERTIES TIMEOUT 120)
+
 # i18n 一致性:扫描源码 _() 键 + 双 json 覆盖 + 裸中文检查 + 字体字形覆盖
 add_executable(test_i18n test_i18n.c)
 target_compile_definitions(test_i18n PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

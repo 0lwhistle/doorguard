@@ -110,6 +110,62 @@ static void uid_flow(const char *uid, bool found, int32_t role, uint32_t flags)
     auth_fsm_handle(&s_fsm, FSM_EV_UID_RESOLVED, &d);
 }
 
+/* 分步驱动(需要断言中间动作时用,如 ASK_UID/ASK_PWD) */
+static void uid_submit(const char *uid)
+{
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    snprintf(d.uid, sizeof(d.uid), "%s", uid);
+    auth_fsm_handle(&s_fsm, FSM_EV_UID_SUBMIT, &d);
+}
+
+static void uid_resolved(const char *uid, bool found, int32_t role, uint32_t flags)
+{
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    snprintf(d.uid_res.user_id, sizeof(d.uid_res.user_id), "%s", uid);
+    snprintf(d.uid_res.user_name, sizeof(d.uid_res.user_name), "用户%s", uid);
+    d.uid_res.found = found;
+    d.uid_res.role = role;
+    d.uid_res.auth_flags = flags;
+    auth_fsm_handle(&s_fsm, FSM_EV_UID_RESOLVED, &d);
+}
+
+static void method_pick(int32_t method)
+{
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.method = method;
+    auth_fsm_handle(&s_fsm, FSM_EV_METHOD_PICK, &d);
+}
+
+static void verify_result(int32_t method, bool ok, int32_t reason)
+{
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.result.method = method;
+    d.result.ok = ok;
+    d.result.reason = reason;
+    snprintf(d.result.user_id, sizeof(d.result.user_id), "%s", s_fsm.cur_uid);
+    snprintf(d.result.user_name, sizeof(d.result.user_name), "%s", s_fsm.cur_name);
+    auth_fsm_handle(&s_fsm, FSM_EV_VERIFY_RESULT, &d);
+}
+
+/* 触发当前登记的定时器(取 FSM 内部 seq,模拟"真到期") */
+static void fire_timer(fsm_timer_t id)
+{
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.timer.timer_id = id;
+    d.timer.seq = s_fsm.timer_active[id];
+    auth_fsm_handle(&s_fsm, FSM_EV_TIMER, &d);
+}
+
+static void step_timeout(void)
+{
+    fire_timer(FSM_TMR_STEP_5S);
+}
+
 /* ================= 1 普通模式命中 ================= */
 
 static void t01_normal_hit(void)
@@ -452,6 +508,110 @@ static void t11_misc_invariants(void)
     DG_CHECK(last_act(FSM_ACT_SET_TIMER)->d.timer.timer_id == FSM_TMR_STEP_5S);
 }
 
+/* ================= 12 菜单入口与验证流程 UI 契约 ================= */
+
+static void admin_count(int32_t n)
+{
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.admin_count = n;
+    auth_fsm_handle(&s_fsm, FSM_EV_ADMIN_COUNT, &d);
+}
+
+static void t12_menu_entry_and_verify_flow(void)
+{
+    printf("[F12] 无管理员免认证进菜单;管理员入口验证过 role;取消/未开启方式\n");
+
+    /* --- 无管理员:免认证进菜单 + 提示先建管理员(新机鸡生蛋) --- */
+    fsm_reset();
+    admin_count(0);
+    auth_fsm_handle(&s_fsm, FSM_EV_MENU_BTN, NULL);
+    DG_CHECK(s_fsm.state == ST_MENU);
+    DG_CHECK(last_act(FSM_ACT_GOTO_PAGE) &&
+             !strcmp(last_act(FSM_ACT_GOTO_PAGE)->d.page, "menu"));
+    DG_CHECK(last_act(FSM_ACT_HINT_TEXT) &&
+             last_act(FSM_ACT_HINT_TEXT)->d.misc.method == DG_HINT_NO_ADMIN);
+    DG_CHECK(count_act(FSM_ACT_SET_TIMER) == 0);   /* 免认证:不起 5s 认证定时器 */
+
+    /* 退出菜单回普通 */
+    auth_fsm_handle(&s_fsm, FSM_EV_BACK, NULL);
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+
+    /* --- 有管理员:仍要管理员认证;人数未知(-1)同样要求认证 --- */
+    fsm_reset();
+    admin_count(2);
+    auth_fsm_handle(&s_fsm, FSM_EV_MENU_BTN, NULL);
+    DG_CHECK(s_fsm.state == ST_ADMIN_AUTH);
+    DG_CHECK(last_act(FSM_ACT_HINT_TEXT)->d.misc.method == DG_HINT_ADMIN_AUTH);
+    DG_CHECK(last_act(FSM_ACT_SET_TIMER)->d.timer.timer_id == FSM_TMR_ADMIN_5S);
+
+    fsm_reset();                                   /* 未回填人数:保守要认证 */
+    auth_fsm_handle(&s_fsm, FSM_EV_MENU_BTN, NULL);
+    DG_CHECK(s_fsm.state == ST_ADMIN_AUTH);
+
+    /* --- 管理员入口点"验证":通过且是管理员 → 进菜单(spec §3) --- */
+    fsm_reset();
+    admin_count(1);
+    auth_fsm_handle(&s_fsm, FSM_EV_MENU_BTN, NULL);
+    DG_CHECK(s_fsm.state == ST_ADMIN_AUTH);
+    auth_fsm_handle(&s_fsm, FSM_EV_VERIFY_BTN, NULL);
+    DG_CHECK(s_fsm.state == ST_VERIFY);
+    DG_CHECK(count_act(FSM_ACT_ASK_UID) == 1);     /* 弹 ID 输入框 */
+    uid_submit("00001");
+    uid_resolved("00001", true, DG_ROLE_ADMIN, DG_AUTH_PWD);
+    DG_CHECK(count_act(FSM_ACT_SHOW_METHODS) == 1);
+    DG_CHECK(last_act(FSM_ACT_SHOW_METHODS)->d.misc.auth_flags == DG_AUTH_PWD);
+    method_pick(DG_METHOD_PWD);
+    DG_CHECK(count_act(FSM_ACT_ASK_PWD) == 1);     /* 弹密码框(带 uid) */
+    DG_CHECK(!strcmp(last_act(FSM_ACT_ASK_PWD)->d.misc.uid, "00001"));
+    verify_result(DG_METHOD_PWD, true, DG_REASON_OK);
+    DG_CHECK(s_fsm.state == ST_MENU);
+    DG_CHECK(last_act(FSM_ACT_GOTO_PAGE) &&
+             !strcmp(last_act(FSM_ACT_GOTO_PAGE)->d.page, "menu"));
+    /* 管理员进门是"进菜单",不是开门(开门只发生在验证成功的通行场景) */
+    DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 0);
+    DG_CHECK(last_act(FSM_ACT_WRITE_LOG)->d.log.result == DG_RESULT_PASS);
+
+    /* --- 管理员入口验证通过但不是管理员:红弹窗(文案"非管理员")+ 停留 --- */
+    fsm_reset();
+    admin_count(1);
+    auth_fsm_handle(&s_fsm, FSM_EV_MENU_BTN, NULL);
+    auth_fsm_handle(&s_fsm, FSM_EV_VERIFY_BTN, NULL);
+    uid_submit("10002");
+    uid_resolved("10002", true, DG_ROLE_NORMAL, DG_AUTH_PWD);
+    method_pick(DG_METHOD_PWD);
+    verify_result(DG_METHOD_PWD, true, DG_REASON_OK);
+    DG_CHECK(s_fsm.state == ST_ADMIN_AUTH);        /* 不回普通,继续尝试 */
+    DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 0);   /* 非管理员不开门 */
+    const act_rec_t *pf = last_act(FSM_ACT_POPUP_FAIL);
+    DG_CHECK(pf && pf->d.fail.not_admin);
+    DG_CHECK(last_act(FSM_ACT_WRITE_LOG)->d.log.result == DG_RESULT_REJECT);
+
+    /* --- 取消验证流程:回普通 + 清提示 + 不写日志 --- */
+    fsm_reset();
+    auth_fsm_handle(&s_fsm, FSM_EV_VERIFY_BTN, NULL);
+    DG_CHECK(s_fsm.state == ST_VERIFY);
+    auth_fsm_handle(&s_fsm, FSM_EV_BACK, NULL);
+    DG_CHECK(s_fsm.state == ST_NORMAL && s_fsm.match_enabled);
+    DG_CHECK(last_act(FSM_ACT_HINT_CLEAR) != NULL);   /* 提示条必须被清掉 */
+    DG_CHECK(count_act(FSM_ACT_WRITE_LOG) == 0);      /* 取消不是验证动作 */
+
+    /* --- 未开启的方式被拒(reason=6;防陈旧弹窗/上位机注入) --- */
+    fsm_reset();
+    uid_flow("10004", true, DG_ROLE_NORMAL, DG_AUTH_PWD);   /* 只开了密码 */
+    method_pick(DG_METHOD_FACE_11);                          /* 却选人脸 */
+    DG_CHECK(s_fsm.state == ST_RESULT);
+    DG_CHECK(last_act(FSM_ACT_WRITE_LOG)->d.log.reason == DG_REASON_METHOD_DISABLED);
+
+    /* --- 子步超时的日志方式 = 当前子步(不再是固定 PWD) --- */
+    fsm_reset();
+    uid_flow("10005", true, DG_ROLE_NORMAL, DG_AUTH_FINGER);
+    method_pick(DG_METHOD_FINGER);
+    step_timeout();
+    DG_CHECK(last_act(FSM_ACT_WRITE_LOG)->d.log.method == DG_METHOD_FINGER);
+    DG_CHECK(last_act(FSM_ACT_WRITE_LOG)->d.log.reason == DG_REASON_TIMEOUT);
+}
+
 int main(void)
 {
     t01_normal_hit();
@@ -465,6 +625,7 @@ int main(void)
     t09_result_ignores_requests();
     t10_standby();
     t11_misc_invariants();
+    t12_menu_entry_and_verify_flow();
 
     DG_TEST_EXIT();
 }

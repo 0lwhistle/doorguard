@@ -94,6 +94,10 @@ static void test_add(void)
 
     uint32_t n = 0;
     DG_CHECK(db_user_count(&n) == DG_OK && n == 1);
+    /* 按权限计数(菜单入口用来判断"系统里还有没有管理员") */
+    DG_CHECK(db_user_count_role(DG_ROLE_ADMIN, &n) == DG_OK && n == 1);
+    DG_CHECK(db_user_count_role(DG_ROLE_NORMAL, &n) == DG_OK && n == 0);
+    DG_CHECK(db_user_count_role(DG_ROLE_BLACKLIST, &n) == DG_OK && n == 0);
 
     /* user_id 重复 */
     user_rec_t dup = make_user("10001", "别人", "pwd2");

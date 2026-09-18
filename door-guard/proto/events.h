@@ -61,13 +61,19 @@ extern "C" {
 /* UI:待机与页面(UI 内部页面管理用) */
 #define EV_UI_STANDBY        EV_DEF(DG_MODULE_ID_UI, 0x0010)     /**< 进入/退出待机 */
 
-/* ---- UI ↔ 服务请求/回执(Phase 7 服务层;UI 不做业务决策) ---- */
+/* ---- UI ↔ 服务请求/回执(服务层→UI 的"请弹窗/请切页",UI 只渲染不决策) ---- */
 #define EV_UI_BTN            EV_DEF(DG_MODULE_ID_UI, 0x0020)     /**< 按钮:菜单/验证/返回 */
 #define EV_UI_TEXT_INPUT     EV_DEF(DG_MODULE_ID_UI, 0x0021)     /**< 弹窗文本提交 */
 #define EV_UI_METHOD_PICK    EV_DEF(DG_MODULE_ID_UI, 0x0022)     /**< 方式选择 */
 #define EV_UI_TOUCH          EV_DEF(DG_MODULE_ID_UI, 0x0023)     /**< 任意触摸 */
 #define EV_UI_GOTO_PAGE      EV_DEF(DG_MODULE_ID_UI, 0x0024)     /**< 服务请求切页 */
 #define EV_UI_HINT           EV_DEF(DG_MODULE_ID_UI, 0x0025)     /**< 提示条语义 */
+#define EV_UI_ASK_UID        EV_DEF(DG_MODULE_ID_UI, 0x0026)     /**< 请求弹 ID 输入框 */
+#define EV_UI_INPUT_PWD      EV_DEF(DG_MODULE_ID_UI, 0x0027)     /**< 请求弹密码输入框(带 uid) */
+#define EV_UI_PICK_METHOD    EV_DEF(DG_MODULE_ID_UI, 0x0028)     /**< 请求弹验证方式选择(auth_flags) */
+#define EV_UI_RESULT         EV_DEF(DG_MODULE_ID_UI, 0x0029)     /**< 结果弹窗(ok/reason/用户名) */
+#define EV_UI_HINT_CLEAR     EV_DEF(DG_MODULE_ID_UI, 0x002A)     /**< 清提示条 */
+#define EV_UI_FACEBOX        EV_DEF(DG_MODULE_ID_UI, 0x002B)     /**< 服务侧脸框颜色(绿/红/隐藏) */
 
 /* access 内部:FSM 定时器/心跳经 tasker 回注(私有;FSM 全部在总线线程驱动) */
 #define EV_ACCESS_TIMER      EV_DEF(DG_MODULE_ID_AUTH, 0x0010)
@@ -227,9 +233,45 @@ typedef struct {
     char    page[16];                     /**< "home"/"menu"/"standby" */
 } ev_goto_page_t;
 
+/** EV_UI_HINT:提示条文案语义
+ *  method >= 0:验证方式提示(_(「请正对摄像头/请按指纹/请输入密码/请刷卡」))
+ *  method <  0:非验证方式的一次性 UI 语义(见 DG_HINT_*) */
 typedef struct {
-    int32_t method;                       /**< -1 = 管理员认证提示;dg_auth_method_t */
+    int32_t method;                       /**< -1/-2 见 DG_HINT_*;>=0 = dg_auth_method_t */
 } ev_hint_t;
+
+/* ev_hint_t.method 负值哨兵(纯 UI 文案选择,不落日志、不进 FSM) */
+#define DG_HINT_ADMIN_AUTH  (-1)          /**< 「管理员认证」 */
+#define DG_HINT_NO_ADMIN    (-2)          /**< 「未设置管理员,请先添加管理员」(新机引导) */
+#define DG_HINT_LANG_RELOAD (-5)          /**< 语言热切换:整页重建(ui/README §5) */
+
+/** EV_UI_ASK_UID:请求弹 ID 输入框(无载荷) */
+
+/** EV_UI_INPUT_PWD:请求弹密码输入框;uid 由 UI 原样回填到 EV_UI_TEXT_INPUT */
+typedef struct {
+    char uid[DG_UID_LEN];
+} ev_ui_input_req_t;
+
+/** EV_UI_PICK_METHOD:请求弹"验证方式"选择框;auth_flags = DG_AUTH_* 位或 */
+typedef struct {
+    uint32_t auth_flags;
+} ev_ui_methods_t;
+
+/** EV_UI_RESULT:结果弹窗(文案由 UI 按 reason 映射,不打印内部原因码) */
+typedef struct {
+    bool    ok;
+    int32_t reason;                       /**< dg_auth_reason_t(ok 时 0) */
+    bool    not_admin;                    /**< 管理员入口专用:提示「非管理员」 */
+    char    user_name[DG_NAME_LEN];       /**< 成功弹窗显示用 */
+} ev_ui_result_t;
+
+/** EV_UI_FACEBOX:服务侧脸框操作;state=-1 → 隐藏;w=0 → 只改颜色不挪位置 */
+typedef struct {
+    int32_t state;                        /**< dg_box_state_t;-1 = 隐藏 */
+    int32_t x, y, w, h;                   /**< 像素矩形;w=0 表示沿用现有位置 */
+} ev_ui_facebox_t;
+
+/** EV_UI_HINT_CLEAR:清提示条(无载荷) */
 
 typedef struct {
     char    user_id[DG_UID_LEN];
@@ -269,6 +311,10 @@ _Static_assert(sizeof(ev_text_input_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_text_inp
 _Static_assert(sizeof(ev_method_pick_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_method_pick_t 超限");
 _Static_assert(sizeof(ev_goto_page_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_goto_page_t 超限");
 _Static_assert(sizeof(ev_hint_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_hint_t 超限");
+_Static_assert(sizeof(ev_ui_input_req_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ui_input_req_t 超限");
+_Static_assert(sizeof(ev_ui_methods_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ui_methods_t 超限");
+_Static_assert(sizeof(ev_ui_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ui_result_t 超限");
+_Static_assert(sizeof(ev_ui_facebox_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ui_facebox_t 超限");
 _Static_assert(sizeof(ev_feature_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_feature_t 超限");
 _Static_assert(sizeof(ev_capture_req_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_capture_req_t 超限");
 _Static_assert(sizeof(ev_access_timer_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_access_timer_t 超限");

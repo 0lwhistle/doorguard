@@ -102,7 +102,8 @@ int main(void)
     DG_CHECK(vision_service_get_mode() == DG_VMODE_DETECT_1N);
 
     /* ---- 3. access 派生(FSM 状态 → mode) ---- */
-    /* 用户 10001:开启人脸+密码,人脸子步要能走到 V_FACE_1V1 */
+    /* 用户 10001(普通,人脸+密码)+ 管理员 00001:有管理员才会走"点菜单要认证"
+     * 那条分支(无管理员时菜单免认证直接进,见 spec-auth §3 新机引导) */
     user_rec_t u;
     memset(&u, 0, sizeof(u));
     snprintf(u.user_id, sizeof(u.user_id), "10001");
@@ -112,10 +113,19 @@ int main(void)
     DG_CHECK(db_user_set_password(&u, "1234") == DG_OK);
     DG_CHECK(db_user_add(&u) == DG_OK);
 
+    user_rec_t adm;
+    memset(&adm, 0, sizeof(adm));
+    snprintf(adm.user_id, sizeof(adm.user_id), "00001");
+    snprintf(adm.user_name, sizeof(adm.user_name), "管理员A");
+    adm.role = DG_ROLE_ADMIN;
+    adm.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;   /* 下面要走 1:1 人脸子步 */
+    DG_CHECK(db_user_set_password(&adm, "8888") == DG_OK);
+    DG_CHECK(db_user_add(&adm) == DG_OK);
+
     /* 普通态:1:N(先让 access 心跳把模式刷回基线) */
     DG_CHECK(wait_mode(DG_VMODE_DETECT_1N, 2000) == DG_VMODE_DETECT_1N);
 
-    /* 点菜单 → 管理员认证态:也允许 1:N(spec-auth §3,role 过滤在 FSM) */
+    /* 点菜单:库里已有管理员 → 进管理员认证态(也允许 1:N,role 过滤在 FSM) */
     pub_btn(DG_BTN_MENU);
     DG_CHECK(wait_mode(DG_VMODE_DETECT_1N, 2000) == DG_VMODE_DETECT_1N);
 
@@ -123,26 +133,51 @@ int main(void)
     pub_btn(DG_BTN_VERIFY);
     DG_CHECK(wait_mode(DG_VMODE_DETECT_ONLY, 2000) == DG_VMODE_DETECT_ONLY);
 
-    /* 提交 ID → 方式选择页:仍是 DETECT_ONLY */
+    /* 提交管理员 ID → 方式选择页:仍是 DETECT_ONLY */
     ev_text_input_t in;
     memset(&in, 0, sizeof(in));
     in.kind = DG_INPUT_UID;
-    snprintf(in.text, sizeof(in.text), "10001");
+    snprintf(in.text, sizeof(in.text), "00001");
     EVENT_BUS_PUBLISH(EV_UI_TEXT_INPUT, &in);
     usleep(200 * 1000);
     DG_CHECK(vision_service_get_mode() == DG_VMODE_DETECT_ONLY);
 
-    /* 选 1:1 人脸 → 携带目标 uid 的 VERIFY_11 */
+    /* 选 1:1 人脸 → 携带目标 uid 的 VERIFY_11(后端据此装载比对标的) */
     ev_method_pick_t mp;
     memset(&mp, 0, sizeof(mp));
     mp.method = DG_METHOD_FACE_11;
     EVENT_BUS_PUBLISH(EV_UI_METHOD_PICK, &mp);
     DG_CHECK(wait_mode(DG_VMODE_VERIFY_11, 2000) == DG_VMODE_VERIFY_11);
     vision_service_get_verify_uid(uid, sizeof(uid));
+    DG_CHECK(strcmp(uid, "00001") == 0);
+
+    /* 管理员 1:1 通过 → 进菜单(spec-auth §3):菜单页只检测不检索 */
+    ev_match_t m;
+    memset(&m, 0, sizeof(m));
+    m.matched = true;
+    snprintf(m.user_id, sizeof(m.user_id), "00001");
+    snprintf(m.user_name, sizeof(m.user_name), "管理员A");
+    m.role = DG_ROLE_ADMIN;
+    m.score_permille = 900;
+    EVENT_BUS_PUBLISH(EV_VISION_VERIFY_11, &m);
+    DG_CHECK(wait_mode(DG_VMODE_DETECT_ONLY, 2000) == DG_VMODE_DETECT_ONLY);
+
+    /* ---- 4. 普通模式点验证:1:1 通过 → 结果态 → 3s 回普通恢复 1:N ---- */
+    pub_btn(DG_BTN_BACK);                          /* 菜单返回 → 回普通 */
+    DG_CHECK(wait_mode(DG_VMODE_DETECT_1N, 2000) == DG_VMODE_DETECT_1N);
+
+    pub_btn(DG_BTN_VERIFY);
+    DG_CHECK(wait_mode(DG_VMODE_DETECT_ONLY, 2000) == DG_VMODE_DETECT_ONLY);
+    memset(&in, 0, sizeof(in));
+    in.kind = DG_INPUT_UID;
+    snprintf(in.text, sizeof(in.text), "10001");
+    EVENT_BUS_PUBLISH(EV_UI_TEXT_INPUT, &in);
+    usleep(200 * 1000);
+    EVENT_BUS_PUBLISH(EV_UI_METHOD_PICK, &mp);     /* 仍选 1:1 人脸 */
+    DG_CHECK(wait_mode(DG_VMODE_VERIFY_11, 2000) == DG_VMODE_VERIFY_11);
+    vision_service_get_verify_uid(uid, sizeof(uid));
     DG_CHECK(strcmp(uid, "10001") == 0);
 
-    /* 视觉侧回 1:1 结果(模拟后端命中)→ 成功态收尾 → 回 1:N */
-    ev_match_t m;
     memset(&m, 0, sizeof(m));
     m.matched = true;
     snprintf(m.user_id, sizeof(m.user_id), "10001");

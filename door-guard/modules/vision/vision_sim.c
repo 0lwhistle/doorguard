@@ -24,32 +24,69 @@
 
 static bool s_started = false;
 
-/* ---- 周期 mock 线程 ---- */
-
+/* ---- 周期 mock 线程 ----
+ * 按工作模式产出(与板上后端同语义,这样 PC 也能把验证流程走通):
+ *   IDLE       不产出(板上=不推帧)
+ *   DETECT_ONLY 只发脸框(菜单/待机/验证子步:不检索,不会误开门)
+ *   DETECT_1N  脸框 + 命中/离开交替(普通模式演示)
+ *   VERIFY_11  脸框 + 对目标用户发 1:1 通过(无模式分支的话 PC 验不了验证按钮)
+ */
 static void *mock_thread(void *arg)
 {
     (void)arg;
     bool hit_next = true;
-    for (;;) {
-        ev_face_box_t box = { .x = 200, .y = 250, .w = 320, .h = 420,
-                              .state = DG_BOX_DETECTED };
-        EVENT_BUS_PUBLISH(EV_VISION_FACE_BOX, &box);
-        usleep(800 * 1000);
+    int tick = 0;
 
-        if (hit_next) {
-            ev_match_t m;
-            memset(&m, 0, sizeof(m));
-            m.matched = true;
-            snprintf(m.user_id, sizeof(m.user_id), "%s", "10001");
-            snprintf(m.user_name, sizeof(m.user_name), "%s", "张三");
-            m.role = DG_ROLE_NORMAL;
-            m.score_permille = 952;
-            EVENT_BUS_PUBLISH(EV_VISION_MATCH_1N, &m);
-        } else {
-            EVENT_BUS_PUBLISH_EMPTY(EV_VISION_FACE_LOST);
+    for (;;) {
+        dg_vision_mode_t mode = vision_service_get_mode();
+        tick++;
+
+        if (mode == DG_VMODE_IDLE) {
+            usleep(500 * 1000);
+            continue;
         }
-        hit_next = !hit_next;
-        usleep(3500 * 1000);
+
+        /* 脸框:每 3 tick(≈1.5s)发一次,模拟检测节流 */
+        if (tick % 3 == 1) {
+            ev_face_box_t box = { .x = 200, .y = 250, .w = 320, .h = 420,
+                                  .state = DG_BOX_DETECTED };
+            EVENT_BUS_PUBLISH(EV_VISION_FACE_BOX, &box);
+        }
+
+        /* 结果:每 8 tick(≈4s)一轮,与真机的判定节奏接近 */
+        if (tick % 8 == 0) {
+            if (mode == DG_VMODE_DETECT_1N) {
+                if (hit_next) {
+                    ev_match_t m;
+                    memset(&m, 0, sizeof(m));
+                    m.matched = true;
+                    snprintf(m.user_id, sizeof(m.user_id), "%s", "10001");
+                    snprintf(m.user_name, sizeof(m.user_name), "%s", "张三");
+                    m.role = DG_ROLE_NORMAL;
+                    m.score_permille = 952;
+                    EVENT_BUS_PUBLISH(EV_VISION_MATCH_1N, &m);
+                } else {
+                    EVENT_BUS_PUBLISH_EMPTY(EV_VISION_FACE_LOST);
+                }
+                hit_next = !hit_next;
+            } else if (mode == DG_VMODE_VERIFY_11) {
+                char uid[DG_UID_LEN];
+                vision_service_get_verify_uid(uid, sizeof(uid));
+                if (uid[0]) {                       /* 有目标才"比中" */
+                    ev_match_t m;
+                    memset(&m, 0, sizeof(m));
+                    m.matched = true;
+                    snprintf(m.user_id, sizeof(m.user_id), "%s", uid);
+                    snprintf(m.user_name, sizeof(m.user_name), "%s", "模拟用户");
+                    m.role = DG_ROLE_NORMAL;
+                    m.score_permille = 930;
+                    EVENT_BUS_PUBLISH(EV_VISION_VERIFY_11, &m);
+                }
+            }
+            /* DETECT_ONLY:只画框,不出结果 */
+        }
+
+        usleep(500 * 1000);
     }
     return NULL;
 }

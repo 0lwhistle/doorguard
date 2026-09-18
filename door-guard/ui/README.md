@@ -11,6 +11,22 @@
 出:pages 点击 → bridge_btn/bridge_touch → event_bus → 服务层(FSM 决策后回流切页)
 ```
 
+服务层请求 UI 动作的事件契约(验证流程全靠这几条;UI 只渲染,不判断能不能):
+
+| 事件 | UI 动作 | UI 回执 |
+|---|---|---|
+| `EV_UI_ASK_UID` | 弹 ID 输入框(数字键盘) | `bridge_uid_submit()` |
+| `EV_UI_PICK_METHOD{auth_flags}` | 弹方式选择(只列开启的;仅一种则直接进) | `bridge_method_pick()` |
+| `EV_UI_INPUT_PWD{uid}` | 弹密码输入框(掩码,uid 原样回填) | `bridge_pwd_submit()` |
+| `EV_UI_RESULT{ok,reason,user_name,not_admin}` | 成功/失败弹窗(文案按 reason 映射) | — |
+| `EV_UI_HINT{method}` | 提示条(方式文案)或 -1 管理员认证 / -2 无管理员 | — |
+| `EV_UI_HINT_CLEAR` | 收提示条 | — |
+| `EV_UI_FACEBOX{state,box}` | 脸框改色(state<0 隐藏;w=0 只改色不挪位) | — |
+| `EV_UI_GOTO_PAGE{page}` | `navigator_switch` | — |
+
+弹窗取消统一走 `bridge_cancel()`(发 `EV_UI_BTN{BACK}`)→ FSM 取消流程回普通;
+reason→文案映射与空库引导见 spec-ui §6。
+
 | 目录/文件 | 职责 | 禁止 |
 |---|---|---|
 | `ui.c` | 引导装配(theme→i18n→navigator→presenters→bridge→泵→首页)+ 全局事件泵 | 业务逻辑 |

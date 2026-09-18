@@ -122,10 +122,12 @@ static void act_log_write(const fsm_log_act_t *l)
     pub_auth_result(&log);                          /* web 上位机同源 */
 }
 
-/* FSM 结果弹窗延迟到日志落库后(UI 弹窗文案取自 EV_AUTH_RESULT) */
+/* FSM 结果弹窗延迟到日志落库后(UI 弹窗文案取自 EV_UI_RESULT/EV_AUTH_RESULT) */
 static struct {
     bool pending;
     bool ok;
+    int32_t reason;
+    bool not_admin;
 } s_popup_defer;
 
 typedef struct {
@@ -182,16 +184,55 @@ static void on_fsm_action(fsm_action_t act, const fsm_action_data_t *d, void *ud
     }
     case FSM_ACT_POPUP_SUCCESS:
     case FSM_ACT_POPUP_FAIL:
-        /* 结果弹窗推迟到日志落库(EV_AUTH_RESULT 先行,UI 取文案) */
+        /* 结果弹窗推迟到日志落库(EV_AUTH_RESULT/EV_UI_RESULT 携用户与原因) */
         s_popup_defer.pending = true;
         s_popup_defer.ok = (act == FSM_ACT_POPUP_SUCCESS);
+        s_popup_defer.reason = d->fail.reason;
+        s_popup_defer.not_admin = d->fail.not_admin;
         break;
     case FSM_ACT_HINT_TEXT: {
+        /* 提示条:UI 按 method 选文案(>=0 验证方式;-1 管理员认证;-2 无管理员) */
         ev_hint_t ev;
+        memset(&ev, 0, sizeof(ev));
         ev.method = d->misc.method;
         EVENT_BUS_PUBLISH(EV_UI_HINT, &ev);
         break;
     }
+    case FSM_ACT_HINT_CLEAR:
+        EVENT_BUS_PUBLISH_EMPTY(EV_UI_HINT_CLEAR);
+        break;
+    case FSM_ACT_ASK_UID:
+        EVENT_BUS_PUBLISH_EMPTY(EV_UI_ASK_UID);      /* 弹 ID 输入框(spec §4.1) */
+        break;
+    case FSM_ACT_ASK_PWD: {
+        ev_ui_input_req_t ev;                        /* 弹密码输入框(掩码) */
+        memset(&ev, 0, sizeof(ev));
+        snprintf(ev.uid, sizeof(ev.uid), "%s", d->misc.uid);
+        EVENT_BUS_PUBLISH(EV_UI_INPUT_PWD, &ev);
+        break;
+    }
+    case FSM_ACT_SHOW_METHODS: {
+        ev_ui_methods_t ev;                          /* 弹验证方式选择(spec §4.2) */
+        memset(&ev, 0, sizeof(ev));
+        ev.auth_flags = d->misc.auth_flags;
+        EVENT_BUS_PUBLISH(EV_UI_PICK_METHOD, &ev);
+        break;
+    }
+    case FSM_ACT_FACEBOX: {
+        /* FSM 侧的脸框决策(命中绿/失败红)也要到 UI:视觉后端只会发黄色检测框 */
+        ev_ui_facebox_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.state = d->facebox.state;
+        ev.x = d->facebox.box.x;
+        ev.y = d->facebox.box.y;
+        ev.w = d->facebox.box.w;      /* w=0 → UI 只改颜色,沿用检测框位置 */
+        ev.h = d->facebox.box.h;
+        EVENT_BUS_PUBLISH(EV_UI_FACEBOX, &ev);
+        break;
+    }
+    case FSM_ACT_FACEBOX_HIDE:
+        EVENT_BUS_PUBLISH_EMPTY(EV_VISION_FACE_LOST);   /* 复用"隐藏脸框"语义 */
+        break;
     case FSM_ACT_OPEN_DOOR: {
         /* 门控:gpio_hal 脉冲(引脚配置 device.json;失败不阻断结果事件) */
         static bool gpio_ready = false;
@@ -211,9 +252,14 @@ static void on_fsm_action(fsm_action_t act, const fsm_action_data_t *d, void *ud
     case FSM_ACT_WRITE_LOG:
         act_log_write(&d->log);
         if (s_popup_defer.pending) {
-            ev_hint_t ev;
-            ev.method = s_popup_defer.ok ? -3 : -4;
-            EVENT_BUS_PUBLISH(EV_UI_HINT, &ev);
+            /* 结果弹窗:UI 按 reason 映射文案(ok=false 时才用 reason) */
+            ev_ui_result_t ev;
+            memset(&ev, 0, sizeof(ev));
+            ev.ok = s_popup_defer.ok;
+            ev.reason = s_popup_defer.reason;
+            ev.not_admin = s_popup_defer.not_admin;
+            snprintf(ev.user_name, sizeof(ev.user_name), "%s", d->log.user_name);
+            EVENT_BUS_PUBLISH(EV_UI_RESULT, &ev);
             s_popup_defer.pending = false;
         }
         break;
@@ -269,6 +315,21 @@ static int on_btn(const event_t *e, void *ud)
 {
     (void)ud;
     const ev_ui_btn_t *b = (const ev_ui_btn_t *)e->data;
+
+    /* 点"菜单":先把管理员人数回填给 FSM(FSM 不碰 DB)——
+     * 一个管理员都没有时 FSM 会免认证放行,否则新机永远进不去菜单(spec-auth §3) */
+    if (b->btn == DG_BTN_MENU) {
+        uint32_t admins = 0;
+        if (db_user_count_role(DG_ROLE_ADMIN, &admins) == DG_OK) {
+            fsm_event_data_t d;
+            memset(&d, 0, sizeof(d));
+            d.admin_count = (int32_t)admins;
+            fsm_feed(FSM_EV_ADMIN_COUNT, &d);
+        } else {
+            DG_LOGW(TAG, "管理员人数查询失败,菜单入口按需认证处理");
+        }
+    }
+
     fsm_event_t ev = (b->btn == DG_BTN_MENU)    ? FSM_EV_MENU_BTN
                      : (b->btn == DG_BTN_VERIFY) ? FSM_EV_VERIFY_BTN
                                                  : FSM_EV_BACK;

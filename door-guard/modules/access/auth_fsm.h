@@ -54,7 +54,7 @@ typedef enum {
 typedef enum {
     FSM_EV_MENU_BTN = 0,        /**< 主页点"菜单" */
     FSM_EV_VERIFY_BTN,          /**< 主页点"验证" */
-    FSM_EV_BACK,                /**< 返回(菜单页返回键) */
+    FSM_EV_BACK,                /**< 返回/取消(菜单返回、验证流程取消) */
     FSM_EV_FACE_DETECTED,       /**< 人脸出现(data: face box) */
     FSM_EV_FACE_LOST,
     FSM_EV_MATCH_1N,            /**< 1:N 结果(data: ev_match_t) */
@@ -63,6 +63,7 @@ typedef enum {
     FSM_EV_UID_RESOLVED,        /**< ID 查询回执(data: uid_resolved_t) */
     FSM_EV_METHOD_PICK,         /**< 选择方式(data: method) */
     FSM_EV_VERIFY_RESULT,       /**< 方式验证结果(data: verify_result_t) */
+    FSM_EV_ADMIN_COUNT,         /**< 管理员人数回执(data: admin_count;服务层查库后喂) */
     FSM_EV_TIMER,               /**< 定时器到期(data: timer_evt_t) */
     FSM_EV_TOUCH,               /**< 任意触摸(data: now_ms) */
     FSM_EV_TICK,                /**< 1s 心跳(data: now_ms,用于待机/锁定计时) */
@@ -102,6 +103,7 @@ typedef union {
     char uid[DG_UID_LEN];
     fsm_uid_resolved_t uid_res;
     int32_t method;
+    int32_t admin_count;           /**< FSM_EV_ADMIN_COUNT:管理员人数(<0 = 未知) */
     fsm_verify_result_t result;
     fsm_timer_evt_t timer;
     int64_t now_ms;
@@ -122,17 +124,18 @@ typedef enum {
 typedef enum {
     FSM_ACT_NONE = 0,
     FSM_ACT_GOTO_PAGE,          /**< data: page 名("menu"/"home"/"standby") */
-    FSM_ACT_FACEBOX,            /**< data: box + 状态颜色 */
+    FSM_ACT_FACEBOX,            /**< data: box + 状态颜色(w=0 = 只改颜色) */
     FSM_ACT_FACEBOX_HIDE,
-    FSM_ACT_POPUP_SUCCESS,      /**< data: user_name */
-    FSM_ACT_POPUP_FAIL,         /**< data: reason(dg_auth_reason_t) */
-    FSM_ACT_ASK_UID,            /**< 弹 ID 输入框 */
+    FSM_ACT_POPUP_SUCCESS,      /**< data: user_name(misc.hint "id|name") */
+    FSM_ACT_POPUP_FAIL,         /**< data: reason(dg_auth_reason_t) + not_admin */
+    FSM_ACT_ASK_UID,            /**< 请弹 ID 输入框(验证流程第一步) */
+    FSM_ACT_ASK_PWD,            /**< data: misc.uid;请弹密码输入框 */
     FSM_ACT_SHOW_METHODS,       /**< data: auth_flags(按开启方式显示按钮) */
     FSM_ACT_SET_TIMER,          /**< data: timer_req_t{timer_id, ms} */
     FSM_ACT_CANCEL_TIMERS,      /**< 取消全部未到期定时器 */
     FSM_ACT_OPEN_DOOR,          /**< data: door_open_ms */
     FSM_ACT_WRITE_LOG,          /**< data: log_rec_t(每次验证动作唯一出口) */
-    FSM_ACT_HINT_TEXT,          /**< data: hint 字符串("请正对摄像头"等) */
+    FSM_ACT_HINT_TEXT,          /**< data: hint(-1 管理员认证/-2 无管理员/方式) */
     FSM_ACT_HINT_CLEAR,
 } fsm_action_t;
 
@@ -150,6 +153,7 @@ typedef struct {
 typedef struct {
     int32_t reason;                /**< dg_auth_reason_t(UI 映射文案) */
     bool popup_fail;               /**< true=失败弹窗;false=仅提示 */
+    bool not_admin;                /**< 管理员入口专用:文案显示「非管理员」 */
 } fsm_fail_act_t;
 
 typedef struct {
@@ -164,6 +168,7 @@ typedef struct {
 typedef struct {
     int32_t method;                /**< 指定方式时非 0;0=按 auth_flags 列出 */
     uint32_t auth_flags;
+    char uid[DG_UID_LEN];          /**< FSM_ACT_ASK_PWD:密码验证的目标用户 */
     char hint[64];
 } fsm_misc_act_t;
 
@@ -195,6 +200,12 @@ typedef struct {
     char cur_name[DG_NAME_LEN];
     int32_t cur_role;
     uint32_t cur_auth_flags;
+    int32_t step_method;           /**< 当前子步的验证方式(超时日志用) */
+    bool verify_from_admin;        /**< 本流程由管理员入口发起(通过后校验 role) */
+
+    /** 管理员人数(FSM_EV_ADMIN_COUNT 回填;<0 = 未知)。=0 时菜单免认证进入:
+     *  新机/管理员被删光的情形下,要求管理员认证会让菜单永远进不去(鸡生蛋) */
+    int32_t admin_count;
 
     /* 密码连错锁定(内存即可,掉电可丢;spec-auth §5) */
     char lock_uid[DG_UID_LEN];

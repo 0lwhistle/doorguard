@@ -620,6 +620,31 @@ int db_user_count(uint32_t *n)
     return rc;
 }
 
+int db_user_count_role(int32_t role, uint32_t *n)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!n)
+        return DG_ERR_PARAM;
+
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    int rc = DG_OK;
+    if (sqlite3_prepare_v2(s_db, "SELECT COUNT(*) FROM users WHERE role=?1", -1,
+                           &st, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    sqlite3_bind_int(st, 1, role);
+    if (sqlite3_step(st) == SQLITE_ROW)
+        *n = (uint32_t)sqlite3_column_int(st, 0);
+    else
+        rc = DG_ERR_DB;
+    sqlite3_finalize(st);
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
 int db_verify_password(const char *user_id, const char *pwd, user_rec_t *out)
 {
     if (!s_db)

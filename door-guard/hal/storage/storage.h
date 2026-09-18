@@ -42,6 +42,9 @@ int db_user_update(const user_rec_t *in);
 int db_user_del(const char *user_id);
 int db_user_get(const char *user_id, user_rec_t *out);
 int db_user_count(uint32_t *n);
+/** 按权限计数(role 见 dg_role_t)。用途:菜单入口判断"系统里还有没有管理员"——
+ *  一个都没有时必须免认证放行,否则新机/管理员被删光后菜单永远打不开 */
+int db_user_count_role(int32_t role, uint32_t *n);
 /** ID+密码验证;成功回填用户记录(密码错误计入 DG_ERR_WRONG_PASSWORD) */
 int db_verify_password(const char *user_id, const char *pwd, user_rec_t *out);
 int db_find_by_ic(const char *ic, user_rec_t *out);

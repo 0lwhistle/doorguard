@@ -5,6 +5,45 @@
 
 ---
 
+## 2026-09-18 验证按钮 + 菜单业务打通;修掉"新机无管理员进不去菜单"死锁
+
+- **背景**:上一轮 UI 重构(Phase 7)把 page_home 瘦身成纯渲染后,FSM 动作到
+  UI 控件那一跳没人补 —— `FSM_ACT_ASK_UID`/`FSM_ACT_SHOW_METHODS` 无处理者,
+  **点"验证"= 静默 5 秒弹"验证失败"**(ID 框和方式选择永远不出现)。
+  这轮把它补齐并加回归测试
+
+- **新增 UI 请求事件**(proto/events.h,服务层→UI,UI 只渲染):
+  `EV_UI_ASK_UID` / `EV_UI_INPUT_PWD{uid}` / `EV_UI_PICK_METHOD{auth_flags}` /
+  `EV_UI_RESULT{ok,reason,user_name,not_admin}` / `EV_UI_HINT_CLEAR` /
+  `EV_UI_FACEBOX{state,box}`;bridge 侧配套 `bridge_uid_submit/pwd_submit/
+  method_pick/cancel`,弹窗取消统一回 `EV_UI_BTN{BACK}`
+- **验证流程 UI**(presenter_home):ID 输入框 → 方式选择(只列开启的,仅一种
+  直接进)→ 密码框(掩码,uid 回填)→ 结果弹窗;**失败文案按 reason 映射**
+  (用户不存在/密码错误/该方式未开启/全部验证方式已关闭/摄像头未就绪;
+  陌生人·黑名单·超时统一"验证失败";管理员入口另有"非管理员")
+- **脸框颜色两个来源**:视觉后端只发黄色检测框,FSM 命中/失败经
+  `EV_UI_FACEBOX` 改色(位置仍用检测框,不抖)。此前 FSM 的绿/红框到不了 UI
+- **菜单业务死锁修复**(用户提的业务漏洞):点"菜单"时 access_service 先查
+  `db_user_count_role(ADMIN)` 喂给 FSM(FSM 不碰 DB);**库里没有管理员 →
+  免认证直接进菜单 + 提示"未设置管理员,请先添加管理员"**(新机/管理员被删光);
+  人数未知(-1,查询失败)按"有管理员"保守处理。新增 storage 接口
+  `db_user_count_role()`
+- **管理员入口补 spec §3 缺项**:管理员态点"验证" → 通过后校验 role:
+  管理员 → **进菜单(不开门)**;非管理员 → 红弹窗"非管理员" + 停留重试
+- 其他修正:未开启方式被拒(reason=6,防陈旧弹窗注入);子步超时日志用当前
+  子步方式(原来固定 PWD);提示条在回普通/待机时清掉(HINT_CLEAR 终于有收发方);
+  取消流程不写日志(spec §4.6)
+- **测试**:新增 `tests/test_verify_flow.c`(服务层端到端:把模拟器手点流程
+  自动化,断言每一步 UI 该收到的事件)+ test_auth_fsm 新增 F12(菜单入口/角色/
+  取消/未开启方式)+ test_storage 补按 role 计数;dg-test 19/19,--tsan 19/19
+- **模拟器可全流程演示**:vision_sim 的 mock 改为**按工作模式产出**
+  (DETECT_ONLY 只画框、DETECT_1N 命中/离开、VERIFY_11 按目标 uid 回通过),
+  PC 上不接人脸模型也能把"验证 → ID → 方式 → 密码/1:1 → 开门"走完
+- **踩坑**:新增中文文案后 `test_i18n` 报"字体缺字形"(非/先)→ 改 lang json
+  必须跑 `ui/font/gen.sh` 重生成字库;注释里 ASCII 引号包中文会被判字符串
+
+---
+
 ## 2026-09-18 B7 补:视觉后端做成可插拔(契约/注册表/特征口径)
 
 - **动机**(用户提):后续想换模型,包括 SCRFD+ArcFace 一类开源模型。

@@ -49,16 +49,15 @@ static void cancel_timers(auth_fsm_t *fsm)
     emit_none(fsm, FSM_ACT_CANCEL_TIMERS);
 }
 
-/* 结果弹窗载荷:ID+姓名经 misc.hint 传递(格式 "user_id|user_name",UI 拆分) */
-static void popup_result(auth_fsm_t *fsm, bool ok, const char *id, const char *name)
+/* 成功弹窗(ok 分支;失败走 fail_and_back/popup_fail_not_admin,原因各不同) */
+static void popup_success(auth_fsm_t *fsm)
 {
     fsm_action_data_t d;
     memset(&d, 0, sizeof(d));
-    d.fail.reason = ok ? DG_REASON_OK : DG_REASON_STRANGER;
-    d.fail.popup_fail = ok;
-    snprintf(d.misc.hint, sizeof(d.misc.hint), "%s|%s", id ? id : "",
-             name ? name : "");
-    emit(fsm, ok ? FSM_ACT_POPUP_SUCCESS : FSM_ACT_POPUP_FAIL, &d);
+    d.fail.reason = DG_REASON_OK;
+    d.fail.popup_fail = true;
+    d.fail.not_admin = false;
+    emit(fsm, FSM_ACT_POPUP_SUCCESS, &d);
 }
 
 static void popup_fail_reason(auth_fsm_t *fsm, int32_t reason)
@@ -67,7 +66,33 @@ static void popup_fail_reason(auth_fsm_t *fsm, int32_t reason)
     memset(&d, 0, sizeof(d));
     d.fail.reason = reason;
     d.fail.popup_fail = true;
+    d.fail.not_admin = false;
     emit(fsm, FSM_ACT_POPUP_FAIL, &d);
+}
+
+/* 失败弹窗:非管理员通过验证(管理员入口专用文案) */
+static void popup_fail_not_admin(auth_fsm_t *fsm)
+{
+    fsm_action_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.fail.reason = DG_REASON_STRANGER;   /* 日志口径沿用"陌生人"(reason 枚举冻结) */
+    d.fail.popup_fail = true;
+    d.fail.not_admin = true;
+    emit(fsm, FSM_ACT_POPUP_FAIL, &d);
+}
+
+/* 提示条(语义枚举由 UI 映射文案;-1 管理员认证 / -2 无管理员 / >=0 验证方式) */
+static void hint_text(auth_fsm_t *fsm, int32_t method)
+{
+    fsm_action_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.misc.method = method;
+    emit(fsm, FSM_ACT_HINT_TEXT, &d);
+}
+
+static void hint_clear(auth_fsm_t *fsm)
+{
+    emit_none(fsm, FSM_ACT_HINT_CLEAR);
 }
 
 static void write_log(auth_fsm_t *fsm, const char *uid, const char *name,
@@ -99,14 +124,39 @@ static void set_match_enabled(auth_fsm_t *fsm, bool on)
     fsm->match_enabled = on;
 }
 
-/* 成功收尾:结果态 + 开门 + 日志(spec §2.3/§4.5) */
+/* 成功收尾:结果态 + 开门 + 日志(spec §2.3/§4.5)
+ * 例外(spec §3):管理员入口发起的验证 → 校验 role:管理员进菜单,非管理员红弹窗 */
 static void succeed(auth_fsm_t *fsm, int32_t method, int64_t now_ms)
 {
+    if (fsm->verify_from_admin) {
+        fsm->verify_from_admin = false;
+        cancel_timers(fsm);
+        if (fsm->cur_role == DG_ROLE_ADMIN) {
+            fsm->state = ST_MENU;
+            fsm->popup_active = false;
+            hint_clear(fsm);
+            set_match_enabled(fsm, false);
+            goto_page(fsm, "menu");
+            write_log(fsm, fsm->cur_uid, fsm->cur_name, method, DG_RESULT_PASS,
+                      DG_REASON_OK, now_ms);
+            DG_LOGI(TAG, "管理员验证通过进菜单");
+            return;
+        }
+        /* 非管理员:红弹窗 + 落日志 + 停留管理员模式继续尝试(spec §3) */
+        popup_fail_not_admin(fsm);
+        write_log(fsm, fsm->cur_uid[0] ? fsm->cur_uid : NULL,
+                  fsm->cur_name[0] ? fsm->cur_name : NULL, method,
+                  DG_RESULT_REJECT, DG_REASON_STRANGER, now_ms);
+        fsm->state = ST_ADMIN_AUTH;
+        set_timer(fsm, FSM_TMR_ADMIN_5S, 5000);
+        return;
+    }
+
     cancel_timers(fsm);
     fsm->state = ST_RESULT;
     fsm->popup_active = true;
     set_timer(fsm, FSM_TMR_RESULT_3S, 3000);
-    popup_result(fsm, true, fsm->cur_uid, fsm->cur_name);
+    popup_success(fsm);
     fsm_action_data_t d;
     memset(&d, 0, sizeof(d));
     d.door_open_ms = (uint32_t)fsm->door_open_ms;
@@ -123,8 +173,13 @@ static void fail_and_back(auth_fsm_t *fsm, int32_t method, int32_t reason,
     fsm->state = ST_RESULT;
     fsm->popup_active = true;
     set_timer(fsm, FSM_TMR_RESULT_3S, 3000);
-    popup_result(fsm, false, fsm->cur_uid[0] ? fsm->cur_uid : NULL,
-                 fsm->cur_name[0] ? fsm->cur_name : NULL);
+    /* 失败弹窗携带真实原因:UI 映射文案(用户自己输的 ID,提示具体些不泄露录入信息) */
+    fsm_action_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.fail.reason = reason;
+    d.fail.popup_fail = true;
+    d.fail.not_admin = false;
+    emit(fsm, FSM_ACT_POPUP_FAIL, &d);
     write_log(fsm, fsm->cur_uid[0] ? fsm->cur_uid : NULL,
               fsm->cur_name[0] ? fsm->cur_name : NULL, method,
               DG_RESULT_REJECT, reason, now_ms);
@@ -137,7 +192,9 @@ static void back_to_normal(auth_fsm_t *fsm)
     fsm->popup_active = false;
     fsm->cur_uid[0] = '\0';             /* 清上下文:陌生人失败不得带上个用户 ID */
     fsm->cur_name[0] = '\0';
+    fsm->verify_from_admin = false;
     set_match_enabled(fsm, true);
+    hint_clear(fsm);                    /* 提示条只在流程内有效,回普通即收 */
     goto_page(fsm, "home");
 }
 
@@ -146,6 +203,7 @@ static void enter_standby(auth_fsm_t *fsm)
     fsm->state = ST_STANDBY;
     set_match_enabled(fsm, false);
     cancel_timers(fsm);
+    hint_clear(fsm);
     goto_page(fsm, "standby");
     DG_LOGI(TAG, "进入待机");
 }
@@ -212,8 +270,11 @@ static void verify_start(auth_fsm_t *fsm)
     fsm->step = V_INPUT_UID;
     fsm->cur_uid[0] = '\0';
     fsm->cur_name[0] = '\0';
+    fsm->cur_auth_flags = 0;
+    fsm->step_method = DG_METHOD_FACE_1N;   /* 未选方式前的超时日志口径(默认方式) */
     set_match_enabled(fsm, false);      /* 点验证即放弃 1:N(spec §4 前提语义) */
-    emit_none(fsm, FSM_ACT_ASK_UID);
+    hint_clear(fsm);
+    emit_none(fsm, FSM_ACT_ASK_UID);    /* UI 弹 ID 输入框(spec §4.1) */
     set_timer(fsm, FSM_TMR_STEP_5S, 5000);
 }
 
@@ -306,8 +367,9 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
             emit(fsm, FSM_ACT_FACEBOX, &d);
             fail_and_back(fsm, DG_METHOD_FACE_1N, DG_REASON_STRANGER, 0);
         } else if (t->timer_id == FSM_TMR_STEP_5S && fsm->state == ST_VERIFY) {
-            /* 子步 5s 超时回普通(spec §4.4),日志 reason=7 */
-            fail_and_back(fsm, DG_METHOD_PWD, DG_REASON_TIMEOUT, 0);
+            /* 子步 5s 超时回普通(spec §4.4),日志 reason=7;
+             * 方式取当前子步(auth_fsm_t.step_method),不再是固定 PWD */
+            fail_and_back(fsm, fsm->step_method, DG_REASON_TIMEOUT, 0);
         } else if (t->timer_id == FSM_TMR_ADMIN_5S && fsm->state == ST_ADMIN_AUTH) {
             back_to_normal(fsm);            /* 5s 无脸无操作回普通(spec §3) */
         } else if (t->timer_id == FSM_TMR_RESULT_3S && fsm->state == ST_RESULT) {
@@ -317,28 +379,63 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
         return;
     }
 
+    case FSM_EV_ADMIN_COUNT:
+        /* 服务层查库后回填(FSM 不碰 DB);<0 = 未知,按"有管理员"保守处理 */
+        fsm->admin_count = data->admin_count;
+        return;
+
     case FSM_EV_MENU_BTN:
-        if (fsm->state == ST_NORMAL) {
-            fsm->state = ST_ADMIN_AUTH;
+        if (fsm->state != ST_NORMAL)
+            return;
+
+        if (fsm->admin_count == 0) {
+            /* 库里一个管理员都没有(新机首次开机、或管理员被删光):此时要求
+             * 管理员认证会让菜单永远打不开(鸡生蛋死锁)——免认证进菜单,
+             * 并提示先建管理员。admin_count<0(未知)不走这条路,保守要求认证 */
+            cancel_timers(fsm);
+            fsm->state = ST_MENU;
+            fsm->popup_active = false;
             set_match_enabled(fsm, false);
-            fsm_action_data_t d;
-            memset(&d, 0, sizeof(d));
-            d.misc.method = -1;             /* 语义:提示"管理员认证"(UI 映射) */
-            emit(fsm, FSM_ACT_HINT_TEXT, &d);
-            set_timer(fsm, FSM_TMR_ADMIN_5S, 5000);
+            hint_text(fsm, DG_HINT_NO_ADMIN);
+            goto_page(fsm, "menu");
+            DG_LOGW(TAG, "系统无管理员:免认证进菜单(请在用户管理中添加管理员)");
+            return;
         }
+
+        fsm->state = ST_ADMIN_AUTH;
+        set_match_enabled(fsm, false);
+        hint_text(fsm, DG_HINT_ADMIN_AUTH);
+        set_timer(fsm, FSM_TMR_ADMIN_5S, 5000);
         return;
 
     case FSM_EV_VERIFY_BTN:
         if (fsm->state == ST_NORMAL || fsm->state == ST_ADMIN_AUTH) {
+            /* 管理员入口发起的验证:通过后校验 role 再决定是否进菜单(spec §3) */
+            fsm->verify_from_admin = (fsm->state == ST_ADMIN_AUTH);
             cancel_timers(fsm);
             verify_start(fsm);
         }
         return;
 
     case FSM_EV_BACK:
-        if (fsm->state == ST_MENU)
+        if (fsm->state == ST_MENU) {
             back_to_normal(fsm);
+        } else if (fsm->state == ST_VERIFY) {
+            /* 用户取消验证流程(弹窗取消/返回):不写日志(不是一次验证动作),
+             * 管理员入口发起的则退回管理员模式继续等(spec §4.6) */
+            bool from_admin = fsm->verify_from_admin;
+            fsm->verify_from_admin = false;
+            cancel_timers(fsm);
+            fsm->popup_active = false;
+            if (from_admin) {
+                fsm->state = ST_ADMIN_AUTH;
+                hint_text(fsm, DG_HINT_ADMIN_AUTH);   /* 覆盖式改提示 */
+                set_timer(fsm, FSM_TMR_ADMIN_5S, 5000);
+            } else {
+                back_to_normal(fsm);                 /* 内含清提示 */
+            }
+            DG_LOGI(TAG, "验证流程取消(%s)", from_admin ? "回管理员认证" : "回普通模式");
+        }
         return;
 
     case FSM_EV_UID_SUBMIT:
@@ -359,15 +456,15 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
         snprintf(fsm->cur_uid, sizeof(fsm->cur_uid), "%s", r->user_id);
 
         if (!r->found) {
-            fail_and_back(fsm, DG_METHOD_PWD, DG_REASON_NO_USER, 0);
+            fail_and_back(fsm, fsm->step_method, DG_REASON_NO_USER, 0);
             return;
         }
         if (r->role == DG_ROLE_BLACKLIST) {
-            fail_and_back(fsm, DG_METHOD_PWD, DG_REASON_BLACKLIST, 0);
+            fail_and_back(fsm, fsm->step_method, DG_REASON_BLACKLIST, 0);
             return;
         }
         if (r->auth_flags == 0) {
-            fail_and_back(fsm, DG_METHOD_PWD, DG_REASON_AUTH_DISABLED, 0);
+            fail_and_back(fsm, fsm->step_method, DG_REASON_AUTH_DISABLED, 0);
             return;
         }
         show_methods(fsm);                  /* 按开启方式显示按钮(spec §4.2) */
@@ -378,15 +475,34 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
         if (fsm->state != ST_VERIFY || fsm->step != V_PICK_METHOD)
             return;
         int32_t m = data->method;
+        uint32_t bit = (m == DG_METHOD_FACE_11)  ? DG_AUTH_FACE
+                       : (m == DG_METHOD_FINGER) ? DG_AUTH_FINGER
+                       : (m == DG_METHOD_PWD)    ? DG_AUTH_PWD
+                       : (m == DG_METHOD_IC)     ? DG_AUTH_IC
+                                                 : 0;
+        /* 未开启的方式一律拒绝(spec §4.2:只显示开启的方式;
+         * 这里再挡一道,防陈旧弹窗/上位机直接注入) */
+        if (!bit || !(fsm->cur_auth_flags & bit)) {
+            fail_and_back(fsm, m, DG_REASON_METHOD_DISABLED, 0);
+            return;
+        }
+
+        fsm->step_method = m;
         fsm->step = (m == DG_METHOD_FACE_11)  ? V_FACE_1V1
                     : (m == DG_METHOD_FINGER) ? V_FINGER
                     : (m == DG_METHOD_PWD)    ? V_PWD
                                               : V_IC;
         set_timer(fsm, FSM_TMR_STEP_5S, 5000);
-        fsm_action_data_t d;
-        memset(&d, 0, sizeof(d));
-        d.misc.method = m;                  /* UI 映射提示("请按指纹"等) */
-        emit(fsm, FSM_ACT_HINT_TEXT, &d);
+
+        if (m == DG_METHOD_PWD) {
+            /* 密码:UI 弹掩码输入框(uid 由 UI 原样回填,服务层据此查库) */
+            fsm_action_data_t d;
+            memset(&d, 0, sizeof(d));
+            snprintf(d.misc.uid, sizeof(d.misc.uid), "%s", fsm->cur_uid);
+            emit(fsm, FSM_ACT_ASK_PWD, &d);
+        } else {
+            hint_text(fsm, m);              /* 1:1 人脸/指纹/IC:提示文案 */
+        }
         return;
     }
 
@@ -436,6 +552,7 @@ void auth_fsm_init(auth_fsm_t *fsm, int32_t door_open_ms, int32_t standby_timeou
     memset(fsm, 0, sizeof(*fsm));
     fsm->state = ST_NORMAL;
     fsm->match_enabled = true;          /* 开机默认普通模式 1:N(spec §5) */
+    fsm->admin_count = -1;              /* 未知:菜单入口保守要求管理员认证 */
     fsm->door_open_ms = door_open_ms;
     fsm->standby_timeout_s = standby_timeout_s;
     fsm->pwd_fail_lock_n = pwd_fail_lock_n;

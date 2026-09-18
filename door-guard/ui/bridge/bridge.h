@@ -27,6 +27,12 @@ void bridge_init(void);
 void bridge_btn(const ev_ui_btn_t *btn);      /* 页面按钮请求(返回/验证…) */
 void bridge_touch(void);                      /* 待机页触摸唤醒请求 */
 
+/* 验证流程回执(弹窗回调 → 服务层;uid 仅密码方式需要) */
+void bridge_uid_submit(const char *uid);      /* ID 输入框确认 */
+void bridge_pwd_submit(const char *uid, const char *pwd); /* 密码框确认 */
+void bridge_method_pick(int32_t method);      /* 方式选择 */
+void bridge_cancel(void);                     /* 弹窗取消 → 放弃当前验证流程 */
+
 /* ---- 数据快照(presenter 拉取式刷新用) ---- */
 /* cfg 快照经 cfg_get();用户/日志列表经 storage——随页迁移逐步收口到本层 */
 

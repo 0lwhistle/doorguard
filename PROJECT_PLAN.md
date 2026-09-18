@@ -17,7 +17,7 @@
 | Armbian SDK | `Rk3576-SDK/Armbian/kickpi-armbian` 仅作参考,主线用官方 SDK |
 | 编译机 | 同一台 Ubuntu VM:8 核 / 内存 7.2G(编译时 make -j 限 6)/ 磁盘 291G 可用 |
 | 磁盘 | SATA SSD 直连(已通过 6GB×3 写读一致性认证)。**历史教训:USB 桥接时代大文件静默损坏**,大文件纪律见第六节 |
-| 当前进度 | **door-guard 软件 Phase 1~10 完成**(2026-09-18 总验收自测过,已上 GitHub);固件 **B5 板上验收大部通过**(串口/屏/IMX415 出流/SSH ✅);**板上自启动+触摸+相机预览已打通**(S60 自启 ✅、fts_ts 触摸 ✅、V4L2+RGA+rkaiq 预览 ✅ B6 提前完成,方向/曝光待人工确认);**B7 应用侧完成并上板**(holder 注册表 14 模块 ✅、视觉工作模式联动 ✅、活体留口 ✅、特征长度自诊断 ✅、**视觉后端可插拔契约** ✅——换模型/换框架(如 rknn 开源模型)不改服务层,见 `door-guard/modules/vision/README.md`;板上 `vision_backend=ERROR` 只因**人脸模型文件缺失**——待把 SDK `models/rockiva_data_rk3576` 的 `face_landmark5.data`/`face_quality_v2.data` 等拷入板 `/usr/lib` 后联调,见 `docs/tech/B7_FACE_HANDOFF.md` §2.4);仓库:origin=GitHub / gitea=旧历史归档;待办:B7 联调(录入人脸/1:N 命中)、门控 GPIO 对拍、WiFi 驱动修复、recovery 延后 |
+| 当前进度 | **door-guard 软件 Phase 1~10 完成**(2026-09-18 总验收自测过,已上 GitHub);固件 **B5 板上验收大部通过**(串口/屏/IMX415 出流/SSH ✅);**板上自启动+触摸+相机预览已打通**(S60 自启 ✅、fts_ts 触摸 ✅、V4L2+RGA+rkaiq 预览 ✅ B6 提前完成,方向/曝光待人工确认);**B7 应用侧完成并上板**(holder 注册表 14 模块 ✅、视觉工作模式联动 ✅、活体留口 ✅、特征长度自诊断 ✅、**视觉后端可插拔契约** ✅——换模型/换框架(如 rknn 开源模型)不改服务层,见 `door-guard/modules/vision/README.md`;板上 `vision_backend=ERROR` 只因**人脸模型文件缺失**——待把 SDK `models/rockiva_data_rk3576` 的 `face_landmark5.data`/`face_quality_v2.data` 等拷入板 `/usr/lib` 后联调,见 `docs/tech/B7_FACE_HANDOFF.md` §2.4);**业务链路打通**(验证按钮全流程:ID 输入/方式选择/密码/1:1 与失败原因文案 ✅;菜单入口:有管理员要认证、**无管理员免认证进菜单**(新机鸡生蛋死锁已修)、管理员验证通过进菜单 ✅;PC 模拟器可全流程演示,回归 `tests/test_verify_flow.c`);仓库:origin=GitHub / gitea=旧历史归档;待办:B7 人脸模型联调(录入人脸/1:N 命中)、指纹与读卡器接入(UI 已留"请按指纹/请刷卡"子步)、门控 GPIO 对拍、WiFi 驱动修复、recovery 延后 |
 
 ---
 
