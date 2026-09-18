@@ -87,6 +87,17 @@ int page_mgr_open(const char *name)
     if (s_depth > 0 && !strcmp(s_stack[s_depth - 1]->name, name))
         return DG_OK;                    /* 幂等 */
 
+    /* 目标已在栈中(如待机唤醒回栈底 home):回退而非再压——
+     * 纯压栈会让 home/standby 反复交替撑爆页面栈(实测死锁路径之一) */
+    for (int i = s_depth - 2; i >= 0; i--) {
+        if (strcmp(s_stack[i]->name, name))
+            continue;
+        destroy_current_locked();
+        s_depth = i + 1;
+        create_page_locked(ops);
+        return DG_OK;
+    }
+
     if (s_depth >= DG_PAGE_STACK_MAX) {
         DG_LOGE("[PAGE]", "页面栈已满(%d),拒绝打开 %s", DG_PAGE_STACK_MAX, name);
         return DG_ERR_STATE;
@@ -110,4 +121,10 @@ void page_mgr_back(void)
 const char *page_mgr_current(void)
 {
     return s_depth > 0 ? s_stack[s_depth - 1]->name : NULL;
+}
+
+void page_mgr_dispatch_evt(const ui_evt_t *evt)
+{
+    if (s_depth > 0 && s_stack[s_depth - 1]->on_evt)
+        s_stack[s_depth - 1]->on_evt(evt);
 }

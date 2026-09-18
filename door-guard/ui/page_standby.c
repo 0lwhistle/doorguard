@@ -17,7 +17,7 @@ static lv_timer_t *s_timer = NULL;
 static void on_touch(lv_event_t *e)
 {
     (void)e;
-    DG_LOGI("[STANDBY]", "触摸唤醒");
+    DG_LOGI("[STANDBY]", "touch wake");
     /* 触摸唤醒由 access 服务统一决策(EV_UI_GOTO_PAGE 回 UI) */
     EVENT_BUS_PUBLISH_EMPTY(EV_UI_TOUCH);
 }

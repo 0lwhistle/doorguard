@@ -41,11 +41,7 @@ static void render_evt(const ui_evt_t *evt);
 static void canvas_timer_cb(lv_timer_t *t)
 {
     (void)t;
-    /* 排空 UI 事件队列(LVGL 线程内渲染) */
-    ui_evt_t evt;
-    while (ui_evt_pop(&evt))
-        render_evt(&evt);
-
+    /* 事件泵已上移 ui.c(页面无关);本定时器只负责 canvas 刷帧 */
     const camera_frame_t *f = camera_latest();
     if (!f || !s_canvas)
         return;
@@ -108,17 +104,6 @@ static int on_hint(const event_t *e, void *ud)
     memset(&evt, 0, sizeof(evt));
     evt.kind = UI_EVT_HINT;
     evt.hint = *(const ev_hint_t *)e->data;
-    ui_evt_push(&evt);
-    return 0;
-}
-
-static int on_goto_page(const event_t *e, void *ud)
-{
-    (void)ud;
-    ui_evt_t evt;
-    memset(&evt, 0, sizeof(evt));
-    evt.kind = UI_EVT_GOTO_PAGE;
-    evt.page = *(const ev_goto_page_t *)e->data;
     ui_evt_push(&evt);
     return 0;
 }
@@ -202,9 +187,6 @@ static void render_evt(const ui_evt_t *evt)
         }
         break;
     }
-    case UI_EVT_GOTO_PAGE:
-        page_mgr_open(evt->page.page);
-        break;
     }
 }
 
@@ -268,7 +250,6 @@ void page_home_create(lv_obj_t *parent)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_FACE_LOST, on_face_lost, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_AUTH_RESULT, on_auth_result, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_HINT, on_hint, NULL);
-    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_GOTO_PAGE, on_goto_page, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EVENT_UI_REFRESH_REQUEST, on_refresh_evt, NULL);
 
     s_pump_timer = lv_timer_create(canvas_timer_cb, 33, NULL); /* 30fps:与传感器帧率对齐 */
@@ -301,6 +282,7 @@ void page_home_register(void)
         .name = "home",
         .create = page_home_create,
         .destroy = page_home_destroy,
+        .on_evt = render_evt,
     };
     page_mgr_register(&ops);
 }
