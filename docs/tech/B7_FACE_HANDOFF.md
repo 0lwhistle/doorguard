@@ -9,6 +9,91 @@ B7 代码主体已写完且**交叉编译零警告**(rockiva 后端、相机 NV1
 特征库同步、录入挂钩、CMake),**未推板未实测**;剩:holder 接入、
 mode 切换、活体留口、板上模型文件(需用户从 VM 拷)、部署联调。
 
+## 0.1 技术架构(定稿)
+
+### 分层与数据流
+
+```
+                      ┌──────────────────────────────────────────┐
+                      │        camera_board(B6 已有,已加 NV12 出口)│
+ IMX415 → ISP mainpath │  DQBUF → RGA 转 XRGB → camera_latest → UI 预览│
+ NV12 1280×720 ──────→ │  DQBUF → on_frame 零拷贝包帧 → ROCKIVA_PushFrame│
+                      │        ↑ on_release(frameId) → 延迟 QBUF     │
+                      └───────────────┬──────────────────────────┘
+                                      │(camera 轮询线程,PushFrame 异步不阻塞)
+   ┌──────────────────────────────────▼───────────────────────────────┐
+   │ vision_rockiva(ROCKIVA 内部线程做 NPU 推理,回调出结果)             │
+   │  detCallback → 最大脸万分比框 → 旋转映射(720×1280)→ EV_VISION_FACE_BOX│
+   │  analyseCallback → 特征(qualityOK)→                                │
+   │    ├─ mode=DETECT_1N:SearchFeature("dg_users") ≥阈值                │
+   │    │    且 db_user_get 存在 → EV_VISION_MATCH_1N ──┐                │
+   │    ├─ mode=VERIFY_11:FeatureCompare vs 目标特征     │               │
+   │    │    → EV_VISION_VERIFY_11 ────────────────────┤                │
+   │    └─ 恒定:缓存最新特征(3s 新鲜窗,录入 CAPTURE_REQ 取用)│            │
+   └──────────────┬───────────────────────────────────┼────────────────┘
+                  │ event_bus(线程安全队列)            │
+                  ▼                                   ▼
+   ┌────────────────────────────┐      ┌──────────────────────────────┐
+   │ access_service → auth_fsm  │      │ enroll_service(录入编排,已有)│
+   │ FSM 判定:1.5s 窗/黑名单拒/  │      │ 特征→查重(注入比较器)→加密入库 │
+   │ per-user 人脸开关→开门+日志  │      │ → library_add 同步特征库      │
+   └──────────┬─────────────────┘      └──────────────────────────────┘
+              ▼ EV_UI_GOTO_PAGE / 弹窗 / 脸框颜色
+   ┌──────────────────────────────────────────────────────────────────┐
+   │ UI(ui.c 全局泵 → navigator → presenter_home → page_home setter)  │
+   └──────────────────────────────────────────────────────────────────┘
+```
+
+### mode 状态机(FSM 状态 → vision 模式,access tick 1s 联动)
+
+| FSM 状态 | vision mode | 检索 | 录入缓存 | 脸框 |
+|---|---|---|---|---|
+| ST_NORMAL 且 match_enabled | DETECT_1N | ✅ | ✅ | ✅ |
+| ST_VERIFY(选了人脸 1:1) | VERIFY_11(cur_uid) | ❌(1:1 比) | ✅ | ✅ |
+| 菜单/用户/待机/结果 | DETECT_ONLY | ❌ | ✅ | 发布但当前页不渲染 |
+| 系统级关人脸(后续接 access_set) | IDLE(不推帧) | ❌ | ❌ | ❌ |
+
+双重门禁:vision 层阈值过滤 + FSM 层 match_enabled/黑名单/per-user 开关——
+误触发开门在语义上不可能。
+
+### 线程模型(不新增线程)
+
+- camera 轮询线程:PushFrame 异步投递(内部队列满=丢帧,无害);
+- ROCKIVA 内部线程:NPU 推理 + 回调;
+- 回调出站一律 EVENT_BUS_PUBLISH;UI 经 ui_events 队列由主循环泵。
+
+### 活体接口(B7 留口 / B8 几何法实现)
+
+1. liveness_service.h 增 `liveness_service_on_face(landmarks[], n, quality)`
+   (B7 空实现);vision_rockiva 开 106 关键点后在 analyse/det 调用;
+2. cfg 增 `liveness_enable`(默认 0);1:N 命中发布处门禁;
+3. B8:动作状态机(眨眼=EAR 边沿/点头=纵向位移比/摇头·转头=yaw 往返),
+   随机 2~3 指令序列,UI 动作引导页,每步 5s 超时,全过置 pass。
+
+## 0.2 holder 移植方案(已批准)
+
+main.c 手工装配 → holder 注册表(`proto/holder/holder.h`,README 有用法)。
+**注册表**(顺序=依赖序;init_fn 统一 `int(void)`,void 服务包一层):
+
+| 模块名 | required | 依赖 | init_fn 包装说明 |
+|---|---|---|---|
+| event_bus | ✅ | — | event_bus_init |
+| tasker | ✅ | event_bus | tasker_init |
+| storage | ✅ | tasker | storage_init(路径按 DG_SIM 分支,包 wrapper) |
+| config | ✅ | storage | cfg_load wrapper(json 路径按 DG_SIM) |
+| capture | ❌ | config,camera | capture_service_start(void→int wrapper) |
+| camera | ❌ | config | camera_init wrapper(路径 /dev/video51) |
+| vision_service | ✅ | event_bus | vision_service_start |
+| vision_backend | ❌ | vision_service,camera | **vision_backend_start 改 int 返回**;成功/失败内部 holder_set_module_state("vision_backend", READY/ERROR),last_error 写"缺模型/Init 失败" |
+| access / enroll / liveness | ✅/❌/❌ | tasker | 各 service_start wrapper |
+| web / mdns | ❌ | config | web_server_start / mdns_start |
+| ui | ❌ | display | ui_init wrapper(失败仅告警,web 路径照常) |
+
+- `holder_init_all(true)`:required 失败 → 退出(S60 3s 拉起重试);❌ 失败 →
+  记 ERROR 继续(摄像头/视觉/UI 挂了门禁/web 仍可用)。
+- 运行期健康:web 后续可加 /api/health 遍历 `holder_get_module_info`。
+- 主循环(camera_poll + ui_poll)保持不变。
+
 ## 1. 已完成(代码在工作树/已提交)
 
 - **modules/vision/vision_rockiva.c**(重写,~330 行):ROCKIVA_Init(VIDEO 模式,
