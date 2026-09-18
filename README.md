@@ -6,14 +6,15 @@
 
 ```
 ├── PROJECT_PLAN.md          项目方案与执行手册(唯一事实来源,每阶段更新)
-├── NEXT_SESSION_PROMPT.md   下次会话开工提示词
 ├── docs/                    开发文档
 │   ├── DEV_HANDBOOK.md      软件开发手册(硬件事实/编译环境/踩坑索引)
 │   ├── DEVLOG.md            开发日志(过程与坑,按日追加)
+│   ├── prompts/             会话开工提示词(NEXT_SESSION / IDLE_TASK)
 │   └── tech/                技术文档(FLASHING 烧录 / TOOLCHAIN 交叉编译)
 ├── env/                     WSL 环境与脚本(source env/env.sh 后 dg-* 直接可用)
 ├── door-guard/              门禁应用源码(WSL 编码编译 / VM 兜底)
 ├── deliverables/            产物:固件包(firmware/)+ WSL 工具链包(wsl-toolchain/)
+│                            (仅 README/md5 等文本进 git;镜像/工具链 tar 本地保留)
 ├── sdk-guide/               官方 SDK 开发资源指南(必读) + 9 份精选官方文档 PDF
 └── sdk-patches/             对官方 SDK 的全部修改,以 git patch 管理
 ```
@@ -35,4 +36,9 @@
 - **WSL**:door-guard 编码→编译→部署:`source env/env.sh` 后 `dg-build` / `dg-deploy`;
   纯逻辑单元测试也在 WSL;工具链见 `docs/tech/TOOLCHAIN.md`
 - **VM**:固件/内核/rootfs 全量编译(SDK `./build.sh` 体系,见 docs/DEV_HANDBOOK.md §6)
-- 中枢:ssh://git@192.168.2.150:222/olwhistle/k7_rk3576.git(局域网 Gitea,SSH 密钥认证)
+- 远程仓库:
+  - **origin** = `git@github.com:0lwhistle/doorguard.git`(GitHub,源码主仓;
+    大于 100MB 的产物二进制被 .gitignore 排除,GitHub 历史中不含固件镜像)
+  - **gitea** = `ssh://git@192.168.2.150:222/olwhistle/k7_rk3576.git`(局域网备份,
+    保留含固件/工具链大文件的完整历史;2026-09-18 目录整理后与 origin 历史分叉,
+    同步需 force push,慎用)

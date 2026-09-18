@@ -1,0 +1,11 @@
+# 构建产物(cmake out-of-source,不进 git)
+door-guard/build/
+door-guard/build-*/
+
+# 交付产物大二进制(不进 git;本地保留,全量历史在局域网 Gitea)
+deliverables/firmware/**/*.img
+deliverables/firmware/**/MiniLoaderAll.bin
+deliverables/wsl-toolchain/*.tar.gz
+
+# Windows 复制残留(WSL 挂载 /mnt 或浏览器下载带入)
+**/*:Zone.Identifier

@@ -56,3 +56,9 @@ rootfs(B4)已包含基础程序运行所需全部 .so;rockiva/sqlite3/lvgl 等�
   ```
 
 - 若后续 PROJECT_PLAN 升级了固件(加/改包),sysroot 需按上面命令重新导出
+
+## 二进制不进 git(2026-09-18)
+
+gcc-aarch64-10.3.tar.gz / doorguard-sysroot.tar.gz 自 2026-09-18 起不再进 git 跟踪
+(.gitignore 排除)。安装走 `env/bin/dg-tc-install`(自动探测本地包);包本体只存
+本地 + 局域网 Gitea 历史;md5sums.txt 保留用于校验。

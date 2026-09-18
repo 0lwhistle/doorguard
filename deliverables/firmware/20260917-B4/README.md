@@ -40,3 +40,10 @@ rknpu2、GStreamer+RTSP、SQLite、dropbear/chrony,无桌面无 X11)。
 ## 首次开机验收
 
 按仓库 `docs/tech/FLASHING.md` 的 B5 清单逐项检查。
+
+## 二进制不进 git(2026-09-18)
+
+镜像与 Loader(update/rootfs/boot/uboot/misc.img、MiniLoaderAll.bin)自 2026-09-18 起
+不再进 git 跟踪(.gitignore 排除):GitHub 单文件上限 100MB 拒收,且源码仓不应携带
+大产物。本目录 md5sums.txt/parameter.txt 等文本保留;镜像本体只存本地 + 局域网
+Gitea(gitea remote 的历史里含全量)。换机时从 Gitea 或本地盘取镜像。
