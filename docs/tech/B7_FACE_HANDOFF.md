@@ -94,6 +94,20 @@ main.c 手工装配 → holder 注册表(`proto/holder/holder.h`,README 有用�
 - 运行期健康:web 后续可加 /api/health 遍历 `holder_get_module_info`。
 - 主循环(camera_poll + ui_poll)保持不变。
 
+## 0.3 当前快照(交接时刻)
+
+- 工作树干净,HEAD=本文件所在提交;交叉编译零警告(22 目标)
+- **板上跑的是 UI 重构版二进制(不含 B7 代码)**,B7 完成后需 dg-deploy
+- 板上服务/相机/3A/触摸/OTA(A/B 槽)均正常;模型缺人脸(见 §2.4)
+- 待用户人工回归:UI 待机唤醒/菜单四入口/用户管理/中英切换(UI 重构后未全测)
+
+## 1.1 首个验证点(上板第一件事!)
+
+**DG_FEATURE_MAX=512,而 ROCKIVA_FACE_FEATURE_SIZE_MAX=4096**——若实际特征
+超过 512B,当前代码会静默丢弃特征(录入/检索全废)。上板先看日志确认
+analyse 特征的 featureSize:超过 512 就把 proto/types.h 的 DG_FEATURE_MAX
+提到实际值(表是 BLOB,免迁移),重编译。
+
 ## 1. 已完成(代码在工作树/已提交)
 
 - **modules/vision/vision_rockiva.c**(重写,~330 行):ROCKIVA_Init(VIDEO 模式,
@@ -153,7 +167,13 @@ main.c 手工装配 → holder 注册表(`proto/holder/holder.h`,README 有用�
    人脸(正对镜头 3s 内)→ 日志 `特征库装载` → 主页举脸:脸框跟随(yellow)→
    命中(green+开门+日志 1:N 命中 x‰)。脸框方向不对改 rect_to_screen
    (90↔270 公式);相似度偏高/偏低调 cfg face_dup_threshold。
-6. **收尾**:DEVLOG B7 条目 + 本文件更新为"已完成" + push GitHub。
+6. **收尾**:DEVLOG B7 条目 + PROJECT_PLAN 进度行 + 本文件更新为"已完成" + push。
+7. **S60 加 env**:启动循环前 export DG_IVA_MODEL_DIR=/usr/lib(未做,§2.4 依赖)。
+8. **vision_backend_start 签名改 int 的涉及面**(3 文件+调用点):
+   vision_service.h 声明 / vision_sim.c / vision_rockiva.c / main.c 调用处。
+9. **链接残留清理(非阻塞)**:链接行有 `-L/external/iva/...`(SDK_ROOT 空导致),
+   清掉 CMakeLists 226-241 的 SDK_ROOT include/lib64 旧注释块或给 SDK_ROOT 默认值。
+10. **用户回归清单**(§0.3):待机唤醒/菜单四入口/用户管理/中英切换 + B7 新流程。
 
 ## 3. API/坑备忘(新会话勿重踩)
 
@@ -181,3 +201,12 @@ main.c 手工装配 → holder 注册表(`proto/holder/holder.h`,README 有用�
 - 板:192.168.2.95,SSH root;日志 /var/log/door-guard.log;
   服务 /etc/init.d/S60doorguard{start|stop|restart}(A/B 槽 OTA 已上线)。
 - push 一律 `git push origin master`(GitHub);上下文压缩交接惯例见本文件。
+- **缓冲饿死坑(已修,别回退)**:on_frame_push 未就绪/推送失败必须立即
+  camera_nv12_release(frame_id),否则 4 缓冲耗尽相机永久断流。
+- 链接顺序坑(已修):dg_vision 的 target_link_libraries 若放在 dg_camera
+  定义之前,CMake 退化为 -l 直链,undefined reference。
+- EV_VISION_VERIFY_11:FSM 侧已备好(auth_fsm.c:273 转 VERIFY_RESULT),
+  vision 的发布路径随 §2.2 mode 切换实现,勿在 FSM 里加东西。
+- 链接行残留 `-L/external/iva/...` 无害(SDK_ROOT 空导致),见 §2.9。
+- PC 端(sim):vision_sim mock 不依赖 camera NV12 出口;camera_set_nv12_listener
+  在 sim 的 camera_sim.c 无实现——sim 不调它即可,勿在公共路径调用。

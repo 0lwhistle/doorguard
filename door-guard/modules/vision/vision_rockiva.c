@@ -80,8 +80,11 @@ static void rect_to_screen(const RockIvaRectangle *r, int src_w, int src_h,
 /* ---- 喂帧(camera 线程):零拷贝包 NV12,ROCKIVA 异步消费 ---- */
 static void on_frame_push(const uint8_t *data, int w, int h, uint32_t frame_id)
 {
-    if (!s_ready)
+    /* 未就绪/推送失败必须立即归还缓冲:否则 4 缓冲耗尽 → 相机永久断流 */
+    if (!s_ready) {
+        camera_nv12_release(frame_id);
         return;
+    }
     RockIvaImage img;
     memset(&img, 0, sizeof(img));
     img.frameId = frame_id;
@@ -90,7 +93,12 @@ static void on_frame_push(const uint8_t *data, int w, int h, uint32_t frame_id)
     img.info.format = ROCKIVA_IMAGE_FORMAT_YUV420SP_NV12;
     img.dataAddr = (uint8_t *)data;
     img.dataFd = -1;                    /* V4L2 mmap 虚拟地址,无 DMA fd */
-    ROCKIVA_PushFrame(s_handle, &img, NULL);
+    if (ROCKIVA_PushFrame(s_handle, &img, NULL) != ROCKIVA_RET_SUCCESS) {
+        camera_nv12_release(frame_id);  /* 队列满丢帧,归还防饿死 */
+        static int n_full;
+        if (n_full++ < 3)
+            DG_LOGW(TAG, "PushFrame 失败(队列满?),丢帧");
+    }
 }
 
 /* ---- 检测回调:脸框 → EV_VISION_FACE_BOX(150ms 节流) ---- */
