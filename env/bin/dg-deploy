@@ -17,6 +17,10 @@ ip="${1:-${DOORGUARD_IP:-}}"
 bin="$DOORGUARD_ROOT/door-guard/build/door-guard"
 [ -x "$bin" ] || { echo "没有编译产物,先执行 dg-build"; exit 1; }
 
+# 应用走 A/B 槽位(/root/door-guard 是指向活动槽的符号链接):
+# 先停服务再推(否则 ETXTBSY),非 -r 时推完自动拉起新版本
+ssh "root@$ip" '/etc/init.d/S60doorguard stop >/dev/null 2>&1' || true
+
 scp "$bin" "root@$ip:/root/door-guard"
 
 # 语言包(i18n 依赖 /root/ui/lang;CWD=/root 才能找到)与自启脚本(幂等)
@@ -28,8 +32,10 @@ if [ -f "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" ]; then
 fi
 
 if [ "$run" = 1 ]; then
-    # 先停自启服务再前台跑,避免双实例抢 DRM/SQLite;退出后手动 start 恢复
-    ssh "root@$ip" '/etc/init.d/S60doorguard stop >/dev/null 2>&1; cd /root && /root/door-guard'
+    # 前台跑,便于串口/ssh 看输出;Ctrl-C 后 /etc/init.d/S60doorguard start 恢复
+    ssh "root@$ip" 'cd /root && /root/door-guard'
 else
-    echo "已推送(二进制+语言包+自启脚本)。板上运行: /etc/init.d/S60doorguard start"
+    ssh "root@$ip" '/etc/init.d/S60doorguard start'
+    slot=$(ssh "root@$ip" 'basename $(readlink /root/door-guard)' 2>/dev/null)
+    echo "已推送并重启服务(活动槽 $slot)"
 fi

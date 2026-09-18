@@ -1,57 +1,144 @@
 #!/bin/sh
-# S60doorguard — door-guard 门禁应用开机自启(buildroot SysV rcS)
+# S60doorguard — door-guard 开机自启 + 应用级 OTA(A/B 槽位)
 #
-# 序号 60:udev(S10)/dhcpcd(S41)/dropbear(S50) 之后,DRM/输入设备就绪。
-# 带监督循环:应用异常退出 3s 后拉起(门禁常在要求;main.c 崩溃退出即重试)。
-# 应用文件布局(dg-deploy 维护):/root/door-guard + /root/ui/lang/*.json;
-# 运行态:/var/lib/door-guard(db/key) + /etc/door-guard/device.json。
+# 自启:udev(S10)/dhcpcd(S41)/dropbear(S50) 之后;监督循环崩溃 3s 拉起。
+# OTA:上传闭环到 /var/lib/door-guard/ota_staged.bin(应用侧已验 sha256),
+#       本脚本的监听循环做二次复核 → 装入非活动槽 → 符号链接原子切换 →
+#       重启进程。连续 3 次秒退(<15s)自动回滚到另一槽。
+# 槽位:/root/dg_app.A 与 /root/dg_app.B;/root/door-guard 是指向当前槽的
+#       符号链接(开发流 dg-deploy 推 /root/door-guard 即写活动槽,不变)。
 DAEMON=/root/door-guard
+SLOT_A=/root/dg_app.A
+SLOT_B=/root/dg_app.B
 APPDIR=/root
 LOG=/var/log/door-guard.log
 SUP_PID=/var/run/door-guard-sup.pid
+WATCH_PID=/var/run/door-guard-ota.pid
+STATE=/var/lib/door-guard
+STAGED=$STATE/ota_staged.bin
+STAGED_SHA=$STATE/ota_staged.bin.sha256
+STAGED_VER=$STATE/ota_staged.ver
+
+log() { echo "$(date '+%F %T') $*" >>"$LOG"; }
+
+aiq_restart() {
+    killall rkaiq_3A_server 2>/dev/null
+    start-stop-daemon -K -p /tmp/.rkaiq_3A 2>/dev/null
+    rm -f /tmp/.rkaiq_3A /tmp/aiq2.lock
+    /etc/init.d/S40rkaiq_3A start >/dev/null 2>&1
+    n=0
+    while [ $n -lt 10 ]; do
+        pidof rkaiq_3A_server >/dev/null 2>&1 && return 0
+        sleep 1
+        n=$((n + 1))
+    done
+    return 1
+}
+
+slot_current() { basename "$(readlink "$DAEMON" 2>/dev/null)" 2>/dev/null; }
+
+slot_other() {
+    [ "$(slot_current)" = "dg_app.B" ] && { echo "$SLOT_A"; return; }
+    echo "$SLOT_B"
+}
+
+slot_activate() { # $1=槽位路径;先建临时链接再 mv,切换原子
+    ln -sf "$1" "$DAEMON.new" && mv -f "$DAEMON.new" "$DAEMON"
+}
+
+# 首次迁移:常规文件 → 槽位 A + 符号链接(幂等)
+slot_migrate() {
+    if [ -f "$DAEMON" ] && [ ! -L "$DAEMON" ]; then
+        cp -f "$DAEMON" "$SLOT_A"
+        slot_activate "$SLOT_A"
+        log "槽位化:door-guard → dg_app.A"
+    fi
+}
+
+ota_swap() {
+    s1=$(stat -c %s "$STAGED" 2>/dev/null) || return 0
+    sleep 2                                   # 收包完成判定:2s 大小不变
+    s2=$(stat -c %s "$STAGED" 2>/dev/null) || return 0
+    [ "$s1" = "$s2" ] || return 0
+    if [ -f "$STAGED_SHA" ]; then             # 二次复核(应用侧已验过一次)
+        if ! (cd "$STATE" && sha256sum -c ota_staged.bin.sha256 >/dev/null 2>&1); then
+            log "OTA sha 复核失败,丢弃"
+            rm -f "$STAGED" "$STAGED_SHA" "$STAGED_VER"
+            return 0
+        fi
+    fi
+    tgt=$(slot_other)
+    cp -f "$STAGED" "$tgt" && chmod +x "$tgt" || { log "OTA 安装失败(拷贝)"; return 1; }
+    slot_activate "$tgt"
+    log "OTA 安装 $(basename "$tgt")(v=$(cat "$STAGED_VER" 2>/dev/null)),重启生效"
+    rm -f "$STAGED" "$STAGED_SHA" "$STAGED_VER"
+    killall door-guard 2>/dev/null            # 监督循环 3s 后拉起进新槽
+}
+
+ota_watch() {
+    echo $$ >"$WATCH_PID"
+    while :; do
+        [ -f "$STAGED" ] && ota_swap
+        sleep 2
+    done
+}
+
+supervise() {
+    echo $$ >"$SUP_PID"                 # 后台子 shell 自己记录真实 pid
+    fail=0
+    while :; do
+        t0=$(date +%s)
+        "$DAEMON" >>"$LOG" 2>&1
+        rc=$?
+        dt=$(( $(date +%s) - t0 ))
+        log "door-guard 退出(rc=$rc,运行${dt}s)"
+        # 坏包(exec 失败 126/127)不涉及相机,跳过 3A 重启:
+        # 快速循环里反复重启 aiq 服务曾把 ISP 驱动搅到内核崩溃(实测)
+        if [ "$rc" = 126 ] || [ "$rc" = 127 ]; then
+            sleep 2
+            continue
+        fi
+        if [ "$dt" -lt 15 ]; then
+            fail=$((fail + 1))
+            if [ "$fail" -ge 3 ]; then
+                other=$(slot_other)
+                if [ -f "$other" ]; then
+                    slot_activate "$other"
+                    log "!!! 连续 3 次秒退,回滚 → $(basename "$other")"
+                    fail=0
+                fi
+            fi
+        else
+            fail=0
+        fi
+        aiq_restart
+        sleep 3
+    done
+}
 
 case "$1" in
   start)
-    [ -x "$DAEMON" ] || { echo "door-guard 不存在($DAEMON),跳过"; exit 0; }
-    mkdir -p /var/lib/door-guard
+    { [ -f "$SLOT_A" ] || [ -f "$SLOT_B" ] || [ -f "$DAEMON" ]; } || {
+        echo "door-guard 不存在,跳过"; exit 0; }
+    mkdir -p "$STATE"
     if [ -f "$SUP_PID" ] && kill -0 "$(cat "$SUP_PID")" 2>/dev/null; then
-        echo "door-guard 已在运行"
-        exit 0
+        echo "door-guard 已在运行"; exit 0
     fi
-    # 3A server 管理:直接杀进程+清 pidfile/锁文件,再经 S40 拉起并等它就绪。
-    # 不能只调 S40 start——杀进程后残留的包装 sh 会让 S40 误判"已在运行"。
-    aiq_restart() {
-        killall rkaiq_3A_server 2>/dev/null
-        start-stop-daemon -K -p /tmp/.rkaiq_3A 2>/dev/null
-        rm -f /tmp/.rkaiq_3A /tmp/aiq2.lock
-        /etc/init.d/S40rkaiq_3A start >/dev/null 2>&1
-        n=0
-        while [ $n -lt 10 ]; do
-            pidof rkaiq_3A_server >/dev/null 2>&1 && return 0
-            sleep 1
-            n=$((n + 1))
-        done
-        return 1
-    }
+    slot_migrate
     aiq_restart
-    (
-        cd "$APPDIR" || exit 1
-        while :; do
-            "$DAEMON" >>"$LOG" 2>&1
-            echo "$(date '+%F %T') door-guard 退出(code=$?),3s 后拉起" >>"$LOG"
-            aiq_restart
-            sleep 3
-        done
-    ) &
-    echo $! >"$SUP_PID"
-    echo "door-guard 已启动(日志 $LOG)"
+    # ⚠️ 必须完全脱离会话:继承 ssh 的 stdout/stderr 时,会话一断,
+    # 子 shell 往死管道写即被卡死(实测监督循环因此假死、回滚失灵)
+    supervise >/dev/null 2>&1 &
+    ota_watch >/dev/null 2>&1 &
+    echo "door-guard 已启动(活动槽 $(slot_current),日志 $LOG)"
     ;;
   stop)
     [ -f "$SUP_PID" ] && kill "$(cat "$SUP_PID")" 2>/dev/null
+    [ -f "$WATCH_PID" ] && kill "$(cat "$WATCH_PID")" 2>/dev/null
     killall door-guard 2>/dev/null
+    killall S60doorguard 2>/dev/null    # pidfile 失准的兜底(本进程随后即退,无碍)
     killall rkaiq_3A_server 2>/dev/null
-    rm -f /tmp/.rkaiq_3A /tmp/aiq2.lock
-    rm -f "$SUP_PID"
+    rm -f "$SUP_PID" "$WATCH_PID" /tmp/.rkaiq_3A /tmp/aiq2.lock
     echo "door-guard 已停止"
     ;;
   restart)

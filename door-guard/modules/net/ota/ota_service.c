@@ -15,8 +15,14 @@
 
 static const char *TAG = "[OTA]";
 
-#define OTA_STAGING   "/tmp/ota_staging.part"
-#define OTA_STAGED    "/tmp/ota_staged.bin"
+/* 暂存放持久区(/tmp 是 tmpfs,重启即失——切换流程依赖跨重启读不到它没关系,
+ * 但安装动作发生在运行中的系统里,放持久区更稳);bash 监听/复核见
+ * board/rootfs-overlay/etc/init.d/S60doorguard */
+#define OTA_DIR       "/var/lib/door-guard"
+#define OTA_STAGING   OTA_DIR "/ota_staging.part"
+#define OTA_STAGED    OTA_DIR "/ota_staged.bin"
+#define OTA_STAGED_SHA OTA_DIR "/ota_staged.bin.sha256"
+#define OTA_STAGED_VER OTA_DIR "/ota_staged.ver"
 #define OTA_MAX_SIZE  (64u * 1024u * 1024u)   /* 包上限 64MB(方案 A 分区预留) */
 
 typedef struct {
@@ -73,6 +79,7 @@ int ota_begin(const ota_manifest_t *m, uint32_t offset, bool *resumed)
     if (staged > m->size)
         return DG_ERR_STATE;
 
+    mkdir(OTA_DIR, 0755);               /* 已存在则忽略 */
     s_ctx.manifest = *m;
     s_ctx.received = staged;
 
@@ -157,6 +164,19 @@ int ota_finish(char *stage_path, size_t path_cap)
     remove(OTA_STAGED);
     if (rename(OTA_STAGING, OTA_STAGED) != 0)
         return DG_ERR_IO;
+
+    /* sidecar:bash 监听器做二次复核与槽位记录用(写失败不影响闭环,
+     * 应用侧 sha256 已验证通过) */
+    FILE *sf = fopen(OTA_STAGED_SHA, "w");
+    if (sf) {
+        fprintf(sf, "%s  ota_staged.bin\n", s_ctx.manifest.sha256);
+        fclose(sf);
+    }
+    FILE *vf = fopen(OTA_STAGED_VER, "w");
+    if (vf) {
+        fprintf(vf, "%s", s_ctx.manifest.version);
+        fclose(vf);
+    }
     if (stage_path)
         snprintf(stage_path, path_cap, "%s", OTA_STAGED);
     DG_LOGI(TAG, "校验闭环通过 v=%s → %s(不刷分区,方案见 OTA_PLAN.md)",
