@@ -124,7 +124,7 @@ door-guard/
 ├── ui/                       # 界面(现有组织保持:bridge/presenters/pages/widgets/navigator/lang/font,
 │                             #   单复数不做无谓更名);验证流程 = 主页弹窗流,不设独立整页(spec-ui)
 ├── configs/                  # 仓库内只放 default.json(默认配置模板,入库);cur_config 不入库(§4.1)
-├── models/                   # 视觉模型文件(face_landmark5.data / face_quality_v2.data 等,打包进固件)
+├── models/                   # 模型清单/校验和(sha256);SDK 二进制不入 git,板上部署 /usr/lib(整目录)
 ├── tests/                    # PC 可跑纯逻辑测试(现有 20 项保留;新模块随做随补)
 ├── sim/                      # PC 模拟器宿主(DG_SIM;#ifdef 只许出现在 HAL sim 后端与 main 装配)
 ├── tools/  scripts/          # 不变

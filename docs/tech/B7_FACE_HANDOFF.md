@@ -215,6 +215,7 @@ main.c 手工装配 → holder 注册表(`proto/holder/holder.h`,README 有用�
    librockiva/rockiva-rk3576-Linux/models/rockiva_data_rk3576/*.data`
    → 整目录 `scp` 到板 `/usr/lib/`(至少 face_landmark5.data、face_quality_v2.data,
    建议全拷)。缺模型时 FACE_Init 返回 -1,日志 ERROR 明示,**系统降级不崩**。
+   模型清单/校验和落 `door-guard/models/`(README+sha256,二进制不入 git)。
    后续固件(B10)应在 buildroot 的 IVA 包里带上这些模型,不再手工拷。
 5. **部署联调**(模型到位后):`source env/env.sh && dg-build && dg-deploy`。
    看板日志(/var/log/door-guard.log):`ROCKIVA 就绪` + `人脸特征长度 N B` →
