@@ -53,6 +53,11 @@ add_library(dg_holder STATIC
 target_include_directories(dg_holder PUBLIC ${CMAKE_SOURCE_DIR}/components/holder)
 target_link_libraries(dg_holder PUBLIC dg_log)
 
+# registry:services 注册表(与 holder 同构 + 心跳/重启原语;README 见 components/registry/)
+add_library(dg_registry STATIC components/registry/registry.c)
+target_include_directories(dg_registry PUBLIC ${CMAKE_SOURCE_DIR}/components/registry)
+target_link_libraries(dg_registry PUBLIC dg_log)
+
 # proto 契约层:错误码/数据结构/业务事件/字段合法性(头在 proto/ 根)
 add_library(dg_proto STATIC
     proto/types.c
@@ -280,7 +285,7 @@ add_executable(door-guard app/main.c)
 # 引用,静态库符号环需组解析
 target_link_libraries(door-guard PRIVATE
     -Wl,--start-group
-    dg_event_bus dg_tasker dg_holder dg_proto dg_storage dg_config
+    dg_event_bus dg_tasker dg_holder dg_registry dg_proto dg_storage dg_config
     lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_gpio dg_uart dg_net dg_display dg_camera
     -Wl,--end-group)
 

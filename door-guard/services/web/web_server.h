@@ -12,6 +12,8 @@
 #ifndef DG_WEB_SERVER_H
 #define DG_WEB_SERVER_H
 
+#include <stdint.h>
+
 #include "err.h"
 
 #ifdef __cplusplus
@@ -20,6 +22,10 @@ extern "C" {
 
 int web_server_start(void);
 void web_server_stop(void);
+
+/** 最近活动心跳(unix ms;推送线程每次唤醒刷新)。
+ * 看门狗判活用(registry 心跳钩子);未启动返回 0(看门狗按"无数据"跳过) */
+int64_t web_server_heartbeat_ms(void);
 
 #ifdef __cplusplus
 }

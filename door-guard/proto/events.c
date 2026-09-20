@@ -37,6 +37,7 @@ static const struct {
     { EV_UI_PICK_METHOD,   "UI_PICK_METHOD" },
     { EV_UI_RESULT,        "UI_RESULT" },
     { EV_UI_HINT_CLEAR,    "UI_HINT_CLEAR" },
+    { EV_SYS_SERVICE_STATE, "SYS_SERVICE_STATE" },
     { EV_UI_FACEBOX,       "UI_FACEBOX" },
     { 0, NULL },
 };

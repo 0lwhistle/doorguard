@@ -40,6 +40,9 @@ extern "C" {
 #define EV_VISION_VERIFY_11  EV_DEF(DG_MODULE_ID_VISION, 0x0004) /**< 1:1 比对结果 */
 #define EV_VISION_SET_MODE   EV_DEF(DG_MODULE_ID_VISION, 0x0005) /**< 工作模式切换(access→vision) */
 
+/* SYSTEM:系统/装配层(看门狗 → UI/web 上位机) */
+#define EV_SYS_SERVICE_STATE EV_DEF(DG_MODULE_ID_SYSTEM, 0x0010) /**< 服务状态变化(降级/禁用通知) */
+
 /* CAPTURE:取流状态(capture → UI/服务) */
 #define EV_CAPTURE_STATE     EV_DEF(DG_MODULE_ID_CAPTURE, 0x0001) /**< 就绪/断流 */
 
@@ -171,6 +174,13 @@ typedef struct {
 typedef struct {
     bool manual;                          /**< true=用户手动触发 */
 } ev_ntp_trigger_t;
+
+/** EV_SYS_SERVICE_STATE:看门狗处置结果(重启/禁用),UI/上位机据此提示降级 */
+typedef struct {
+    char    name[32];                     /**< 服务名(registry 注册名) */
+    int32_t state;                        /**< registry_state_t 值 */
+    int32_t err;                          /**< 预留(0 = 无) */
+} ev_sys_service_state_t;
 
 /** EV_NET_NTP_RESULT */
 typedef struct {
@@ -338,6 +348,7 @@ _Static_assert(sizeof(ev_ota_progress_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ota_pr
 _Static_assert(sizeof(ev_web_set_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_set_t 超限");
 _Static_assert(sizeof(ev_web_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_state_t 超限");
 _Static_assert(sizeof(ev_web_set_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_set_result_t 超限");
+_Static_assert(sizeof(ev_sys_service_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_sys_service_state_t 超限");
 _Static_assert(sizeof(ev_finger_status_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_finger_status_t 超限");
 _Static_assert(sizeof(ev_ic_card_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ic_card_t 超限");
 _Static_assert(sizeof(ev_door_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_door_state_t 超限");

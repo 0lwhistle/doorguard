@@ -113,6 +113,17 @@ int gpio_hal_get_level(int *level)
     return read_sysfs_int(path, level);
 }
 
+int gpio_hal_set_level(int level)
+{
+    if (s_line < 0)
+        return DG_ERR_NOT_INIT;
+    if (level != 0 && level != 1)
+        return DG_ERR_PARAM;
+    char path[64];
+    snprintf(path, sizeof(path), "/sys/class/gpio/gpio%d/value", s_line);
+    return write_sysfs(path, level ? "1" : "0");
+}
+
 int gpio_hal_line(void)
 {
     return s_line;

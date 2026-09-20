@@ -28,6 +28,9 @@ int gpio_hal_door_pulse(uint32_t ms);
 /** 电平读取(对拍/自检:读 /sys/class/gpio/gpioN/value) */
 int gpio_hal_get_level(int *level);
 
+/** 电平直设(0/1;安全停机把继电器复位到断开态用,不走开门脉冲) */
+int gpio_hal_set_level(int level);
+
 /** 读回引脚号(-1 未初始化) */
 int gpio_hal_line(void);
 

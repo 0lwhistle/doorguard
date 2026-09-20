@@ -82,6 +82,7 @@ static pthread_mutex_t s_ws_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t s_ws_cond = PTHREAD_COND_INITIALIZER;
 static pthread_t s_pusher;
 static bool s_pusher_run = false;
+static int64_t s_hb_ms = 0;              /* 推送线程每次唤醒刷新(看门狗判活) */
 
 /* 入队(任意线程;满则丢最旧并计数——宁可丢几条实时事件,也不能阻塞总线) */
 static void ws_enqueue(const char *json)
@@ -116,6 +117,9 @@ static void *ws_pusher_thread(void *arg)
     while (1) {
         char msg[WS_MSG_MAX];
         pthread_mutex_lock(&s_ws_mtx);
+        struct timespec hb_now;
+        clock_gettime(CLOCK_REALTIME, &hb_now);
+        s_hb_ms = (int64_t)hb_now.tv_sec * 1000 + hb_now.tv_nsec / 1000000;
         while (s_pusher_run && s_q_head == s_q_tail) {
             struct timespec ts;
             clock_gettime(CLOCK_REALTIME, &ts);
@@ -1057,6 +1061,11 @@ int web_server_start(void)
     publish_web_state();
     DG_LOGI(TAG, "web 上位机就绪 :%d(版本 %s)", port, DG_FW_VERSION);
     return DG_OK;
+}
+
+int64_t web_server_heartbeat_ms(void)
+{
+    return s_hb_ms;                      /* int64 读原子;看门狗容忍轻微滞后 */
 }
 
 void web_server_stop(void)
