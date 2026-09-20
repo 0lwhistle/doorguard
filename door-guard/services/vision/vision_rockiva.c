@@ -29,7 +29,7 @@
 #include "storage.h"
 #include "cfg.h"
 #include "liveness_service.h"
-#include "hal/camera/camera.h"
+#include "modules/camera/camera.h"
 
 #include <rockiva_face_api.h>
 

@@ -5,6 +5,35 @@
 
 ---
 
+## 2026-09-20 架构 v2 决议 + M1 目录迁移落地
+
+**做了什么**
+- 用户拍板 4 项:只读直调按"高实时/高性能"放宽(登记制)/ device_config 表冻结 /
+  RTSP 暂缓走 WS 快照 / 迁移立即。决议写回 proposal §1/§10。
+- **M1 机械迁移**(全部 git mv 保历史,零行为变更):
+  proto/{tasker,event_bus,holder}→components/、proto/dg_log→components/logger/;
+  hal/{uart,gpio,npu}→drv/、hal/{camera,display}→modules/、hal/storage→modules/sqlite;
+  modules/{capture,vision,liveness,access,enroll}→services/;
+  modules/net/{web,ota,mdns,ntp}→services/(net_info 留守 modules/net);
+  auth→services/verify(finger→fingerprint、card→ic);config→services/config。
+- include 带路径引用 13 处 + 两份 CMake 全量替换;修 3 个迁移断点:
+  ① dg_gpio/dg_uart/dg_display/dg_camera 原靠 dg_log 的 proto/ include 目录意外传导,
+  现按 v2 依赖规则显式声明 proto;② dg_net 补 services/ 目录(跨子目录 include);
+  ③ 组件 README/头注释自引用清理。
+- **验收:WSL Ubuntu-22.04 全新构建 22/22 ctest 全过、0 警告**。
+- 文档同步:PROJECT_PLAN §3.1/§3.4/快照、architecture.md §1/§2.1/§4、door-guard/README 索引。
+
+**没做完 / 坑**
+- Windows 本机 push 仍被拒(id_rsa.pub 未注册到 GitHub)——注册后 `git push` 即可。
+- 教训:dg_log 的 PUBLIC include 目录曾是全体目标的 proto 可见性来源(暗依赖),
+  迁移时必须排查"链接链继承的 include 目录",不能只看源码 include 语句。
+
+**下一步**
+- M2 行为升级(每项独立提交):registry 装配+看门狗+降级矩阵 / config 双文件+旧配置迁移 /
+  DB WAL+单写者+特征缓存 / OTA 按需线程。
+
+---
+
 ## 2026-09-20 架构 v2 评审稿(重构方向修订)
 
 **做了什么**

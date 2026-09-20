@@ -1,6 +1,6 @@
 # RK3576 K7 人脸识别门禁系统 — 项目方案与执行手册
 
-> 更新:2026-09-18(目录整理/上 GitHub)。本文档是项目的唯一事实来源(Single Source of Truth)。
+> 更新:2026-09-20(架构 v2 评审通过 + M1 目录迁移)。本文档是项目的唯一事实来源(Single Source of Truth)。
 > 每次会话开工前先读本文档恢复上下文;完成阶段后更新"进度快照"。
 
 ---
@@ -17,7 +17,7 @@
 | Armbian SDK | `Rk3576-SDK/Armbian/kickpi-armbian` 仅作参考,主线用官方 SDK |
 | 编译机 | 同一台 Ubuntu VM:8 核 / 内存 7.2G(编译时 make -j 限 6)/ 磁盘 291G 可用 |
 | 磁盘 | SATA SSD 直连(已通过 6GB×3 写读一致性认证)。**历史教训:USB 桥接时代大文件静默损坏**,大文件纪律见第六节 |
-| 当前进度 | **door-guard 软件 Phase 1~10 完成**(2026-09-18 总验收自测过,已上 GitHub);固件 **B5 板上验收大部通过**(串口/屏/IMX415 出流/SSH ✅);**板上自启动+触摸+相机预览已打通**(S60 自启 ✅、fts_ts 触摸 ✅、V4L2+RGA+rkaiq 预览 ✅ B6 提前完成,方向/曝光待人工确认);**B7 应用侧完成并上板**(holder 注册表 14 模块 ✅、视觉工作模式联动 ✅、活体留口 ✅、特征长度自诊断 ✅、**视觉后端可插拔契约** ✅——换模型/换框架(如 rknn 开源模型)不改服务层,见 `door-guard/modules/vision/README.md`;板上 `vision_backend=ERROR` 只因**人脸模型文件缺失**——待把 SDK `models/rockiva_data_rk3576` 的 `face_landmark5.data`/`face_quality_v2.data` 等拷入板 `/usr/lib` 后联调,见 `docs/tech/B7_FACE_HANDOFF.md` §2.4);**业务链路打通**(验证按钮全流程:ID 输入/方式选择/密码/1:1 与失败原因文案 ✅;菜单入口:有管理员要认证、**无管理员免认证进菜单**(新机鸡生蛋死锁已修)、管理员验证通过进菜单 ✅;PC 模拟器可全流程演示,回归 `tests/test_verify_flow.c`;**输入体系完备**(屏幕键盘数字+字母两页、每个输入 UI 即时校验 + 存储层强制校验,规则唯一权威 `proto/valid.c`;中文姓名需上位机录入);仓库:origin=GitHub / gitea=旧历史归档;**web 上位机 = Vue 3 工程**(2026-09-18:分层 views/stores/api/components、六视图+路由、产物内嵌资源表、vitest 44 项 + frontend_check + 验收 63 项);**web 上位机 + mDNS 做实**(2026-09-18):页面重做(蓝白主题+动效,源文件 pages/ 生成入库)、鉴权重构(web_auth 凭据+登录风控 / web_session token 表,改密即踢下线)、WS 服务端主动推送(不再靠客户端 ping)、设备菜单新增「Web 管理」页(改账号/口令+局域网地址),mDNS 公告 `_http._tcp` 服务 + 探测防重名 + IP 变化重通告(局域网可直接 `http://doorguard.local:8080`);顺带修:WebSocket 握手在 OpenSSL 3 下段错误、NTP 服务从未装配、`/api/device` 的 uptime 是 epoch;待办:B7 人脸模型联调(录入人脸/1:N 命中)、指纹与读卡器接入(UI 已留"请按指纹/请刷卡"子步)、门控 GPIO 对拍、WiFi 驱动修复、web 页面浏览器像素级复核 + 监控画面接 capture 帧、recovery 延后 |
+| 当前进度 | **door-guard 软件 Phase 1~10 完成**(2026-09-18 总验收自测过,已上 GitHub);固件 **B5 板上验收大部通过**(串口/屏/IMX415 出流/SSH ✅);**板上自启动+触摸+相机预览已打通**(S60 自启 ✅、fts_ts 触摸 ✅、V4L2+RGA+rkaiq 预览 ✅ B6 提前完成,方向/曝光待人工确认);**B7 应用侧完成并上板**(holder 注册表 14 模块 ✅、视觉工作模式联动 ✅、活体留口 ✅、特征长度自诊断 ✅、**视觉后端可插拔契约** ✅——换模型/换框架(如 rknn 开源模型)不改服务层,见 `door-guard/modules/vision/README.md`;板上 `vision_backend=ERROR` 只因**人脸模型文件缺失**——待把 SDK `models/rockiva_data_rk3576` 的 `face_landmark5.data`/`face_quality_v2.data` 等拷入板 `/usr/lib` 后联调,见 `docs/tech/B7_FACE_HANDOFF.md` §2.4);**业务链路打通**(验证按钮全流程:ID 输入/方式选择/密码/1:1 与失败原因文案 ✅;菜单入口:有管理员要认证、**无管理员免认证进菜单**(新机鸡生蛋死锁已修)、管理员验证通过进菜单 ✅;PC 模拟器可全流程演示,回归 `tests/test_verify_flow.c`;**输入体系完备**(屏幕键盘数字+字母两页、每个输入 UI 即时校验 + 存储层强制校验,规则唯一权威 `proto/valid.c`;中文姓名需上位机录入);仓库:origin=GitHub / gitea=旧历史归档;**web 上位机 = Vue 3 工程**(2026-09-18:分层 views/stores/api/components、六视图+路由、产物内嵌资源表、vitest 44 项 + frontend_check + 验收 63 项);**web 上位机 + mDNS 做实**(2026-09-18):页面重做(蓝白主题+动效,源文件 pages/ 生成入库)、鉴权重构(web_auth 凭据+登录风控 / web_session token 表,改密即踢下线)、WS 服务端主动推送(不再靠客户端 ping)、设备菜单新增「Web 管理」页(改账号/口令+局域网地址),mDNS 公告 `_http._tcp` 服务 + 探测防重名 + IP 变化重通告(局域网可直接 `http://doorguard.local:8080`);顺带修:WebSocket 握手在 OpenSSL 3 下段错误、NTP 服务从未装配、`/api/device` 的 uptime 是 epoch;待办:B7 人脸模型联调(录入人脸/1:N 命中)、指纹与读卡器接入(UI 已留"请按指纹/请刷卡"子步)、门控 GPIO 对拍、WiFi 驱动修复、web 页面浏览器像素级复核 + 监控画面接 capture 帧、recovery 延后;**2026-09-20 架构 v2 评审通过并落地**:五层栈重构(components/drv→modules→services+proto 契约)M1 机械迁移完成、22 项 ctest 全绿,方案/决议/迁移映射见 `docs/architecture-v2-proposal.md` |
 
 ---
 
@@ -32,28 +32,42 @@
 
 ## 三、总体架构
 
-### 3.1 软件分层
+### 3.1 软件分层(架构 v2,2026-09-20;细则见 docs/architecture-v2-proposal.md)
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  UI 层:LVGL(基于 SDK app/lvgl_demo 骨架)             │
-│  界面:待机页/识别中/动作引导/结果页/管理页              │
+│  UI 层:ui/(LVGL;bridge 事件桥 + presenters + pages)  │
+│  只发/收事件,不做业务决策;验证流程=主页弹窗流          │
 ├─────────────────────────────────────────────────────┤
-│  业务服务层(线程 + 消息总线,互不直接调用)              │
-│   capture_service   取流:rkaiq 3A + V4L2 → NV12 环形缓冲│
-│   vision_service    ROCKIVA 检测/识别/1:N检索(官方方案)  │
-│   liveness_service  动作状态机(随机序列)+姿态/张嘴判定   │
-│   access_service    认证融合、门控决策、继电器、日志       │
-│   enroll_service    人脸/指纹/卡注册管理                 │
+│  服务层 services/(注册进 registry,线程归属表见 v2 §3.3)│
+│   capture   取流:rkaiq 3A + V4L2 → NV12 环形缓冲      │
+│   vision    检测→质量闸门→识别→1:N 检索(后端可插拔)     │
+│   liveness  动作活体状态机(认证管线强制阶段)            │
+│   verify    认证编排 + face/fingerprint/ic/password    │
+│   access    门控决策、继电器、日志唯一出口               │
+│   enroll    用户/特征录入(查重)                        │
+│   config    配置服务(M2 落地 default/cur 双文件)        │
+│   web/ota/mdns/ntp  网络服务族(基于 modules/net)       │
+│   database/ui(M2:单写者队列+WAL/LVGL 宿主+看门狗)      │
 ├─────────────────────────────────────────────────────┤
-│  HAL 层(薄封装,可替换)                                │
-│   camera_hal  display_hal(DRM)  npu_hal(librknnrt)  │
-│   gpio_hal(libgpiod)  uart_hal(指纹/读卡)  storage(SQLite)│
+│  模块层 modules/(注册进 holder)                        │
+│   camera  display  sqlite  net(net_info)             │
+│   touch/as608/mfrc522 随硬件接入                       │
+├─────────────────────────────────────────────────────┤
+│  驱动层 drv/(总线级薄封装,可替换,sim 同接口)            │
+│   uart  gpio  npu(i2c/spi/pwm 随硬件接入)              │
+├─────────────────────────────────────────────────────┤
+│  组件层 components/:tasker event_bus holder logger     │
+│         (registry 待 M2;机制层,pthread port)          │
+│  契约层 proto/:events types valid err(唯一横切层)      │
 ├─────────────────────────────────────────────────────┤
 │  平台层:官方 SDK(kernel-6.1 + rkaiq + rknpu2 + rga    │
-│          + mpp + libmali + buildroot rootfs)          │
+│          + mpp + libmali + buildroot rootfs)           │
 └─────────────────────────────────────────────────────┘
 ```
+
+- 依赖白名单与跨服务调用规则(只读直调登记制)见 proposal §1;M2 待落地项:
+  registry 装配、看门狗+降级矩阵、config 双文件、database 单写者队列+特征缓存。
 
 ### 3.2 数据流
 
@@ -74,23 +88,23 @@ IMX415 ─MIPI→ RKISP(rkaiq 3A)→ NV12 帧
 3. **UI 与视觉解耦**:UI 订阅事件总线,不直接调视觉模块;视觉不依赖 UI。
 4. **模块独立成静态库**,main 只做装配,便于单元测试与替换。
 
-### 3.4 应用代码目录(door-guard/)
+### 3.4 应用代码目录(door-guard/,2026-09-20 v2 迁移后实况)
 
 ```
 door-guard/
-├── app/            main.c、装配、配置加载
-├── ui/             LVGL 界面(页面、主题、动作引导动画)
-├── modules/
-│   ├── capture/    取流线程、帧环形缓冲
-│   ├── vision/     检测/识别/特征库比对
-│   ├── liveness/   动作状态机、姿态判定
-│   └── access/     门控决策、日志
-├── hal/            camera/display/npu/gpio/uart/storage 薄封装
-├── proto/          消息与事件定义(帧、事件、结果)
-├── auth/           auth_provider 接口 + face/finger/card 实现
-├── third_party/    lvgl、librknnrt 头+so、cjson、sqlite3
+├── app/            main.c、装配(初始化后转看门狗:待 M2)
+├── ui/             LVGL 界面(bridge/presenters/pages/widgets/navigator/lang/font)
+├── services/       capture vision liveness verify{face,fingerprint,ic} access
+│                   enroll config web ota mdns ntp
+├── modules/        camera display sqlite net(net_info);touch/as608/mfrc522 待接
+├── drv/            uart gpio npu;i2c/spi/pwm 随硬件接入
+├── components/     tasker event_bus holder logger(registry 待 M2)
+├── proto/          events/types/valid/err(跨层契约,唯一横切层)
+├── third_party/    lvgl、civetweb、cjson、stb_image、lv_drivers
 ├── tools/          模型转换脚本(PC 端)、阈值标定脚本
-└── configs/        device.json(分辨率/阈值/串口/GPIO 配置)
+├── tests/          ctest 22 用例(宿主 gcc)
+├── sim/            PC 模拟器素材
+└── configs/        device.json(出厂值;M2 改 default.json 模板 + 设备 /userdata 现用配置)
 ```
 
 ---

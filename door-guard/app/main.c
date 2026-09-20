@@ -16,7 +16,7 @@
  * 模块间只经 proto/ 定义的队列与事件总线通信,不直接互调。
  * #ifdef DG_SIM 仅出现在本装配与 HAL sim 后端(纪律允许范围)。
  */
-#include "hal/camera/camera.h"
+#include "modules/camera/camera.h"
 #include "access_service.h"
 #include "capture_service.h"
 #include "cfg.h"

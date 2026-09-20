@@ -3,7 +3,7 @@
  *
  * 移植自模板 tests/test_tasker.c(TK1~TK5 断言逐条保留,未弱化)。
  * 任务在 pthread 真实调度下运行;超时定时器为 no-op,timeout 升级路径
- * 在板上验证(见 proto/tasker/README.md)。
+ * 在板上验证(见 components/tasker/README.md)。
  */
 #include "tasker.h"
 #include "tasker_port.h"

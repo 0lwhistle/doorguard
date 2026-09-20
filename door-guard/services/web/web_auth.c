@@ -15,7 +15,7 @@
 #include "dg_log.h"
 #include "storage.h"
 #include "valid.h"
-#include "hal/storage/crypto.h"
+#include "modules/sqlite/crypto.h"
 
 #include <openssl/rand.h>
 #include <pthread.h>

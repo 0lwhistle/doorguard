@@ -11,7 +11,7 @@
  */
 #include "ui.h"
 #include "cfg.h"
-#include "hal/display/display.h"
+#include "modules/display/display.h"
 #include "i18n.h"
 #include "lvgl.h"
 #include "navigator/navigator.h"

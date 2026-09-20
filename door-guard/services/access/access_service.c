@@ -14,7 +14,7 @@
  */
 #include "access_service.h"
 #include "auth_fsm.h"
-#include "hal/gpio/gpio_hal.h"
+#include "drv/gpio/gpio_hal.h"
 #include "cfg.h"
 #include "dg_log.h"
 #include "event_bus.h"

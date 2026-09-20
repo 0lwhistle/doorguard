@@ -2,7 +2,7 @@
  * task_manager.h — 任务节点与调度表(tasker 内部)
  *
  * 移植自模板 ovs/components/core/tasker/task_manager.h;与模板差异:
- * logger.h 换为 proto/dg_log.h,mem.h 换为标准 malloc/free。
+ * logger.h 换为 components/logger/dg_log.h,mem.h 换为标准 malloc/free。
  */
 #ifndef TASK_MANAGER
 #define TASK_MANAGER

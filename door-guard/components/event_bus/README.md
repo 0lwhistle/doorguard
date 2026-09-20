@@ -12,7 +12,7 @@ event_bus_internal.h / event_bus_port.*,2026-09-09 的 REFACTORING_PLAN 5.1 四�
 |---|---|---|---|
 | 平台分支 | ESP(FreeRTOS)+ PC 双分支 | 仅保留 pthread 分支 | door-guard 只跑 Linux |
 | 内存池 | 依赖模板 mem_pool 模块 | `dg_event_pool.{h,c}` 自实现(同语义:定长块 + 空闲链 + 池满退化堆) | 只此一处用池,不值得引入通用池 |
-| 日志 | 模板 logger.h | `proto/dg_log.h` | door-guard 统一日志尚未建,先承接 |
+| 日志 | 模板 logger.h | `components/logger/dg_log.h` | door-guard 统一日志尚未建,先承接 |
 | 锁获取 | PC 分支 trylock+nanosleep 轮询 | `pthread_mutex_timedlock` | 语义相同,不烧 CPU |
 | 任务停止 | PC 分支任务永不退出,deinit 后句柄泄漏 | stop 标志 + join,deinit 在 ≤10ms 内回收线程 | door-guard 纪律:中途退出有清理路径 |
 | 事件域 | WiFi/LoRa/Audio 等模板业务事件 | 按门禁模块重组 SYSTEM/UI/TEST 域;业务事件(EV_*)在 Phase 2 proto/events.h 定义 | 域不同 |

@@ -10,7 +10,7 @@
 #include "events.h"
 #include "tasker.h"
 
-#include "hal/camera/camera.h"
+#include "modules/camera/camera.h"
 
 #include <string.h>
 

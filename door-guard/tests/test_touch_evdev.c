@@ -4,7 +4,7 @@
  * 覆盖:MT Type-B 槽位协议按下/移动/抬起、双槽点跟随、legacy ABS_X/Y 协议、
  * abs 范围→屏幕缩放、swap/invert 校准路径、越界钳制。
  */
-#include "hal/display/touch_evdev.h"
+#include "modules/display/touch_evdev.h"
 #include "dg_test.h"
 
 #include <linux/input.h>

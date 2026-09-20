@@ -11,7 +11,7 @@
 #include "widgets/dg_btn.h"
 #include "widgets/dg_popup.h"
 
-#include "hal/camera/camera.h"
+#include "modules/camera/camera.h"
 
 #include <stdlib.h>
 #include <string.h>

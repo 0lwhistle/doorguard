@@ -19,7 +19,7 @@ REFACTORING_PLAN 5.2 修复版)。模板路径:`/home/olwhistle/dockerNow/esp32/
 | 项 | 模板 | 本移植 | 原因 |
 |---|---|---|---|
 | 平台分支 | ESP + PC 双实现 | 仅 PC(pthread)分支 | door-guard 只跑 Linux |
-| logger.h | 模板私有日志 | `proto/dg_log.h` | 统一日志承接 |
+| logger.h | 模板私有日志 | `components/logger/dg_log.h` | 统一日志承接 |
 | mem.h | 模板私有内存管理 | 标准 malloc/free | 门禁内存充裕,无池化必要 |
 | 线程栈宏 | 3~8KB(FreeRTOS 静态栈) | 64~128KB(attr 提示) | pthread 栈按需补页 |
 | 超时定时器 | PC 分支 no-op | 保持 no-op(同模板) | 超时机制只升级 level 不中断任务;业务超时走状态机 timer_seq,不依赖此处 |

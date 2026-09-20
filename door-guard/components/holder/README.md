@@ -17,7 +17,7 @@ HAL 与服务的启动顺序与健康状态注册表:`app/main.c` 装配时按"�
 |---|---|---|---|
 | 互斥锁 | FreeRTOS `xSemaphoreCreateMutex`/Take/Give | pthread 互斥量 + `pthread_mutex_timedlock`(1000ms 超时语义等价) | Linux 平台 |
 | 计时 | `esp_timer_get_time()` | `CLOCK_MONOTONIC` 微秒 | 初始化耗时统计 |
-| mem/logger | 模板 mem.h / logger.h | malloc/free / `proto/dg_log.h` | 去模板依赖 |
+| mem/logger | 模板 mem.h / logger.h | malloc/free / `components/logger/dg_log.h` | 去模板依赖 |
 | 销毁判空 | `if (mutex) vSemaphoreDelete(mutex)` | 直接 `pthread_mutex_destroy`(依赖 initialized 标志防重复) | pthread 互斥量为内联类型非指针 |
 
 核心逻辑**逐行保留**:按依赖分批初始化(轮次"解锁"下一批)、缺失依赖/
