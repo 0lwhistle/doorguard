@@ -39,3 +39,19 @@ cd <SDK>/rockiva_data_rk3576 && sha256sum *.data > sha256sums.txt
 固件阶段模型应随 rockiva 库同源进 buildroot 的 IVA 包(落 /usr/lib),不再手工拷;
 模型格式与 rockiva 库版本绑定,二者必须同发。A/B 升级若另设分区/userdata 承载模型,
 依赖 `face.model_tag` + `vision_backend=ERROR` 自诊断兜底,不会出现新旧静默错配。
+
+## 已就位:自组 rknn 管线模型(2026-09-20,用户 rknn-toolkit2 转换)
+
+| 文件 | 角色 | 出处 | 大小 |
+|---|---|---|---|
+| `RetinaFace.rknn` | 人脸检测(备选检测器) | RetinaFace | 18 MB |
+| `det_10g.rknn` | 人脸检测(SCRFD-10G) | InsightFace model zoo | 9.4 MB |
+| `w600k_r50.rknn` | 人脸特征提取(ArcFace-R50,w600k) | InsightFace model zoo | 84 MB |
+
+校验:`sha256sums.txt`(二进制在本目录,已被 .gitignore 挡住不入库)。
+用途:vision_backend 可插拔契约的**自组后端**(SCRFD/ArcFace,PROJECT_PLAN §4.3 备选路径)
+——**代码侧尚无该后端**,B7 主线仍是 ROCKIVA;此三件为预置,落位待后端实现。实现时必做:
+
+- ArcFace-R50 输出 512 维 float32 = **2048 B**,超过 `DG_FEATURE_MAX(512)`
+  (proto/types.h),须先提上限(users.features 是 BLOB,免迁移);
+- 特征空间 ≠ `rockiva-face-v1`,自组后端须用**独立 `face.model_tag`**(如 `arcface-r50-v1`)。

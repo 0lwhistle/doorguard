@@ -14,6 +14,10 @@ deliverables/wsl-toolchain/*.tar.gz
 door-guard/sim/data/
 
 # 前端工程依赖与本地构建产物(node_modules 不入库;pages/ 才是入库的嵌入资源)
-door-guard/modules/net/web/frontend/node_modules/
-door-guard/modules/net/web/frontend/dist/
-door-guard/modules/net/web/web_pages.c.tmp
+door-guard/services/web/frontend/node_modules/
+door-guard/services/web/frontend/dist/
+door-guard/services/web/web_pages.c.tmp
+
+# 模型二进制不入 git(来源/角色/校验见 door-guard/models/README.md 与 sha256sums.txt)
+door-guard/models/*.rknn
+door-guard/models/*.data
