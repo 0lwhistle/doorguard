@@ -1,13 +1,16 @@
 /*
- * cfg.h — 设备配置:device.json(出厂默认)+ DB device_config(用户设置)
+ * cfg.h — 设备配置:default.json(出厂模板)+ cur_config.json(现用配置)
  *
- * 解析优先级(后者覆盖前者):
- *   代码内置默认 → configs/device.json → DB device_config(spec-database §5)
- * 理由:json 随固件分发,是"出厂值";菜单/上位机改动的值必须持久且升级不丢,
- * 所以 DB 为最终事实。任何键缺失→默认;类型错/越界→回退默认并 WARN(不崩)。
+ * 架构 v2 M2①(spec 见 docs/architecture-v2-proposal.md §4.1):
+ *   加载序:代码内置默认 → default.json(出厂模板,只读) → cur_config.json(现用,稀疏覆盖)
+ *   - cur 不存在 → 首启迁移:把 DB device_config 中已知业务键一次性导出生成 cur,
+ *     此后 DB 冻结(仅存 web 凭据等非配置数据),cfg_set 只写 cur 文件;
+ *   - cfg_set_*:校验 → 内存生效 → 500ms 防抖原子落盘(临时文件→fsync→rename);
+ *   - cfg_flush():同步强制落盘(测试与关机路径);cfg_reset_key/reset_all() 按项/全部
+ *     恢复默认(从 cur 删键,加载序自然回落 default);
+ *   - 任何键缺失→默认;类型错/越界→回退默认并 WARN(不崩)。
  *
- * 快照只读:各服务经 cfg_get() 取值;设置页改动走 cfg_set()(写 DB 并刷新),
- * 不允许直接改快照。
+ * 快照只读:各服务经 cfg_get() 取值;改动一律走 cfg_set/reset,不允许直接改快照。
  */
 #ifndef DG_CFG_H
 #define DG_CFG_H
@@ -29,7 +32,7 @@ typedef struct {
     double face_dup_threshold; /**< 入库人脸查重相似度阈值,0.50~1.00,默认 0.90 */
     double face_match_threshold; /**< 1:N/1:1 命中阈值,0.30~1.00,默认 0.42(ROCKIVA 相似度) */
     int  liveness_enable;      /**< 动作活体开关,0/1,默认 0(B8 算法落地后开启) */
-    /* 视觉后端(json-only,不经 DB:换模型/换后端属部署参数,见 modules/vision/README.md) */
+    /* 视觉后端(json-only,不经 set/迁移:换模型/换后端属部署参数,见 services/vision/README.md) */
     char face_backend[16];     /**< 想要的后端名("rockiva"/"rknn"/"sim"),空=第一个注册的 */
     char face_model_dir[128];  /**< 模型目录,默认 /usr/lib(env DG_IVA_MODEL_DIR 优先) */
     char face_model_tag[64];   /**< 特征口径标识;换模型必须改它(旧特征作废) */
@@ -41,23 +44,34 @@ typedef struct {
     int  ota_port;             /**< OTA 监听端口,1024~65535,默认 9000 */
     char ntp_server[64];       /**< 默认 ntp.aliyun.com(国内部署实测可用) */
     char ota_url[128];         /**< OTA 升级包源地址,可空 */
-    /* 硬件参数(json-only,不经 DB;引脚待硬件确认) */
+    /* 硬件参数(json-only;引脚待硬件确认) */
     int  relay_gpio_line;      /**< 开门继电器 GPIO 行号,默认 0 */
     char relay_gpio_chip[32];  /**< GPIO 控制器(sysfs 模式下仅记录) */
 } dg_cfg_t;
 
 /**
- * 加载配置(json 路径 + DB 覆盖)。storage_init 必须先于本调用。
- * json 文件不存在/坏 json 不算错误:全部走默认并 WARN(出厂文件损坏时设备仍可用)。
+ * 加载配置(出厂模板 + 现用配置)。storage_init 须先于本调用(首启迁移读 DB)。
+ * @param default_path 出厂模板 json(缺失/坏 → 内置默认,WARN 不拒启)
+ * @param cur_path     现用配置 json(缺失 → 首启迁移生成;坏 → 视为空并 WARN)
+ * @return DG_OK / DG_ERR_IO(cur 首启迁移写盘失败,内存值仍可用)
  */
-int cfg_load(const char *json_path);
+int cfg_load(const char *default_path, const char *cur_path);
 
-/** 只读快照(加载后稳定;cfg_set 成功后更新) */
+/** 只读快照(两次 set 之间稳定;cfg_set/reset 成功后更新) */
 const dg_cfg_t *cfg_get(void);
 
-/** 设置并持久化(写 DB device_config,校验通过后刷新快照);key 见 cfg_keys.h 语义 */
-int cfg_set_int(const char *db_key, int value);
-int cfg_set_str(const char *db_key, const char *value);
+/** 设置并持久化(防抖落盘);key 为业务键名(同 DB 迁移键,见 test_cfg.c) */
+int cfg_set_int(const char *key, int value);
+int cfg_set_str(const char *key, const char *value);
+
+/** 按项恢复默认:从 cur 删除该键(加载序回落 default);未知键 DG_ERR_PARAM */
+int cfg_reset_key(const char *key);
+
+/** 全部恢复默认:cur 清空;同步落盘后返回 */
+int cfg_reset_all(void);
+
+/** 同步强制落盘(原子写:临时文件→fsync→rename);无未落盘改动时为空操作 */
+int cfg_flush(void);
 
 #ifdef __cplusplus
 }

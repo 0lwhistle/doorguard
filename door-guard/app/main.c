@@ -52,7 +52,8 @@
 #endif
 
 /* 装配参数(依赖 init_fn 无参数,故经静态变量传给包装函数) */
-static const char *s_json_path;
+static const char *s_def_path;      /* 出厂模板(只读) */
+static const char *s_cur_path;      /* 现用配置(首启自动生成) */
 static dg_ui_args_t s_ui_args;
 static const char *s_camera_dir;
 
@@ -76,10 +77,11 @@ static int mod_storage(void)
     return storage_init(DG_DB_PATH, DG_KEY_PATH);
 }
 
-/* cfg_load 的 json 路径:板上 /etc,模拟器取仓库 configs/(开发便利) */
+/* 配置双文件(架构 v2 M2①):出厂模板 + 现用配置;板上模板在 /etc(随固件),
+ * 现用配置放 /userdata 持久分区(A/B 升级换 rootfs 不丢用户设置) */
 static int mod_config(void)
 {
-    return cfg_load(s_json_path);
+    return cfg_load(s_def_path, s_cur_path);
 }
 
 static int mod_vision_service(void)
@@ -214,10 +216,12 @@ int main(int argc, char *argv[])
 {
     /* 装配参数:相机节点(sim=图片目录)/ 语言表 / 配置文件 */
 #ifdef DG_SIM
-    s_json_path = "configs/device.json";
+    s_def_path = "configs/default.json";
+    s_cur_path = "sim/data/cur_config.json";
     s_camera_dir = (argc > 1) ? argv[1] : "sim/media";
 #else
-    s_json_path = "/etc/door-guard/device.json";
+    s_def_path = "/etc/door-guard/default.json";
+    s_cur_path = "/userdata/doorguard/cur_config.json";
     s_camera_dir = (argc > 1) ? argv[1] : "/dev/video0";
 #endif
     s_ui_args.lang_dir = "ui/lang";

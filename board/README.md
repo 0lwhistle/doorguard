@@ -10,7 +10,7 @@ rootfs-overlay/
 
 - 应用本体 `/root/door-guard` 与语言包 `/root/ui/lang/` 由 `dg-deploy` 推送
 - 运行态目录 `/var/lib/door-guard/`(db/key)由脚本自动创建
-- 配置 `/etc/door-guard/device.json`(已部署;缺省走代码默认)
+- 配置:出厂模板 `/etc/door-guard/default.json`(缺省走代码默认);现用配置 `/userdata/doorguard/cur_config.json`(首启自动生成,升级不丢)
 - 日志 `/var/log/door-guard.log`
 - 触摸轴向校准:在 S60doorguard 的启动循环前 export `DG_TOUCH_SWAP_XY` /
-  `DG_TOUCH_INVERT_X` / `DG_TOUCH_INVERT_Y`(见 door-guard/hal/display/README.md)
+  `DG_TOUCH_INVERT_X` / `DG_TOUCH_INVERT_Y`(见 door-guard/modules/display/README.md)

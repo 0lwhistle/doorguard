@@ -3,7 +3,7 @@
  *
  * 实现:B4 rootfs 无 libgpiod/gpiod CLI(实测),采用 sysfs 接口
  * (/sys/class/gpio/export + gpioN/value);rootfs 升级带 libgpiod 后迁移。
- * 引脚号进 device.json(access.relay_gpio_line,出厂占位 0,
+ * 引脚号进 default.json(access.relay_gpio_line,出厂占位 0,
  * 待硬件确认:继电器实际接线引脚,DEVLOG 登记)。
  * 语义:开门 = 拉高 door_open_ms 后拉低(电平型继电器假设;
  * 脉冲型继电器待硬件确认后调整)。

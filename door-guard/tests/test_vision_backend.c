@@ -115,7 +115,7 @@ int main(void)
     char db[192], key[192], json[192];
     snprintf(db, sizeof(db), "%s/db.sqlite", s_dir);
     snprintf(key, sizeof(key), "%s/dg.key", s_dir);
-    snprintf(json, sizeof(json), "%s/device.json", s_dir);
+    snprintf(json, sizeof(json), "%s/default.json", s_dir);
     DG_CHECK(storage_init(db, key) == DG_OK);
     /* 配置里点名后端与口径:同时验 face.backend / face.model_tag 两个键的解析 */
     FILE *f = fopen(json, "wb");
@@ -123,7 +123,7 @@ int main(void)
         return 1;
     fputs("{\"face\":{\"backend\":\"mock\",\"model_tag\":\"mock-v1\"}}", f);
     fclose(f);
-    cfg_load(json);
+    cfg_load(json, NULL);   /* 只给出厂模板,无现用文件 */
     DG_CHECK(vision_service_start() == DG_OK);
 
     /* ---- 1. 注册表参数校验 ---- */

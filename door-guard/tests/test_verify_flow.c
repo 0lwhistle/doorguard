@@ -208,7 +208,7 @@ int main(void)
     snprintf(db, sizeof(db), "%s/db.sqlite", s_dir);
     snprintf(key, sizeof(key), "%s/dg.key", s_dir);
     DG_CHECK(storage_init(db, key) == DG_OK);
-    cfg_load(NULL);
+    cfg_load(NULL, NULL);
 
     event_bus_subscribe(EV_UI_ASK_UID, on_ask_uid, NULL);
     event_bus_subscribe(EV_UI_INPUT_PWD, on_input_pwd, NULL);

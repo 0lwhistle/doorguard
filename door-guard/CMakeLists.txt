@@ -68,10 +68,10 @@ target_include_directories(cjson PUBLIC ${CMAKE_SOURCE_DIR}/third_party/cjson)
 # 屏蔽第三方源码的告警(不因 vendored 代码破"零警告"纪律,不修改其内容)
 target_compile_options(cjson PRIVATE -w)
 
-# config:配置服务(默认→device.json→DB device_config;M2 落地 default/cur 双文件)
+# config:配置服务(default 模板 + cur 原子落盘 + DB 首启迁移;M2① 双文件)
 add_library(dg_config STATIC services/config/cfg.c)
 target_include_directories(dg_config PUBLIC ${CMAKE_SOURCE_DIR}/services/config)
-target_link_libraries(dg_config PUBLIC dg_storage cjson)
+target_link_libraries(dg_config PUBLIC dg_storage cjson dg_tasker)
 
 # storage:SQLite 存储加加密(storage.h API;sysroot 实测有 sqlite3/openssl3)
 add_library(dg_storage STATIC

@@ -234,7 +234,7 @@ static void on_fsm_action(fsm_action_t act, const fsm_action_data_t *d, void *ud
         EVENT_BUS_PUBLISH_EMPTY(EV_VISION_FACE_LOST);   /* 复用"隐藏脸框"语义 */
         break;
     case FSM_ACT_OPEN_DOOR: {
-        /* 门控:gpio_hal 脉冲(引脚配置 device.json;失败不阻断结果事件) */
+        /* 门控:gpio_hal 脉冲(引脚配置 default.json;失败不阻断结果事件) */
         static bool gpio_ready = false;
         if (!gpio_ready) {
             if (gpio_hal_init(cfg_get()->relay_gpio_line) == DG_OK)

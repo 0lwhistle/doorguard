@@ -119,7 +119,7 @@ int main(void)
     snprintf(db, sizeof(db), "%s/db.sqlite", s_dir);
     snprintf(key, sizeof(key), "%s/dg.key", s_dir);
     DG_CHECK(storage_init(db, key) == DG_OK);
-    cfg_load(NULL);                             /* 全默认 */
+    cfg_load(NULL, NULL);                       /* 纯内置默认(无文件模式) */
 
     event_bus_subscribe(EV_AUTH_DOOR_OPEN, on_door, NULL);
     event_bus_subscribe(EV_AUTH_RESULT, on_result, NULL);

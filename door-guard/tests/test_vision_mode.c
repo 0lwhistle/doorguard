@@ -62,7 +62,7 @@ int main(void)
     snprintf(db, sizeof(db), "%s/db.sqlite", s_dir);
     snprintf(key, sizeof(key), "%s/dg.key", s_dir);
     DG_CHECK(storage_init(db, key) == DG_OK);
-    cfg_load(NULL);
+    cfg_load(NULL, NULL);
 
     DG_CHECK(access_service_start() == DG_OK);
     DG_CHECK(vision_service_start() == DG_OK);
