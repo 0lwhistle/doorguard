@@ -38,7 +38,10 @@ UI 层        ui/ 页面与弹窗(LVGL;PC 模拟器 + 板上双构建)
   产物入库(`pages/`、`web_pages.c`)。跨层边界是同仓库内最干净的示范:
   视图不取数、组件纯展示、HTTP 出口唯一 —— 后端 C 侧同理(服务层不碰 UI、UI 不碰 SQL)
 
-## 2. ESP32 模板复用(模板已到位)
+## 2. ESP32 模板复用(移植已完成)
+
+> 状态:tasker / event_bus / holder 已完成移植,并随 2026-09-20 架构 v2 M1 迁移落位
+> `components/`(dg_log → `components/logger/`);本节保留作映射表与移植约定参考。
 
 模板位置:**`/home/olwhistle/dockerNow/esp32/programs/ovs`**(KickPi 开发机本地;
 API 头文件在 `components/api/`,实现+移植层在 `components/core/`,自带 `tests/`、`sim/`)。

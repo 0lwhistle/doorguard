@@ -1,8 +1,8 @@
 # 数据库规格(SQLite)
 
 > 库文件:`/var/lib/door-guard/door-guard.db`(目录 0700、库文件 0600;后续若分区方案调整,
-> 数据目录迁至独立持久分区,见 spec-network.md OTA 一节)。访问一律走 storage HAL 封装,
-> UI/业务层不得直接写 SQL。
+> 数据目录迁至独立持久分区,见 spec-network.md OTA 一节)。访问一律走 `modules/sqlite`
+> (dg_storage)封装,UI/业务层不得直接写 SQL。
 
 ## 1. users 表
 
@@ -109,7 +109,7 @@ CREATE TABLE device_config (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_a
 `ntp_server`、`door_open_ms`、`pwd_fail_lock_n`(连续错 N 次锁定)、`pwd_fail_lock_s`。
 网络配置(DHCP/静态 IP/掩码/网关)也存这里,由网络服务在开机与变更时应用。
 
-## 6. 存储服务接口(storage HAL / auth 层,示意)
+## 6. 存储服务接口(modules/sqlite,示意)
 
 ```c
 /* 全部返回 0 成功,负数错误码(见 door-guard/proto/err.h);线程安全(内部互斥) */

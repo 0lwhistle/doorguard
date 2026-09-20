@@ -1,7 +1,7 @@
 # UI 规格(LVGL,蓝白主题)
 
 > 平台:同一份 UI 代码跑两处 —— RK3576(DRM 后端,板上)与 **PC 模拟器**(SDL2,调 UI 用)。
-> 摄像头帧通过 camera HAL 抽象注入:板上取真实流,PC 端用视频文件/图片源回放。
+> 摄像头帧通过 camera 模块(`modules/camera`)抽象注入:板上取真实流,PC 端用视频文件/图片源回放。
 
 ## 1. 主题与组件规范
 
@@ -142,7 +142,7 @@ door-guard/ui/
 - 页面间跳转走页面管理器(`ui/page_mgr.h`:push/pop),事件经 event_bus 发布订阅
 - UI 层**不做业务决策**:按钮事件发事件给 access/enroll 服务,结果经事件回 UI 渲染
 - PC 模拟器构建:`cmake -DDG_SIM=ON`(SDL2 窗口 720×1280),与板上共用全部 ui/ 代码;
-  模拟器专用输入源(视频/图片循环)由 camera HAL 的 sim 后端提供
+  模拟器专用输入源(视频/图片循环)由 camera 模块(`modules/camera`)的 sim 后端提供
 
 ## 5. 验收自检(UI 相关,每次提交 UI 改动前过一遍)
 

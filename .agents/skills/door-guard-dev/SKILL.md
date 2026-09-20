@@ -1,6 +1,6 @@
 ---
 name: door-guard-dev
-description: RK3576 K7 人脸识别门禁项目(door-guard)开发技能,含完整业务规格与工作流。凡在本仓库做任何开发都必须先用本技能:LVGL 界面(主页验证/待机/菜单/弹窗)、用户与门禁记录 SQLite、认证业务(1:N/1:1 人脸、指纹、密码、IC 卡)、网络功能(web 上位机/websocket/视频推流/OTA A/B 升级/NTP/mDNS)、HAL 驱动、PC 模拟器、测试与文档。用户提到门禁、door-guard、K7、识别、用户管理、OTA、上位机等即触发,即便没说"门禁"二字。
+description: RK3576 K7 人脸识别门禁项目(door-guard)开发技能,含完整业务规格与工作流。凡在本仓库做任何开发都必须先用本技能:LVGL 界面(主页验证/待机/菜单/弹窗)、用户与门禁记录 SQLite、认证业务(1:N/1:1 人脸、指纹、密码、IC 卡)、网络功能(web 上位机/websocket/视频推流/OTA A/B 升级/NTP/mDNS)、驱动与模块层、PC 模拟器、测试与文档。用户提到门禁、door-guard、K7、识别、用户管理、OTA、上位机等即触发,即便没说"门禁"二字。
 ---
 
 # door-guard 开发技能(RK3576 K7 人脸识别门禁)
@@ -18,6 +18,7 @@ description: RK3576 K7 人脸识别门禁项目(door-guard)开发技能,含完�
 | 页面/待机/菜单/主题/多语言 | references/spec-ui.md |
 | web 上位机、OTA、NTP、mDNS | references/spec-network.md |
 | 新建模块、移植 ESP32 组件、构建体系 | references/architecture.md |
+| 架构 v2 全景:五层栈/线程归属/降级矩阵/跨服务调用规则/M2 待办 | docs/architecture-v2-proposal.md |
 | 硬件实测结论(WiFi 坏、摄像头在 cam2、串口参数等) | docs/DEV_HANDBOOK.md §2/§4 |
 
 ## 1. 环境速查
@@ -36,12 +37,12 @@ dg-serial             # 串口控制台(1500000 8N1,不是 115200)
 
 ## 2. 硬性工程纪律
 
-- **模块化**:模块间只经 `proto/` 的消息/事件总线通信,禁止跨层直调;新建模块先对照 references/architecture.md 明确职责再动手
+- **模块化**:五层栈 `ui → services → modules → drv ← components + proto 契约`(2026-09-20 v2 迁移已就位);模块/服务间只经 `proto/` 的消息/事件总线通信,禁止跨层直调——例外仅"只读直调登记制"(高实时/高性能读路径,新增必须先在 proposal §1 登记);新建模块先对照 references/architecture.md 明确职责并登记再动手
 - **边界优先**:实现任何功能前先列边界情况(空输入/超时/重复/权限不足/并发/掉电恢复),每个错误显式处理并返回失败码,禁止静默吞掉
 - **命名**:模块前缀式 `module_action()` / `module_type_t`;注释解释"为什么",不复述代码
 - **完成的定义**:一个功能模块 = 代码 + 注释 + 测试案例(`door-guard/tests/`,WSL 宿主 gcc 可跑)+ 模块 README + 使用示例,缺一不算完成
 - **UI**:所有 label 一律 `_("原文")` 包裹;翻译文件 `ui/lang/<语言>.json`(键=原文,值=译文);按钮一律图标+label;蓝白主题,色值 token 见 spec-ui.md
-- **配置**:业务参数进 `configs/device.json` 或 DB device_config 表,代码零魔数
+- **配置**:业务参数进 `configs/device.json` 或 DB device_config 表,代码零魔数(v2 决议:device_config 表已冻结,新配置只进 JSON;M2 落地 default/cur 双文件)
 - 推板前 dg-build 无警告;测试不过不推板
 
 ## 3. 收尾纪律(每次会话结束前)
@@ -60,10 +61,11 @@ dg-serial             # 串口控制台(1500000 8N1,不是 115200)
 - 弹窗期间:摄像头推流与脸框照常显示,但 **1:N 匹配必须挂起**(标志位管理,见 spec-auth-business.md)
 - 每次验证动作(任何方式、成功或失败)都写 access_logs,供菜单查询页与上位机查询
 
-## 5. ESP32 模板复用
+## 5. ESP32 模板复用(移植已完成,2026-09-20 随 v2 迁移落位)
 
-用户提供 ESP32 工程模板(tasker / event_bus / holder / lvgl 模块化思想等)。移植约定:
+tasker / event_bus / holder 已移植到 `door-guard/components/`(pthread port;dg_log 在
+`components/logger/`),组件 ↔ 模板映射表见 references/architecture.md §2.1。后续约定:
 
+- 新增核心组件(如 registry)放 `components/<name>/`,沿用模板纪律:公共 API 与 port 层分离、
+  附 README(原模块出处、改动点、使用示例)、跑通移植时自带的测试
 - 只取**概念与接口形态**,不复制 ESP-IDF 依赖;FreeRTOS API 换成 pthread/Linux 等价物
-- 移植代码放 `door-guard/third_party/` 或 `proto/`,每个组件附 README:原模块出处、改动点、使用示例
-- 模板到位后,在 references/architecture.md 补"模板组件 ↔ door-guard 模块"映射表

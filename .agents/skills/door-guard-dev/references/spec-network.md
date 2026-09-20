@@ -5,7 +5,7 @@
 ## 1. web 上位机(HTTP + WebSocket)
 
 - 板上起内嵌 HTTP 服务(civetweb,单库 vendored;端口默认 **8080**,进 device_config
-  `web_port`)。前端是 **Vue 3 单页应用**(`modules/net/web/frontend/`,Vite 构建),
+  `web_port`)。前端是 **Vue 3 单页应用**(`services/web/frontend/`,Vite 构建),
   产物同步到 `pages/` 再经 `gen_pages.sh` 生成资源表 `web_pages.c`,**两者都入库**:
   固件构建机不需要 node,只有改前端时才要 `./build_frontend.sh`
 - 前端分层纪律(由 `tests/web/frontend_check.py` 自动检查):
@@ -37,13 +37,13 @@
   - 凭据存 device_config(账号明文 + PBKDF2 salt/hash),**首启默认 admin/admin 并置
     默认口令标记**,UI 与上位机均提示尽快修改;账号/口令合法性走 `proto/valid.h` 同一份规则
   - 登录风控:同一来源连错 5 次锁定 60 秒(429 + Retry-After),锁定表内存维护、重启解锁
-- 监控视频实时推流:复用 capture_service 帧(RTSP 拉流或 HTTP-MJPEG,取实现成本低者,
-  不另开摄像头链路)——**当前仍是占位**,页面已留位
+- 监控视频实时推流:**复用 capture 帧,经 web 服务现有 WebSocket 周期推 JPEG 快照**
+  (2026-09-20 架构 v2 决议:RTSP 暂缓,后续有高帧率需求再评估)——当前仍是占位,页面已留位
 - 安全:除登录与静态资源外全部校验 token(X-Auth-Token;WebSocket 因浏览器无法加头用
   `?token=`);未授权 WS 连接显式回 401 再拒;口令走 PBKDF2 同款
 - mDNS:局域网通告 `<host>.local`(A 记录)并公告 `_http._tcp` 服务(PTR/SRV/TXT),
   host 取 device_config `mdns_host`(默认 `doorguard`)。实现在
-  `modules/net/mdns/`(自实现,avahi 不在 rootfs),细节见该模块 README:
+  `services/mdns/`(自实现,avahi 不在 rootfs),细节见该模块 README:
   探测防重名 → 通告 → 应答(组播/legacy 单播)→ IP 变化重通告 → 关机 goodbye
 
 ## 2. OTA 远程升级(A/B 分区,应用层 HTTP 流式)
