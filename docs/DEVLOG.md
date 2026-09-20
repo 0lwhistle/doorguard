@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-09-20 架构 v2 评审稿(重构方向修订)
+
+**做了什么**
+- 评审了用户的重构方向初稿(五层栈:components/drv→modules→services→UI + 双注册表 +
+  线程分配),结论:方向对,但有一处自相矛盾 + 三处缺失,产出修订稿
+  **`docs/architecture-v2-proposal.md`**(评审稿,未动任何代码)。
+- 关键修正:耗时任务不再进 tasker(收敛 ≤500ms,长任务一律独立线程,OTA 按需);
+  补 proto 契约层与 tests 落位;liveness 显式化为认证管线强制阶段;
+  register→registry(C 关键字)、vertify→verify、meun→menu、stream→capture;
+  线程睡眠规范(condvar/eventfd + 原子状态,禁标志位忙等);线程↔服务归属表;
+  main 转看门狗 + 降级矩阵;cur_config 移 /userdata/doorguard(A/B 不丢配置);
+  配置全量进内存 + 防抖原子落盘(弃"配置分页");DB 补 WAL + 单写者队列 + 特征全量缓存;
+  NTP 立项;services→drv(npu)白名单 + 只读跨服务直调双白名单。
+- 文档内含:目标目录树、依赖白名单、迁移映射表(现→目标)、M0~M3 迁移阶段。
+
+**没做完 / 待定**
+- 仅方案,**零代码迁移**;4 项待用户拍板(只读直调放宽 / device_config 表冻结 /
+  RTSP 暂缓 / 迁移时机),见 proposal §10。
+
+**下一步**
+- 用户评审 proposal → 并入 PROJECT_PLAN §三 + architecture.md → M1 机械迁移(零行为变更,
+  全测试回归)→ M2 行为升级逐项独立提交。
+
+---
+
 ## 2026-09-18 web 上位机迁移到 Vue 3(模块化重构)
 
 **做了什么**
