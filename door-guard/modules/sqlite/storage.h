@@ -57,6 +57,30 @@ typedef int (*dg_feature_iter_fn)(const char *user_id,
 int db_user_iter_face(dg_feature_iter_fn fn, void *ud);
 int db_user_iter_finger(dg_feature_iter_fn fn, void *ud);
 
+/* ---- 人脸特征只读快照(M2②;verify 热路径直读,禁止逐帧查库) ---- */
+
+typedef struct {
+    char     user_id[DG_UID_LEN];
+    int32_t  role;                         /**< dg_role_t(黑名单过滤由消费方做) */
+    uint32_t auth_flags;                   /**< DG_AUTH_*(DG_AUTH_FACE 过滤由消费方做) */
+    uint16_t face_len;                     /**< 恒 >0(无脸用户不入快照) */
+    uint8_t  face_vec[DG_FEATURE_MAX];     /**< 明文(仅内存,不落盘) */
+} dg_feat_ent_t;
+
+typedef struct {
+    uint32_t             count;
+    const dg_feat_ent_t *ents;             /**< 只读数组,与快照同生命周期 */
+} dg_feat_snap_t;
+
+/**
+ * 取人脸特征只读快照(启动全量装载,增删改增量同步)。
+ * **必须成对**调用 storage_features_ro_done(),不可嵌套;持快照期间禁止
+ * 调用 storage 其他接口。异常态(broken)返回 count=0:1:N 恒不命中,fail-closed。
+ */
+const dg_feat_snap_t *storage_features_ro(void);
+/** 释放快照(与 storage_features_ro 成对) */
+void storage_features_ro_done(void);
+
 /**
  * 注入特征查重比较器(返回 1 = 判定重复)。
  * 人脸:enroll 编排注入 ROCKIVA 相似度比较;指纹:指纹算法比较。

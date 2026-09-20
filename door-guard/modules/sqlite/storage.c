@@ -34,6 +34,130 @@ static dg_feature_cmp_fn s_face_cmp;
 static dg_feature_cmp_fn s_finger_cmp;
 static void *s_cmp_ud;
 
+/* ---- 人脸特征内存缓存(M2②:verify 热路径直读,禁止逐帧查库) ----
+ * 写侧:变更在 s_mtx 临界区内"整表拷贝 + 增量"生成新快照后原子切换(发布失败
+ * 降级全量重载,再失败置 broken → 快照恒空,1:N 恒不命中,fail-closed);
+ * 读侧:storage_features_ro() 取只读快照(读锁,仅与发布瞬间互斥),用完必须
+ * 配对 storage_features_ro_done();持快照期间禁止再调 storage 其他接口(防锁序)。
+ * 只缓存人脸(1:N 热路径);指纹/IC 走 1:1 与查重迭代器,保持 DB 路径。 */
+typedef struct {
+    uint32_t        count;
+    dg_feat_ent_t  *ents;                   /* 随快照整体替换的 malloc 数组 */
+} cache_snap_t;
+
+static cache_snap_t s_cache;
+static bool s_cache_broken;               /* 发布/重载双双失败:快照恒空(fail-closed) */
+static pthread_rwlock_t s_cache_lk = PTHREAD_RWLOCK_INITIALIZER;
+
+static int cache_load_locked(void);       /* 前置声明(实现在 DB 读区) */
+
+static void cache_ent_fill(dg_feat_ent_t *e, const char *uid, int32_t role,
+                           uint32_t auth_flags, const uint8_t *face, uint16_t face_len)
+{
+    memset(e, 0, sizeof(*e));
+    snprintf(e->user_id, sizeof(e->user_id), "%s", uid);
+    e->role = role;
+    e->auth_flags = auth_flags;
+    e->face_len = face_len;
+    if (face_len > 0)
+        memcpy(e->face_vec, face, face_len);
+}
+
+/* 发布新快照:wrlock 内换指针 + 释放旧数组(读者持 rdlock,绝无 use-after-free) */
+static void cache_publish_locked(dg_feat_ent_t *ents, uint32_t n)
+{
+    cache_snap_t ns = { .count = n, .ents = ents };
+    pthread_rwlock_wrlock(&s_cache_lk);
+    cache_snap_t old = s_cache;
+    s_cache = ns;
+    pthread_rwlock_unlock(&s_cache_lk);
+    free(old.ents);
+}
+
+/* 当前快照的拷贝(扩容 extra);调用方持 s_mtx(s_cache 仅在 s_mtx 下变更) */
+static dg_feat_ent_t *cache_copy(uint32_t extra, uint32_t *out_cap)
+{
+    uint32_t cap = s_cache.count + extra;
+    dg_feat_ent_t *arr = malloc(sizeof(dg_feat_ent_t) * (cap ? cap : 1));
+    if (!arr)
+        return NULL;
+    if (s_cache.count)
+        memcpy(arr, s_cache.ents, sizeof(dg_feat_ent_t) * s_cache.count);
+    *out_cap = cap;
+    return arr;
+}
+
+/* 缓存维护失败的自愈:全量重载;再失败置 broken(fail-closed,日志见) */
+static void cache_recover_locked(void)
+{
+    if (cache_load_locked() != DG_OK) {
+        s_cache_broken = true;
+        DG_LOGE(TAG, "特征缓存维护失败且重载失败,1:N 快照已置空(fail-closed)");
+    }
+}
+
+static int cache_add_locked(const user_rec_t *in)
+{
+    if (in->face_vec_len == 0)
+        return DG_OK;                       /* 无脸用户不入 1:N 画廊 */
+    uint32_t cap;
+    dg_feat_ent_t *arr = cache_copy(1, &cap);
+    if (!arr)
+        return DG_ERR_NO_MEMORY;
+    cache_ent_fill(&arr[s_cache.count], in->user_id, in->role, in->auth_flags,
+                   in->face_vec, in->face_vec_len);
+    cache_publish_locked(arr, s_cache.count + 1);
+    return DG_OK;
+}
+
+/* update 语义(len=0=保留脸,role/flags 始终覆盖)与画廊同步 */
+static int cache_update_locked(const char *uid, const uint8_t *face,
+                               uint16_t face_len, int32_t role, uint32_t auth_flags)
+{
+    uint32_t idx = s_cache.count;
+    for (uint32_t i = 0; i < s_cache.count; i++) {
+        if (!strcmp(s_cache.ents[i].user_id, uid)) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx == s_cache.count && face_len == 0)
+        return DG_OK;                       /* 无脸用户,画廊无关 */
+
+    uint32_t cap;
+    dg_feat_ent_t *arr = cache_copy(1, &cap);
+    if (!arr)
+        return DG_ERR_NO_MEMORY;
+    if (idx == s_cache.count) {             /* 原无脸,本次新录 */
+        cache_ent_fill(&arr[idx], uid, role, auth_flags, face, face_len);
+        cache_publish_locked(arr, s_cache.count + 1);
+    } else {                                /* 换脸或仅改权限 */
+        const dg_feat_ent_t *old = &s_cache.ents[idx];
+        cache_ent_fill(&arr[idx], uid, role, auth_flags,
+                       face_len > 0 ? face : old->face_vec,
+                       face_len > 0 ? face_len : old->face_len);
+        cache_publish_locked(arr, s_cache.count);
+    }
+    return DG_OK;
+}
+
+static int cache_del_locked(const char *uid)
+{
+    for (uint32_t i = 0; i < s_cache.count; i++) {
+        if (strcmp(s_cache.ents[i].user_id, uid))
+            continue;
+        uint32_t cap;
+        dg_feat_ent_t *arr = cache_copy(0, &cap);
+        if (!arr)
+            return DG_ERR_NO_MEMORY;
+        memmove(&arr[i], &arr[i + 1],
+                sizeof(dg_feat_ent_t) * (s_cache.count - i - 1));
+        cache_publish_locked(arr, s_cache.count - 1);
+        break;
+    }
+    return DG_OK;
+}
+
 /* ---- DDL(与 spec-database §1/§4/§5 逐字一致,勿改) ---- */
 
 static const char *const s_ddl[] = {
@@ -117,6 +241,15 @@ int storage_init(const char *db_path, const char *key_path)
     }
 
     DG_LOGI(TAG, "storage ready: %s", db_path);
+
+    /* 特征缓存启动装载:装载失败属致命(1:N 恒空),让 storage_init 显式失败,
+     * 由装配层"必需模块失败拒绝启动"接管 */
+    int crc = cache_load_locked();
+    if (crc != DG_OK) {
+        DG_LOGE(TAG, "特征缓存装载失败(%d)", crc);
+        pthread_mutex_unlock(&s_mtx);
+        return crc;
+    }
     pthread_mutex_unlock(&s_mtx);
     return DG_OK;
 }
@@ -128,6 +261,12 @@ void storage_deinit(void)
         sqlite3_close(s_db);
         s_db = NULL;
     }
+    pthread_rwlock_wrlock(&s_cache_lk);
+    free(s_cache.ents);
+    s_cache.count = 0;
+    s_cache.ents = NULL;
+    s_cache_broken = false;
+    pthread_rwlock_unlock(&s_cache_lk);
     pthread_mutex_unlock(&s_mtx);
     dg_crypto_deinit();
 }
@@ -241,6 +380,46 @@ static int row_to_user(sqlite3_stmt *st, user_rec_t *out)
 }
 
 /* ---- 唯一性预检(调用方须持 s_mtx) ---- */
+
+/* 特征缓存全量装载(调用方持 s_mtx;storage_init 与自愈路径用) */
+static int cache_load_locked(void)
+{
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(s_db,
+                           "SELECT user_id,role,auth_flags,face_vec FROM users",
+                           -1, &st, NULL) != SQLITE_OK)
+        return DG_ERR_DB;
+    dg_feat_ent_t *arr = malloc(sizeof(dg_feat_ent_t) * (size_t)DG_USER_MAX);
+    if (!arr) {
+        sqlite3_finalize(st);
+        return DG_ERR_NO_MEMORY;
+    }
+    uint32_t n = 0;
+    while (sqlite3_step(st) == SQLITE_ROW && n < DG_USER_MAX) {
+        dg_feat_ent_t *e = &arr[n];
+        memset(e, 0, sizeof(*e));
+        col_text_copy(st, 0, e->user_id, sizeof(e->user_id));
+        e->role = sqlite3_column_int(st, 1);
+        e->auth_flags = (uint32_t)sqlite3_column_int64(st, 2);
+        const void *blob = sqlite3_column_blob(st, 3);
+        int nbytes = sqlite3_column_bytes(st, 3);
+        size_t plain_len = 0;
+        if (blob && nbytes > 0
+            && dg_feature_unwrap(blob, (size_t)nbytes, e->face_vec,
+                                 sizeof(e->face_vec), &plain_len) == DG_OK
+            && plain_len > 0) {
+            e->face_len = (uint16_t)plain_len;
+            n++;
+        }
+        /* 解密失败的行:跳过并告警(坏行不拖垮整个画廊;长度自诊断会另报) */
+        if (blob && nbytes > 0 && e->face_len == 0)
+            DG_LOGW(TAG, "特征缓存:跳过坏行 uid=%s", e->user_id);
+    }
+    sqlite3_finalize(st);
+    cache_publish_locked(arr, n);
+    s_cache_broken = false;
+    return DG_OK;
+}
 
 static bool uid_exists_locked(const char *user_id)
 {
@@ -477,6 +656,10 @@ int db_user_add(const user_rec_t *in)
         }
     }
     sqlite3_finalize(st);
+    if (rc == DG_OK && cache_add_locked(in) != DG_OK) {
+        DG_LOGE(TAG, "特征缓存增量更新失败(add),触发全量重载");
+        cache_recover_locked();
+    }
     pthread_mutex_unlock(&s_mtx);
     return rc;
 }
@@ -608,6 +791,12 @@ int db_user_update(const user_rec_t *in)
         }
     }
     sqlite3_finalize(st);
+    if (rc == DG_OK
+        && cache_update_locked(in->user_id, face_plain, face_len,
+                               in->role, in->auth_flags) != DG_OK) {
+        DG_LOGE(TAG, "特征缓存增量更新失败(update),触发全量重载");
+        cache_recover_locked();
+    }
     pthread_mutex_unlock(&s_mtx);
     return rc;
 }
@@ -631,6 +820,10 @@ int db_user_del(const char *user_id)
     if (sqlite3_step(st) != SQLITE_DONE || sqlite3_changes(s_db) == 0)
         rc = sqlite3_changes(s_db) == 0 ? DG_ERR_NOT_FOUND : DG_ERR_DB;
     sqlite3_finalize(st);
+    if (rc == DG_OK && cache_del_locked(user_id) != DG_OK) {
+        DG_LOGE(TAG, "特征缓存增量更新失败(del),触发全量重载");
+        cache_recover_locked();
+    }
     pthread_mutex_unlock(&s_mtx);
     return rc;
 }
@@ -1001,4 +1194,24 @@ int db_config_get(const char *key, char *out, size_t out_size)
     sqlite3_finalize(st);
     pthread_mutex_unlock(&s_mtx);
     return rc;
+}
+
+/* ---- 特征只读快照(M2②;只读直调登记制白名单项,proposal §1) ----
+ * 用法:const dg_feat_snap_t *s = storage_features_ro(); 遍历 s->ents;
+ *      storage_features_ro_done();  —— 必须成对、不可嵌套;持快照期间
+ *      禁止调用 storage 其他接口(写侧持 s_mtx 等 wrlock,防锁序倒挂)。
+ * broken 状态返回 count=0:消费方(1:N 比对)恒不命中,安全侧失败。 */
+const dg_feat_snap_t *storage_features_ro(void)
+{
+    pthread_rwlock_rdlock(&s_cache_lk);
+    if (s_cache_broken) {
+        static const dg_feat_snap_t empty = { .count = 0, .ents = NULL };
+        return &empty;                      /* 不解锁:ro_done 统一解,见下 */
+    }
+    return (const dg_feat_snap_t *)&s_cache;
+}
+
+void storage_features_ro_done(void)
+{
+    pthread_rwlock_unlock(&s_cache_lk);
 }
