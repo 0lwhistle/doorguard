@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-09-21 架构 v2 M2 行为升级四项落地(25/25 测试绿)
+
+**做了什么**(每项独立提交,WSL 全新构建回归后才提交)
+- **M2① config 双文件**(`546833c`):cfg 重构为元表驱动;set/reset/迁移/加载四操作同源。
+  default 模板(configs/default.json)+ 现用配置(板 /userdata/doorguard/cur_config.json,
+  sim sim/data/)。cur 缺失 → DB device_config 已知业务键一次性导出,此后 DB 冻结
+  (web 凭据留 DB,定位为凭据非配置——已知债务);cfg_set 内存生效+500ms 防抖;
+  cfg_flush 原子落盘(tmp+fsync+rename);cfg_reset_key/all 按项/全部恢复默认。
+  配置文件 NULL=无文件模式(测试)。
+- **M2② 特征缓存**(`676bc07`):人脸特征启动全量装载、增删改增量同步(拷贝+原子切换);
+  storage_features_ro()/ro_done() 只读快照(读写锁,持快照禁调其他 storage 接口——
+  防锁序);维护失败自愈全量重载,再失败 broken→快照恒空(1:N 恒不命中,fail-closed)。
+  新增 tests/test_feat_cache。
+- **M2③ registry+看门狗**(`dc306a6`):components/registry(holder 同构+心跳/重启原语/
+  依赖解析器注入/README);main.c 拆双表装配(holder=infra+modules,registry=services),
+  初始化后 main 转看门狗 5s 巡检:可选服务异常→重启一次→仍异常 DISABLED+
+  EV_SYS_SERVICE_STATE 通知;必需服务(vision_service/access)→安全停机
+  (gpio_hal_set_level(0) 复位继电器+退出交 S60)。web 补心跳(推送线程唤醒刷新)。
+  新增 tests/test_registry。
+- **M2④ OTA 按需线程**(`2a8800e`):写线程流水线——web 线程只投递环形缓冲(256KB 背压),
+  盘 I/O+摘要+终态校验/落位在按需线程(存在期=上传期,完成即退);断点续传重放移入
+  写线程;**EV_NET_OTA_PROGRESS 首次真实发布**(≥5% 一拍+终态);DG_OTA_DIR 可覆盖
+  暂存目录。新增 tests/test_ota(正常闭环/拒收/超限/BUSY/abort/续传)。
+
+**踩坑**
+- cfg_load 持锁调 cfg_flush → 非递归互斥自锁死锁(测试超时定位);抽 flush_locked 修复。
+- tasker_cancel_by_name 在 tasker 未初始化时空锁段错误(头注称"自动初始化"未覆盖此
+  API);flush_schedule 显式 tasker_init() 幂等兜底。
+- 教训:grep -c warning 在日志未落盘时有竞态假象,零警告判定用 python 全字节扫描。
+
+**没做完 / 遗留**
+- DB 单写者请求队列未做(②缩小为特征缓存);EV_SYS_SERVICE_STATE 的 UI 提示渲染未接;
+  心跳覆盖目前仅 web(其余服务状态监控);推送 GitHub 仍被 SSH 公钥阻塞。
+
+**下一步**
+- B7 人脸模型联调(模型已齐:ROCKIVA .data 待拷板 / 自组 rknn 三件已入 models/);
+  遗留项随下轮;push 待公钥。
+
+---
+
 ## 2026-09-20 架构 v2 决议 + M1 目录迁移落地
 
 **做了什么**
