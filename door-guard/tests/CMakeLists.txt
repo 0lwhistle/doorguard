@@ -72,6 +72,15 @@ target_link_libraries(test_web_auth PRIVATE dg_storage dg_proto crypto pthread)
 add_test(NAME test_web_auth COMMAND test_web_auth)
 set_tests_properties(test_web_auth PROPERTIES TIMEOUT 60)
 
+# OTA 按需写线程流水线(环形缓冲/校验闭环/断点续传/进度事件;DG_OTA_DIR=临时目录)
+add_executable(test_ota test_ota.c)
+target_include_directories(test_ota PRIVATE
+    ${CMAKE_SOURCE_DIR}/services/ota ${CMAKE_SOURCE_DIR}/proto
+    ${CMAKE_SOURCE_DIR}/components/event_bus)
+target_link_libraries(test_ota PRIVATE dg_net crypto pthread)
+add_test(NAME test_ota COMMAND test_ota)
+set_tests_properties(test_ota PROPERTIES TIMEOUT 120)
+
 # i18n 一致性:扫描源码 _() 键 + 双 json 覆盖 + 裸中文检查 + 字体字形覆盖
 add_executable(test_i18n test_i18n.c)
 target_compile_definitions(test_i18n PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
