@@ -33,7 +33,26 @@ camera NV12 1280×720
 | 驱动 | `drv/npu/npu_model.c` | rknn 运行时薄封装(全仓唯一 include `<rknn_api.h>`) | `tools/npu_probe` |
 | 驱动 | `drv/npu/npu_pre.c` | RGA letterbox + ROI 裁剪(坐标数学头内联) | `tests/test_npu_pre`(数学) |
 | 算法 | `rknn_face.c` | SCRFD/RetinaFace 解码、NMS、5 点对齐、余弦、归一化 | `tests/test_rknn_face` |
+| 质量 | `face_quality.c` | 清晰度(Laplacian 方差)/人脸像素/检测分,阈值走配置 | `tests/test_face_quality` |
 | 装配 | `vision_rknn.c` | 契约实现、调度、事件发布 | 板上(npu_probe/rknn_det_test/rknn_rec_test) |
+
+### 两条行为约定(改这块前必读)
+
+- **一次在场只放行一次**:1:N 是持续上报的(每 300ms 都会命中),后端用
+  `s_granted_presence` 保证同一次在场只发布一次命中,`FACE_LOST` 时重新武装。
+  没有这道闸,FSM 会"开门→结果→回普通→再开门"循环:继电器反复动作、日志刷屏、
+  弹窗反复建销把 UI 拖垮(表现为主页面卡死 + 脸框闪烁)。**不要试图在 FSM 侧加冷却**
+  ——`FSM_EV_MATCH_1N` 传的 `now_ms` 是 0(FSM 时间注入式设计),会算成负数永久屏蔽。
+- **质量闸门**:`recognize()` 在送 ArcFace 前测"这张对齐脸"的清晰度/尺寸/检测分,
+  不合格直接丢弃并按 2s 节流打日志(标定依据)。阈值 `face.min_face_px` /
+  `face.blur_min` / `face.det_score_min`,**0 = 该项不启用**。
+
+### 头像(照片)通路
+
+头像是独立于特征的数据:`db_user_set_avatar/get_avatar`(`storage.h`),
+**AES-256-CTR 加密落库**(复用 `dg_feature_wrap`),上限 32KB,160×160 JPEG。
+**不进 `user_rec_t`**——那是 KB 级 BLOB,而 user_rec_t 在认证/检索热路径每次整份拷贝。
+拍摄录入与头像显示的剩余工作见 `docs/tech/CAPTURE_AVATAR_HANDOFF.md`。
 
 **两条血的教训**(踩过、有实测数据,别再踩):
 1. **ArcFace 未烤归一化**:必须喂 `(x-127.5)/127.5` 的 F32。直喂 uint8 会让所有
