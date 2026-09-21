@@ -1,4 +1,4 @@
-# hal/camera — 相机 HAL(RGB 帧投递)
+# modules/camera — 相机模块(RGB 帧投递)
 
 同一 `camera.h` 接口两种后端,UI/业务不感知差异:
 
@@ -44,7 +44,7 @@ IMX415(cam2,实体名 m02_b_imx415 8-0037)→ rkcif → rkisp-vir2(/dev/media5)
 ## 使用示例
 
 ```c
-#include "hal/camera/camera.h"
+#include "modules/camera/camera.h"
 camera_init("/dev/video51", NULL, NULL);   /* 内部后台线程初始化,立即返回 */
 for (;;) {                                  /* 主循环 */
     camera_poll();                          /* DQBUF+RGA 转换 */

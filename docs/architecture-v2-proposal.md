@@ -306,3 +306,50 @@ capture 帧 ─→ vision:检测 → 质量闸门(评分达标才有资格) → 
 4. **迁移时机:立即**——本文档即日生效,M0(并入 PROJECT_PLAN/architecture.md)与
    M1(机械迁移)已同日执行完成:目录/include/CMake 全量迁移,WSL 宿主全新构建
    **22/22 测试通过、0 警告**;M2 行为升级逐项独立提交、可单独回滚。
+
+---
+
+## 11. 落地自查清单(新会话开工时按此核验,2026-09-21 基准)
+
+全部通过 = v2 落地完好;任一不符 = 有人动过,先查 git log 再继续开发。
+
+**① 提交链与远程**(`git log --oneline -6` + `git status -sb`):
+
+- 最新 6 条依次为:`91c4990` 收尾文档 → `2a8800e` M2④ ota 按需线程 →
+  `dc306a6` M2③ registry+看门狗 → `676bc07` M2② 特征缓存 →
+  `546833c` M2① config 双文件 → `89549b1` models 登记;
+- `## master...origin/master` 无 ahead/behind(工作树干净且已推送)。
+
+**② 目录形态**(v2 五层栈,`ls door-guard`):
+
+- 应有:`app ui proto components drv modules services configs models tests sim tools third_party`;
+  components 下有 `tasker event_bus holder registry logger`;
+  services 下有 `capture vision liveness verify access enroll config web ota mdns ntp`;
+  modules 下只有 `camera display sqlite net`;
+- **不应有**:`hal/`、`auth/`、顶层 `config/`、
+  `modules/{capture,vision,liveness,access,enroll}`、`modules/net/{web,ota,mdns,ntp}`、
+  `proto/{tasker,event_bus,holder,dg_log.*}`(均已在 M1 迁走)。
+
+**③ 测试**(WSL 宿主全新构建):`ctest` **25/25 全绿**(22 原有 + test_feat_cache /
+test_registry / test_ota);零警告以 python 全字节扫描构建日志判定
+(`grep -c warning` 对未落盘日志有竞态假象,不可作准)。
+
+**④ 关键行为红线**(`grep` 核验):
+
+- `services/config/cfg.c` 中 **不得出现 `db_config_set`**(DB 冻结;只允许
+  `db_config_get` 做首启迁移读取);
+- 配置运行时文件只在 `/userdata/doorguard/cur_config.json`(板)/ `sim/data/`(sim),
+  **不得回到源码树或 /etc 写入**;
+- 全源码树(app ui proto components services modules drv tests)**不得有
+  `#include "hal/…"`、`#include "auth/…"` 等 M1 前旧路径**;
+- `git ls-files door-guard/models` 只有 `README.md` 与 `sha256sums.txt`
+  (模型二进制 .rknn/.data 永不入库,被 .gitignore 挡住);
+- `git push` 正常即可,**不需要 --force**(远程旧 lineage 已于 2026-09-21 替换,
+  其他旧克隆须 `fetch + reset --hard` 对齐,勿 pull)。
+
+**⑤ 文档同步态**:DEVLOG 顶部有 2026-09-21(M2 四项)与 2026-09-20(M1)两条;
+PROJECT_PLAN 快照含"2026-09-21 M2 行为升级四项完成,25/25 全绿";本文 §9 已标注
+M1/M2 完成与遗留(DB 单写者队列、EV_SYS_SERVICE_STATE 的 UI 渲染、心跳仅 web、M3)。
+
+**遗留事项(有意未做,勿当缺陷报)**:见 §9 M2 ①③ 条内"遗留"注记与 DEVLOG
+"没做完/遗留"段。

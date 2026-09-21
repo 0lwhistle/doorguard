@@ -1,4 +1,4 @@
-# hal/display — 显示与触摸输入 HAL
+# modules/display — 显示与触摸输入模块
 
 同一份 `ui/` 代码跑 PC 模拟器与板上(spec-ui),本模块按端提供后端:
 
@@ -27,7 +27,7 @@
 ## 使用示例(板端初始化,main 经 ui_init 间接调用)
 
 ```c
-#include "hal/display/display.h"
+#include "modules/display/display.h"
 lv_init();
 if (display_init() != DG_OK) return 1;  /* DRM + 触摸 indev 一次就绪 */
 /* 之后主循环周期调 ui_poll()(内部 lv_timer_handler 驱动 flush 与触摸采样) */
