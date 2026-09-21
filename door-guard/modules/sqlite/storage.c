@@ -852,8 +852,8 @@ int db_user_del(const char *user_id)
     return rc;
 }
 
-/** 头像上限:160×160 JPEG 约 8KB,给足余量;超限拒绝而非撑大库 */
-#define DG_AVATAR_MAX 32768
+/* 头像上限:160×160 JPEG 约 8KB,给足余量;超限拒绝而非撑大库
+ * (上限常量在 proto/types.h,vision 照片槽与 enroll 缓冲共用) */
 
 int db_user_set_avatar(const char *user_id, const uint8_t *jpeg, size_t len)
 {
@@ -861,13 +861,13 @@ int db_user_set_avatar(const char *user_id, const uint8_t *jpeg, size_t len)
         return DG_ERR_NOT_INIT;
     if (!user_id || !*user_id)
         return DG_ERR_PARAM;
-    if (len > DG_AVATAR_MAX)
+    if (len > DG_AVATAR_JPEG_MAX)
         return DG_ERR_PARAM;
 
     /* 加密再落库:与特征同一把设备密钥、同一 AES-256-CTR 封装(随机 IV 前缀)。
      * 理由:人脸照片与特征同属生物特征数据,库文件泄露时不该只有特征受保护;
      * 机制现成,不额外引入依赖。len=0 表示清除头像(存 NULL)。 */
-    uint8_t enc[DG_AVATAR_MAX + 16];
+    uint8_t enc[DG_AVATAR_JPEG_MAX + 16];
     size_t enc_len = 0;
     if (len > 0) {
         if (!jpeg)
@@ -941,8 +941,10 @@ int db_user_clear_face(const char *user_id)
     pthread_mutex_lock(&s_mtx);
     sqlite3_stmt *st;
     int rc = DG_OK;
+    /* 头像随人脸生命周期:清除人脸 = 头像一并消失(编辑页"清除"后列表/预览
+     * 都要回到占位"无";2026-09-21 拍摄录入验收 §6-6) */
     if (sqlite3_prepare_v2(s_db,
-                           "UPDATE users SET face_vec=NULL WHERE user_id=?1",
+                           "UPDATE users SET face_vec=NULL, avatar=NULL WHERE user_id=?1",
                            -1, &st, NULL) != SQLITE_OK) {
         pthread_mutex_unlock(&s_mtx);
         return DG_ERR_DB;

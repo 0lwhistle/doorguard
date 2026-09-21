@@ -32,6 +32,7 @@
 #include "events.h"
 #include "liveness_service.h"
 #include "modules/camera/camera.h"
+#include "modules/jpeg/dg_jpeg.h"
 #include "storage.h"
 #include "cfg.h"
 
@@ -62,6 +63,8 @@ static const char *TAG = "[VISION]";
 #define RKNN_REC_MS         300         /* 识别节流(录入缓存新鲜度 ≤300ms) */
 #define RKNN_ROI_MAX        256         /* ROI 裁剪输出上限(边长) */
 #define RKNN_ROI_MARGIN     1.5f        /* ROI 相对关键点外扩(留对齐余量) */
+#define RKNN_AVATAR_SZ      160         /* 头像边长(列表 40px/预览 160px 都够) */
+#define RKNN_Q_PUB_MS       1000        /* 质量事件兜底刷新(拍摄页 UI 状态) */
 
 static npu_model_t *s_face, *s_rec;
 static bool s_ready;
@@ -92,16 +95,24 @@ static int      s_rec_dim;            /* 实际输出维度(=512 时才启用识
 static size_t   s_rec_in_bytes;
 static uint8_t *s_roi;                /* 人脸 ROI(RGB) */
 static uint8_t *s_aligned;            /* 对齐后 112×112(RGB) */
+static uint8_t  s_avatar_warp[RKNN_AVATAR_SZ * RKNN_AVATAR_SZ * 3];
+                                       /* 头像 160×160 对齐结果(相机线程独占) */
 static float   *s_norm_in;            /* ArcFace 输入(归一化 f32) */
 static int64_t  s_last_rec_ms;
 
-/* 最新特征缓存(analyse 路径写,录入 CAPTURE_REQ 读;与 ROCKIVA 后端同语义) */
+/* 最新「特征 + 同帧头像大图」成对缓存(analyse 路径同帧写入;录入
+ * CAPTURE_REQ 读)。一把锁保护成对性:照片与特征必须出自同一帧,
+ * 否则脸动了一下,头像就和特征对不上号(拍摄录入交接 §3.1 硬要求)。 */
+static pthread_mutex_t s_cap_mtx = PTHREAD_MUTEX_INITIALIZER;
 static struct {
-    pthread_mutex_t mtx;
     uint8_t  data[DG_FEATURE_MAX];
     uint16_t len;
     int64_t  ms;
-} s_cap = { .mtx = PTHREAD_MUTEX_INITIALIZER };
+} s_cap;
+static struct {
+    uint8_t  data[RKNN_AVATAR_SZ * RKNN_AVATAR_SZ * 3];
+    int64_t  ms;                        /* 恒等于同帧 s_cap.ms */
+} s_snap;
 
 /* 1:1 目标特征(模式切换时装载) */
 static struct {
@@ -427,6 +438,24 @@ static bool recognize(const uint8_t *nv12, int w, int h,
         const face_quality_verdict_t v = face_quality_check(&q, &thr);
         s_last_q = q;
         s_last_q_verdict = v;
+
+        /* 质量事件(拍摄页实时提示用):verdict 变化即发;不变时 1s 兜底
+         * 刷一次——拍摄页 push 后最多 1s 内能拿到当前状态,平时近零开销 */
+        {
+            static face_quality_verdict_t last_pub_v = FQ_ERR_PARAM;
+            static int64_t last_pub_ms;
+            const int64_t now = now_ms();
+            if (v != last_pub_v || now - last_pub_ms >= RKNN_Q_PUB_MS) {
+                last_pub_v = v;
+                last_pub_ms = now;
+                ev_vision_quality_t eq;
+                memset(&eq, 0, sizeof(eq));
+                eq.verdict = v;
+                eq.face_px = q.face_px;
+                EVENT_BUS_PUBLISH(EV_VISION_QUALITY, &eq);
+            }
+        }
+
         if (v != FQ_OK) {
             /* 节流日志:板上标定阈值的依据(先看实测值再改配置) */
             static int64_t last_log;
@@ -440,6 +469,17 @@ static bool recognize(const uint8_t *nv12, int w, int h,
             }
             return false;
         }
+    }
+
+    /* 头像大图:按 AVATAR/112 整体缩放对齐矩阵再采样一次(M'=S·M,复用同一
+     * 份对齐结果,全库头像构图一致);与特征同帧,由调用方成对入缓存 */
+    {
+        float mb[6];
+        const float s = (float)RKNN_AVATAR_SZ / 112.0f;
+        for (int i = 0; i < 6; i++)
+            mb[i] = m[i] * s;
+        rknn_align_warp(s_roi, dw, dh, mb, s_avatar_warp, RKNN_AVATAR_SZ,
+                        RKNN_AVATAR_SZ);
     }
 
     /* 归一化 → NPU → L2(板上实测:该模型未烤归一化,必须喂 (x-127.5)/127.5) */
@@ -539,12 +579,15 @@ static void on_frame_push(const uint8_t *data, int w, int h, uint32_t frame_id)
         s_last_rec_ms = t;
         float feat[RKNN_REC_DIM];
         if (recognize(data, w, h, &src, s_cand[best].score, feat)) {
-            /* 录入缓存(DETECT_ONLY 下也照常:录入页在该模式) */
-            pthread_mutex_lock(&s_cap.mtx);
+            /* 录入缓存:特征 + 同帧头像大图一把锁成对写(DETECT_ONLY 下
+             * 也照常:录入页/拍摄页在该模式) */
+            pthread_mutex_lock(&s_cap_mtx);
             memcpy(s_cap.data, feat, RKNN_FEATURE_BYTES);
             s_cap.len = RKNN_FEATURE_BYTES;
             s_cap.ms = t;
-            pthread_mutex_unlock(&s_cap.mtx);
+            memcpy(s_snap.data, s_avatar_warp, sizeof(s_snap.data));
+            s_snap.ms = t;
+            pthread_mutex_unlock(&s_cap_mtx);
 
             if (mode == DG_VMODE_VERIFY_11)
                 verify_against_target(feat);
@@ -586,21 +629,34 @@ static void on_frame_push(const uint8_t *data, int w, int h, uint32_t frame_id)
     EVENT_BUS_PUBLISH(EV_VISION_FACE_BOX, &box);
 }
 
-/* 录入抓取请求:提交近 3s 缓存特征 */
+/* 录入抓取请求:提交近 3s 缓存特征 + 同帧头像(编码成 JPEG 走照片槽) */
 static int on_capture_req(const event_t *e, void *ud)
 {
     (void)ud;
     const ev_capture_req_t *r = (const ev_capture_req_t *)e->data;
 
-    pthread_mutex_lock(&s_cap.mtx);
+    /* 大缓冲一律 static:总线分发线程栈仅 64KB(EVENT_BUS_TASK_STACK_SIZE),
+     * 局部数组会栈溢出;总线单线程分发,静态缓冲无重入 */
+    static uint8_t buf[DG_FEATURE_MAX];
+    static uint8_t snap[RKNN_AVATAR_SZ * RKNN_AVATAR_SZ * 3];
+    static uint8_t jpeg[DG_AVATAR_JPEG_MAX];
+    bool has_snap = false;
+
+    pthread_mutex_lock(&s_cap_mtx);
     const int64_t age = now_ms() - s_cap.ms;
     uint16_t len = s_cap.len;
-    uint8_t buf[DG_FEATURE_MAX];
-    if (len && age <= 3000)
+    if (len && age <= 3000) {
         memcpy(buf, s_cap.data, len);
-    else
+        /* 同帧校验:ms 相同才收下(一把锁下成对写,此处必成立,防御将来
+         * 拆锁改动) */
+        if (s_snap.ms == s_cap.ms) {
+            memcpy(snap, s_snap.data, sizeof(snap));
+            has_snap = true;
+        }
+    } else {
         len = 0;
-    pthread_mutex_unlock(&s_cap.mtx);
+    }
+    pthread_mutex_unlock(&s_cap_mtx);
 
     if (!len) {
         DG_LOGW(TAG, "录入取特征:近 3s 无合格人脸(请正对镜头重试)");
@@ -608,6 +664,21 @@ static int on_capture_req(const event_t *e, void *ud)
     }
     DG_LOGI(TAG, "录入取特征:%u B(滞后 %lldms)→ %s", len, (long long)age,
             r->user_id);
+
+    /* 头像:此刻编码一次(几毫秒,总线线程可承受;不是每帧)。
+     * 先于 submit_feature 入槽——submit 发布的事件若同步分发,enroll
+     * 立刻按同一 seq 取件,顺序不能反 */
+    if (has_snap) {
+        size_t jlen = 0;
+        const int rc = dg_jpeg_encode_rgb(snap, RKNN_AVATAR_SZ, RKNN_AVATAR_SZ,
+                                          80, jpeg, sizeof(jpeg), &jlen);
+        if (rc == DG_OK)
+            vision_service_put_avatar(r->seq, jpeg, jlen);
+        else
+            DG_LOGW(TAG, "头像编码失败(%d):本次入库无头像", rc);
+    } else {
+        DG_LOGW(TAG, "同帧头像缺失:本次入库无头像");
+    }
     vision_service_submit_feature(r->user_id, r->seq, buf, len);
     return 0;
 }

@@ -105,6 +105,7 @@ door-guard/
 │   ├── as608/                #   指纹(UART)——硬件接入时按此落位
 │   ├── mfrc522/              #   IC 读卡(SPI)——同上
 │   ├── sqlite/               #   libsqlite3 薄封装(连接/迁移/stmt 助手),原 hal/storage
+│   ├── jpeg/                 #   头像 JPEG 编解码(libjpeg 内存↔内存薄封装,2026-09-21)
 │   └── net/                  #   netif/网口信息/socket 助手(mdns/ntp/ota/web 迁出 → services/)
 ├── services/                 # 顶层业务;每个服务在归属表中认领线程(§3.3)
 │   ├── capture/              #   取流线程:rkaiq 3A + V4L2 → NV12 dma_buf 环形缓冲,分发 fd

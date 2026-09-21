@@ -124,5 +124,13 @@
   "录入": "Enroll",
   "绑定": "Bind",
   "设置密码": "Set Password",
-  "录入超时,请正对摄像头重试": "Timed out, face the camera and retry"
+  "录入超时,请正对摄像头重试": "Timed out, face the camera and retry",
+  "人脸录入": "Face Enrollment",
+  "拍摄": "Capture",
+  "重拍": "Retake",
+  "完成": "Done",
+  "可以拍摄": "Ready to capture",
+  "已拍摄": "Captured",
+  "太模糊,请保持不动": "Too blurry, hold still",
+  "请靠近一些": "Move closer"
 }

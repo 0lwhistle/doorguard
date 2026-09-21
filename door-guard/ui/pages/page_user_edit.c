@@ -17,9 +17,11 @@
 #include "events.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
+#include "presenters/presenter_capture.h"
 #include "storage.h"
 #include "theme.h"
 #include "valid_ui.h"
+#include "widgets/dg_avatar.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_popup.h"
 
@@ -36,6 +38,7 @@ static char  s_pending_pwd[DG_PWD_MAX_LEN];
 static lv_obj_t *s_title;
 static lv_obj_t *s_val_name, *s_val_role, *s_val_pwd, *s_val_face,
                *s_val_finger, *s_val_ic;
+static lv_obj_t *s_img_face;                    /* 人脸行头像预览 */
 static lv_obj_t *s_btn_pwd, *s_btn_face, *s_btn_save, *s_btn_del;
 
 /* 错误码 → 文案(UI 唯一映射点;修正旧版把 DUP_UID 映射成“该卡已绑定”的错误) */
@@ -56,6 +59,13 @@ static const char *err_text(int rc)
 }
 
 static void refresh(void);
+
+/* 拍摄录入页入口:特征与头像由拍摄页一并发起(本页不再直发录入请求) */
+static void goto_capture(void)
+{
+    page_capture_open(s_uid);
+    navigator_push("capture");
+}
 
 /* ---- 小构件:一行 = 标题 + 值 + 动作按钮 ---- */
 
@@ -156,6 +166,18 @@ static void refresh(void)
     val_set(s_val_face, rec.face_vec_len > 0 ? _("已录入") : _("无"));
     val_set(s_val_finger, rec.finger_vec_len > 0 ? _("已录入") : _("无"));
     val_set(s_val_ic, _("无"));
+    /* 头像预览:有人脸才有头像(同一生命周期);行高 96,预览缩到 80×80 */
+    if (s_img_face) {
+        const lv_img_dsc_t *av = dg_avatar_get(s_uid, DG_AVATAR_FULL);
+        if (av && rec.face_vec_len > 0) {
+            lv_img_set_src(s_img_face, av);
+            lv_img_set_zoom(s_img_face, (uint16_t)(256 * 80 / 160));
+            lv_obj_update_layout(s_img_face);
+            lv_obj_clear_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
     if (s_btn_pwd)
         dg_btn_set_label(s_btn_pwd, _("修改"));
     if (s_btn_face)
@@ -261,50 +283,6 @@ static void on_role(lv_event_t *e)
 
 static void apply_face_pick(void *ud, int idx);   /* on_face 先用后定义 */
 
-static void enroll_result_popup(int err)
-{
-    if (err == DG_OK)
-        dg_popup_success(_("操作成功"), 1000, NULL, NULL);
-    else
-        dg_popup_fail(err_text(err), 2000, NULL, NULL);
-}
-
-static void enroll_request(int32_t kind)
-{
-    ev_enroll_request_t ev;
-    memset(&ev, 0, sizeof(ev));
-    snprintf(ev.user_id, sizeof(ev.user_id), "%s", s_uid);
-    ev.kind = kind;
-    ev.seq = (uint32_t)time(NULL);
-    EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
-}
-
-/* 录入回执 5s 超时:链路里任何一环没响应(3s 内无人脸/后端异常),此前 UI
- * 永远无声——用户以为“录入功能没提供”。有超时,至少明确告知重试。 */
-static lv_timer_t *s_enroll_wait;
-
-static void enroll_timeout_cb(lv_timer_t *t)
-{
-    (void)t;
-    s_enroll_wait = NULL;
-    dg_popup_fail(_("录入超时,请正对摄像头重试"), 3000, NULL, NULL);
-}
-
-static void enroll_wait_cancel(void)
-{
-    if (s_enroll_wait) {
-        lv_timer_del(s_enroll_wait);
-        s_enroll_wait = NULL;
-    }
-}
-
-static void enroll_wait_start(void)
-{
-    enroll_wait_cancel();
-    s_enroll_wait = lv_timer_create(enroll_timeout_cb, 5000, NULL);
-    lv_timer_set_repeat_count(s_enroll_wait, 1);
-}
-
 static void on_face(lv_event_t *e)
 {
     (void)e;
@@ -312,26 +290,28 @@ static void on_face(lv_event_t *e)
     if (db_user_get(s_uid, &rec) != DG_OK)
         return;
     if (rec.face_vec_len > 0) {
-        /* 已录入:给“重录 / 清除”两个选项(弹窗带取消) */
+        /* 已录入:给“重录 / 清除”两个选项(弹窗带取消);重录走拍摄页 */
         const char *const opts[] = { _("重录"), _("清除") };
         dg_popup_choice(_("人脸"), opts, 2, apply_face_pick, NULL, NULL);
         return;
     }
-    enroll_request(DG_ENROLL_FACE);
-    enroll_wait_start();
-    dg_popup_success(_("请正对摄像头"), 1500, NULL, NULL);
+    goto_capture();
 }
 
 static void apply_face_pick(void *ud, int idx)
 {
     (void)ud;
     if (idx == 0) {
-        enroll_request(DG_ENROLL_FACE);
-        enroll_wait_start();
-        dg_popup_success(_("请正对摄像头"), 1500, NULL, NULL);
-    } else {
-        enroll_request(DG_ENROLL_FACE_CLEAR);
+        goto_capture();
+        return;
     }
+    /* 清除人脸(头像随行消失:db_user_clear_face 连带清 avatar) */
+    ev_enroll_request_t ev;
+    memset(&ev, 0, sizeof(ev));
+    snprintf(ev.user_id, sizeof(ev.user_id), "%s", s_uid);
+    ev.kind = DG_ENROLL_FACE_CLEAR;
+    ev.seq = (uint32_t)time(NULL);
+    EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
 }
 
 static void on_finger(lv_event_t *e)
@@ -378,6 +358,7 @@ static void apply_del(void *ud, int idx)
     (void)ud;
     if (idx != 0)
         return;
+    dg_avatar_invalidate(s_uid);        /* 用户即删:头像缓存同步作废 */
     ev_enroll_request_t ev;
     memset(&ev, 0, sizeof(ev));
     snprintf(ev.user_id, sizeof(ev.user_id), "%s", s_uid);
@@ -400,7 +381,7 @@ static void on_back(lv_event_t *e)
     navigator_back();
 }
 
-/* ---- 录入结果回执(桥转发,UI 线程) ---- */
+/* ---- 录入结果回执(桥转发,UI 线程;人脸录入的回执由拍摄页处理,这里只管清除/删除) ---- */
 
 static void on_evt(const ui_evt_t *evt)
 {
@@ -408,10 +389,10 @@ static void on_evt(const ui_evt_t *evt)
         return;
     if (strcmp(evt->enroll.user_id, s_uid) != 0)
         return;
-    if (evt->enroll.kind == DG_ENROLL_FACE_CLEAR && evt->enroll.err == DG_OK)
+    if (evt->enroll.kind == DG_ENROLL_FACE_CLEAR && evt->enroll.err == DG_OK) {
+        dg_avatar_invalidate(s_uid);     /* 头像随人脸清除,缓存同步作废 */
         dg_popup_success(_("已清除"), 800, NULL, NULL);
-    else
-        enroll_result_popup(evt->enroll.err);
+    }
     refresh();
 }
 
@@ -419,7 +400,6 @@ void page_user_edit_evt(const ui_evt_t *evt)
 {
     if (evt->kind != UI_EVT_ENROLL_RESULT)
         return;
-    enroll_wait_cancel();               /* 有回执即撤超时定时器 */
     on_evt(evt);
 }
 
@@ -463,8 +443,13 @@ void page_user_edit_create(lv_obj_t *parent)
     row_create(col, _("密码"), &s_val_pwd, &s_btn_pwd);
     lv_obj_add_event_cb(s_btn_pwd, on_pwd, LV_EVENT_CLICKED, NULL);
 
-    row_create(col, _("人脸"), &s_val_face, &s_btn_face);
+    /* 人脸行:值与按钮之外再挂一个头像预览位(无头像时隐藏,值区显示「无」) */
+    lv_obj_t *face_row = row_create(col, _("人脸"), &s_val_face, &s_btn_face);
     lv_obj_add_event_cb(s_btn_face, on_face, LV_EVENT_CLICKED, NULL);
+    s_img_face = lv_img_create(face_row);
+    /* 不加边框:zoom 只缩小绘制,部件包围盒仍是 160×160,边框会画到行外 */
+    lv_obj_align(s_img_face, LV_ALIGN_RIGHT_MID, -180, 0);
+    lv_obj_add_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
 
     row = row_create(col, _("指纹"), &s_val_finger, NULL);
     row_action_btn_label(row, _("录入"), on_finger);
@@ -492,9 +477,9 @@ void page_user_edit_create(lv_obj_t *parent)
 
 void page_user_edit_destroy(void)
 {
-    enroll_wait_cancel();
     s_title = s_val_name = s_val_role = s_val_pwd = NULL;
     s_val_face = s_val_finger = s_val_ic = NULL;
+    s_img_face = NULL;
     s_btn_pwd = s_btn_face = s_btn_save = s_btn_del = NULL;
     memset(s_pending_pwd, 0, sizeof(s_pending_pwd));
 }

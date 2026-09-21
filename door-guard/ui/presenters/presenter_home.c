@@ -204,7 +204,9 @@ static void home_on_evt(const ui_evt_t *evt)
     case UI_EVT_WEB_SET_RESULT:
         break;                               /* 设备/设备管理子页消费 */
     case UI_EVT_ENROLL_RESULT:
-        break;                               /* 用户编辑页消费 */
+        break;                               /* 用户编辑/拍摄页消费 */
+    case UI_EVT_QUALITY:
+        break;                               /* 拍摄页消费(主页不显示质量) */
     }
 }
 

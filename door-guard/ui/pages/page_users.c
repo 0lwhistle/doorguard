@@ -12,6 +12,7 @@
 #include "storage.h"
 #include "theme.h"
 #include "presenters/presenter_user_edit.h"
+#include "widgets/dg_avatar.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_list.h"
 #include "widgets/dg_popup.h"
@@ -59,7 +60,10 @@ static void refresh_list(void)
         snprintf(rowtxt, sizeof(rowtxt), "%s %s [%s]", rec.user_id, rec.user_name,
                  role_name(rec.role));
         snprintf(s_row_uids[shown], sizeof(s_row_uids[shown]), "%s", rec.user_id);
-        lv_obj_t *row = dg_list_add_row(s_list, NULL, rowtxt, on_row_click);
+        /* 行首头像缩略图(40×40,libjpeg 1/4 缩放解码 + 控件内缓存);
+         * 无头像传 NULL,行为与旧列表一致 */
+        lv_obj_t *row = dg_list_add_row(s_list, dg_avatar_get(rec.user_id, DG_AVATAR_THUMB),
+                                        rowtxt, on_row_click);
         lv_obj_set_user_data(row, s_row_uids[shown]);
         shown++;
     }

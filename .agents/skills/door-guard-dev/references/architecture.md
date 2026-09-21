@@ -79,7 +79,7 @@ FreeRTOS 依赖被隔离在 port 层,移植 = 实现对应 pthread port,不动�
 ## 4. 目录索引(door-guard/,2026-09-20 v2 迁移后)
 
 `app/` 装配启动 · `ui/` 界面 · `services/{capture,vision,liveness,verify,access,enroll,config,web,ota,mdns,ntp}` ·
-`modules/{camera,display,sqlite,net}` · `drv/{uart,gpio,npu}` ·
+`modules/{camera,display,sqlite,jpeg,net}` · `drv/{uart,gpio,npu}` ·
 `components/{tasker,event_bus,holder,logger}` · `proto/` 消息与事件契约 ·
 `configs/device.json` · `tests/` · `tools/` · `third_party/`
 (职责细表见 door-guard/README.md;目标形态与迁移映射见 docs/architecture-v2-proposal.md)

@@ -47,12 +47,36 @@ camera NV12 1280×720
   不合格直接丢弃并按 2s 节流打日志(标定依据)。阈值 `face.min_face_px` /
   `face.blur_min` / `face.det_score_min`,**0 = 该项不启用**。
 
-### 头像(照片)通路
+### 头像(照片)通路(2026-09-21 拍摄录入落地)
 
 头像是独立于特征的数据:`db_user_set_avatar/get_avatar`(`storage.h`),
-**AES-256-CTR 加密落库**(复用 `dg_feature_wrap`),上限 32KB,160×160 JPEG。
-**不进 `user_rec_t`**——那是 KB 级 BLOB,而 user_rec_t 在认证/检索热路径每次整份拷贝。
-拍摄录入与头像显示的剩余工作见 `docs/tech/CAPTURE_AVATAR_HANDOFF.md`。
+**AES-256-CTR 加密落库**(复用 `dg_feature_wrap`),上限 `DG_AVATAR_JPEG_MAX`
+(32KB),160×160 JPEG(q80)。**不进 `user_rec_t`**——那是 KB 级 BLOB,
+而 user_rec_t 在认证/检索热路径每次整份拷贝。
+
+拍摄录入的完整链路(已实现):
+
+1. **同帧成对缓存**:rknn 后端 `recognize()` 过质量闸门后,把特征与同帧的
+   160×160 对齐大图(112 参考矩阵 ×160/112 整体缩放,`M'=S·M`)写进
+   `s_cap + s_snap`(一把锁,保证照片与特征出自同一帧)。
+2. **拍摄时编码**:编辑页「人脸」→ 拍摄页 push;用户点 [拍摄](质量合格才可点)
+   → `EV_ENROLL_REQUEST` → 后端 `on_capture_req` 取出成对缓存,
+   `dg_jpeg_encode_rgb` 编码一次(几 ms,总线线程可承受),
+   先 `vision_service_put_avatar(seq, ...)` 入**照片槽**再 `submit_feature`
+   (事件若同步分发,enroll 会立刻按 seq 取件,顺序不能反)。
+3. **入库**:enroll 服务处理 `EV_VISION_FEATURE` 时按同一 seq
+   `fetch_avatar` → `db_user_set_avatar`。槽位无照片(编码失败降级)只跳过
+   头像,特征照常入库。照片是 KB 级,按架构纪律**不进事件总线**。
+4. **显示**:`ui/widgets/dg_avatar`(db_user_get_avatar → dg_jpeg 解码 →
+   lv_img_dsc_t,内部小缓存);列表缩略图用 1/4 缩放解码(40×40)。
+   LVGL 的 PNG/SJPG 解码器与文件系统适配在固件里全是关的,所以走
+   「解码成原始像素」这条路。
+5. **质量实时提示**:后端发 `EV_VISION_QUALITY`(verdict 变化即发,不变 1s
+   兜底),拍摄页据此显示「可以拍摄/太模糊,请保持不动/请靠近一些/
+   请正对摄像头」并控制 [拍摄] 使能;其它页面忽略该事件。
+
+**JPEG 编解码**在 `modules/jpeg/dg_jpeg.c`(libjpeg 内存↔内存薄封装;
+错误不 exit、损坏输入报错不崩)。
 
 **两条血的教训**(踩过、有实测数据,别再踩):
 1. **ArcFace 未烤归一化**:必须喂 `(x-127.5)/127.5` 的 F32。直喂 uint8 会让所有

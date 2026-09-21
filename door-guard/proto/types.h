@@ -28,6 +28,9 @@ extern "C" {
  *  users.features 是 BLOB 存长度按需使用,提上限免迁移;内存结构 user_rec_t
  *  随之变大(2000 用户全量特征缓存 ≈ 4 MB,M2 特征缓存可容纳) */
 #define DG_FEATURE_MAX      2048
+/** 头像 JPEG 上限(160×160 q80 实测 6~10KB,给足余量):storage 落库上限、
+ *  vision 照片槽与 enroll 取件缓冲共用同一常量,避免三处魔数漂移 */
+#define DG_AVATAR_JPEG_MAX  (32 * 1024)
 #define DG_PWD_HASH_LEN     32    /**< PBKDF2-HMAC-SHA256 输出 256bit */
 #define DG_PWD_SALT_LEN     16    /**< 每用户随机盐(spec-database §3) */
 

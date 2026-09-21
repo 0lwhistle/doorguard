@@ -39,6 +39,7 @@ extern "C" {
 #define EV_VISION_MATCH_1N   EV_DEF(DG_MODULE_ID_VISION, 0x0003) /**< 1:N 检索结果 */
 #define EV_VISION_VERIFY_11  EV_DEF(DG_MODULE_ID_VISION, 0x0004) /**< 1:1 比对结果 */
 #define EV_VISION_SET_MODE   EV_DEF(DG_MODULE_ID_VISION, 0x0005) /**< 工作模式切换(access→vision) */
+#define EV_VISION_QUALITY    EV_DEF(DG_MODULE_ID_VISION, 0x0006) /**< 人脸质量判定(拍摄页实时提示) */
 
 /* SYSTEM:系统/装配层(看门狗 → UI/web 上位机) */
 #define EV_SYS_SERVICE_STATE EV_DEF(DG_MODULE_ID_SYSTEM, 0x0010) /**< 服务状态变化(降级/禁用通知) */
@@ -116,6 +117,14 @@ typedef struct {
     int32_t x, y, w, h;                   /**< 像素矩形(摄像头帧坐标系) */
     int32_t state;                        /**< dg_box_state_t */
 } ev_face_box_t;
+
+/** EV_VISION_QUALITY:质量闸门判定(vision 后端在识别路径逐次测量;
+ *  verdict 取 face_quality.h 的 face_quality_verdict_t 值。无脸时后端不发
+ *  本事件,UI 用 EV_VISION_FACE_LOST 语义处理。face_px 供调试显示) */
+typedef struct {
+    int32_t verdict;                     /**< face_quality_verdict_t(0=合格) */
+    int32_t face_px;                     /**< 人脸框较小边(像素) */
+} ev_vision_quality_t;
 
 /** EV_VISION_MATCH_1N / EV_VISION_VERIFY_11 共用 */
 typedef struct {
@@ -336,6 +345,7 @@ typedef struct {
 
 _Static_assert(sizeof(ev_auth_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_auth_result_t 超限");
 _Static_assert(sizeof(ev_face_box_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_face_box_t 超限");
+_Static_assert(sizeof(ev_vision_quality_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_vision_quality_t 超限");
 _Static_assert(sizeof(ev_match_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_match_t 超限");
 _Static_assert(sizeof(ev_vision_mode_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_vision_mode_t 超限");
 _Static_assert(sizeof(ev_capture_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_capture_state_t 超限");

@@ -27,6 +27,7 @@ extern void presenter_standby_register(void);
 extern void presenter_menu_register(void);
 extern void presenter_users_register(void);
 extern void presenter_user_edit_register(void);
+extern void presenter_capture_register(void);
 extern void presenter_device_register(void);
 extern void presenter_access_set_register(void);
 extern void presenter_logs_register(void);
@@ -73,6 +74,7 @@ int ui_init(const dg_ui_args_t *args)
     presenter_menu_register();
     presenter_users_register();
     presenter_user_edit_register();
+    presenter_capture_register();
     presenter_device_register();
     presenter_access_set_register();
     presenter_logs_register();

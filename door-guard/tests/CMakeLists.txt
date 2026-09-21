@@ -30,6 +30,8 @@ dg_add_test(test_uart_mock dg_uart)
 set_tests_properties(test_auth_fsm PROPERTIES TIMEOUT 60)
 dg_add_test(test_rknn_face dg_rknn_face)
 dg_add_test(test_face_quality dg_rknn_face)
+# 头像 JPEG 编解码(往返保真/缩放解码/损坏输入不崩)
+dg_add_test(test_jpeg dg_jpeg)
 # letterbox 是头内联的纯数学,测试只需那个头目录(不需要 dg_npu:它含 RGA,宿主编不了)
 dg_add_test(test_npu_pre dg_rknn_face)
 

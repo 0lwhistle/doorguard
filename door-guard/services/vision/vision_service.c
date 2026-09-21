@@ -1,8 +1,9 @@
 /*
  * vision_service.c — 视觉服务实现
  *
- * 槽位:8 个特征槽(环形),事件 EV_VISION_FEATURE 携 (user_id, seq, len),
- * enroll 按 seq 经 vision_service_fetch_feature 取明文(用后擦除)。
+ * 槽位:8 个特征槽(环形)+ 1 个头像照片槽,事件 EV_VISION_FEATURE 携
+ * (user_id, seq, len),enroll 按 seq 经 vision_service_fetch_feature 取明文
+ * (用后擦除),头像按同一 seq 经 fetch_avatar 取。
  * 工作模式:EV_VISION_SET_MODE(access 1s tick 联动)写入,后端每帧/每回调读取。
  * 后端:注册表 + 契约见 vision_backend.h;本文件不认识任何具体模型/库。
  */
@@ -85,6 +86,51 @@ int vision_service_fetch_feature(uint32_t seq, uint8_t *out, size_t cap, size_t 
     }
     pthread_mutex_unlock(&s_mtx);
     return DG_ERR_NOT_FOUND;
+}
+
+/* ---- 头像照片槽:单槽足够 ----
+ * 拍摄是用户点击驱动的一次动作,不存在并发提交;旧照片未被取走就被
+ * 覆盖 = 上一次拍摄作废(新一轮拍摄本来就该用新照片),不算丢数据。 */
+static struct {
+    pthread_mutex_t mtx;
+    bool used;
+    uint32_t seq;
+    uint8_t data[DG_AVATAR_JPEG_MAX];
+    size_t len;
+} s_avatar_slot = { .mtx = PTHREAD_MUTEX_INITIALIZER };
+
+int vision_service_put_avatar(uint32_t seq, const uint8_t *jpeg, size_t len)
+{
+    if (!jpeg || len == 0 || len > sizeof(s_avatar_slot.data))
+        return DG_ERR_PARAM;
+    pthread_mutex_lock(&s_avatar_slot.mtx);
+    memcpy(s_avatar_slot.data, jpeg, len);
+    s_avatar_slot.len = len;
+    s_avatar_slot.seq = seq;
+    s_avatar_slot.used = true;
+    pthread_mutex_unlock(&s_avatar_slot.mtx);
+    return DG_OK;
+}
+
+int vision_service_fetch_avatar(uint32_t seq, uint8_t *out, size_t cap, size_t *len)
+{
+    if (!out || !len)
+        return DG_ERR_PARAM;
+    pthread_mutex_lock(&s_avatar_slot.mtx);
+    int rc = DG_ERR_NOT_FOUND;
+    if (s_avatar_slot.used && s_avatar_slot.seq == seq) {
+        if (cap < s_avatar_slot.len)
+            rc = DG_ERR_NO_MEMORY;
+        else {
+            memcpy(out, s_avatar_slot.data, s_avatar_slot.len);
+            *len = s_avatar_slot.len;
+            memset(s_avatar_slot.data, 0, sizeof(s_avatar_slot.data)); /* 即取即清 */
+            s_avatar_slot.used = false;
+            rc = DG_OK;
+        }
+    }
+    pthread_mutex_unlock(&s_avatar_slot.mtx);
+    return rc;
 }
 
 static vision_lib_add_fn s_lib_add;

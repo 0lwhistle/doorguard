@@ -66,6 +66,16 @@ int vision_service_submit_feature(const char *user_id, uint32_t seq,
                                   const uint8_t *feature, size_t len);
 int vision_service_fetch_feature(uint32_t seq, uint8_t *out, size_t cap, size_t *len);
 
+/* ---- 头像照片槽(单槽;照片是 KB 级,按架构纪律不进事件总线) ----
+ *
+ * 拍摄录入用:后端在 submit_feature 前先 put(同 seq 配对),
+ * enroll 在 EV_VISION_FEATURE 处理时按同一 seq fetch 并落库。
+ * 照片与特征必须出自同一帧——成对性由后端保证(见 vision_rknn.c 的
+ * 「特征 + 同帧头像」缓存),槽位只负责按 seq 递一趟。 */
+
+int vision_service_put_avatar(uint32_t seq, const uint8_t *jpeg, size_t len);
+int vision_service_fetch_avatar(uint32_t seq, uint8_t *out, size_t cap, size_t *len);
+
 #ifdef __cplusplus
 }
 #endif

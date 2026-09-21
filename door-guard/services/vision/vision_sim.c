@@ -12,6 +12,7 @@
 #include "dg_log.h"
 #include "event_bus.h"
 #include "events.h"
+#include "modules/jpeg/dg_jpeg.h"
 #include "vision_service.h"
 #include "vision_backend.h"
 
@@ -106,8 +107,27 @@ static int on_capture_req(const event_t *e, void *ud)
         seed ^= (uint8_t)*p;
     memset(feat, seed, sizeof(feat));
 
+    /* 伪头像 = 同 seed 派生的渐变图,编码成真 JPEG(与板上 rknn 后端同路:
+     * 照片槽 → enroll 按 seq 取件落库;宿主端到端要能验到 DB 里那张图)。
+     * seq 与特征提交用同一个(照片槽按 seq 与特征配对) */
     static uint32_t s_seq = 0;              /* 槽位句柄:进程内单调 */
-    uint32_t seq = ++s_seq;
+    const uint32_t seq = ++s_seq;
+    /* static:总线分发线程栈仅 64KB,大数组上栈会溢出(与板上后端同纪律) */
+    static uint8_t rgb[64 * 64 * 3];
+    static uint8_t jpeg[DG_AVATAR_JPEG_MAX];
+    for (int y = 0; y < 64; y++)
+        for (int x = 0; x < 64; x++) {
+            uint8_t *px = &rgb[(y * 64 + x) * 3];
+            px[0] = (uint8_t)(seed + x * 3);
+            px[1] = (uint8_t)(seed + y * 3);
+            px[2] = (uint8_t)(seed + x + y);
+        }
+    size_t jlen = 0;
+    if (dg_jpeg_encode_rgb(rgb, 64, 64, 80, jpeg, sizeof(jpeg), &jlen) == DG_OK)
+        vision_service_put_avatar(seq, jpeg, jlen);
+    else
+        DG_LOGW("[VISION]", "sim 头像编码失败(忽略:测试环境异常)");
+
     vision_service_submit_feature(r->user_id, seq, feat, len);
     return 0;
 }

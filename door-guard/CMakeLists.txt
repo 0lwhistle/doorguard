@@ -22,6 +22,18 @@ include_directories(${CMAKE_SOURCE_DIR})
 
 find_package(Threads REQUIRED)
 
+# jpeg:头像编解码(modules/jpeg)。sysroot 里混进了两套 libjpeg:dev 名
+# libjpeg.so 实为旧 IJG 6b ABI(SONAME .62),板上运行库只有 turbo 的
+# libjpeg.so.8——必须显式链 .8,否则板上加载失败(rc=127,2026-09-21 实测)。
+if(CMAKE_SYSROOT AND EXISTS "${CMAKE_SYSROOT}/usr/lib/libjpeg.so.8")
+    set(DG_JPEG_LIB "${CMAKE_SYSROOT}/usr/lib/libjpeg.so.8")
+elseif(CMAKE_SYSROOT AND EXISTS "${CMAKE_SYSROOT}/usr/lib64/libjpeg.so.8")
+    set(DG_JPEG_LIB "${CMAKE_SYSROOT}/usr/lib64/libjpeg.so.8")
+else()
+    find_package(JPEG REQUIRED)   # 宿主测试构建:发行版 libjpeg-turbo(同为 .8)
+    set(DG_JPEG_LIB JPEG::JPEG)
+endif()
+
 # ---- 基础组件(板上与测试同一份源码) ----
 # dg_log:移植组件共用的极简日志(接口见 components/logger/dg_log.h)
 add_library(dg_log STATIC components/logger/dg_log.c)
@@ -86,6 +98,11 @@ add_library(dg_storage STATIC
 target_include_directories(dg_storage PUBLIC ${CMAKE_SOURCE_DIR}/modules/sqlite)
 target_link_libraries(dg_storage PUBLIC dg_proto sqlite3 crypto)
 
+# jpeg:头像 JPEG 编解码(内存↔内存,libjpeg 薄封装;视觉编码/UI 解码共用)
+add_library(dg_jpeg STATIC modules/jpeg/dg_jpeg.c)
+target_include_directories(dg_jpeg PUBLIC ${CMAKE_SOURCE_DIR}/modules/jpeg)
+target_link_libraries(dg_jpeg PUBLIC dg_proto ${DG_JPEG_LIB})
+
 # ---- LVGL 8.3(third_party 源码双端同源编译:板上不再依赖 sysroot 的
 # liblvgl.so,以获得自定义 lv_conf:CJK 字体/256KB 内存池) ----
 file(GLOB_RECURSE LVGL_SRCS third_party/lvgl/src/*.c)
@@ -108,6 +125,7 @@ add_library(dg_ui STATIC
     ui/pages/page_menu.c
     ui/pages/page_users.c
     ui/pages/page_user_edit.c
+    ui/pages/page_capture.c
     ui/pages/page_device.c
     ui/pages/page_access_set.c
     ui/pages/page_logs.c
@@ -117,6 +135,7 @@ add_library(dg_ui STATIC
     ui/presenters/presenter_menu.c
     ui/presenters/presenter_users.c
     ui/presenters/presenter_user_edit.c
+    ui/presenters/presenter_capture.c
     ui/presenters/presenter_device.c
     ui/presenters/presenter_access_set.c
     ui/presenters/presenter_logs.c
@@ -126,7 +145,7 @@ add_library(dg_ui STATIC
     ${DG_WIDGET_SRCS}
 )
 target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DIR}/services/access)
-target_link_libraries(dg_ui PUBLIC lvgl dg_config dg_access)
+target_link_libraries(dg_ui PUBLIC lvgl dg_config dg_access dg_storage dg_jpeg)
 
 # access:验证状态机 + 认证融合服务(FSM 持有者,日志/开门唯一出口)
 add_library(dg_access STATIC
@@ -141,7 +160,7 @@ target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker dg_gpio)
 add_library(dg_vision STATIC services/vision/vision_service.c)
 target_include_directories(dg_vision PUBLIC ${CMAKE_SOURCE_DIR}/services/vision)
 # 服务层要注入 storage 查重比较器 + 登记特征口径(device_config),并读 cfg
-target_link_libraries(dg_vision PUBLIC dg_proto dg_storage dg_config)
+target_link_libraries(dg_vision PUBLIC dg_proto dg_storage dg_config dg_jpeg)
 # 测试构建走 sim 后端:测试是宿主 gcc 无 rockiva 头/库(板上后端只在交叉编译里编)
 if(DG_SIM OR DG_BUILD_TESTS)
     target_sources(dg_vision PRIVATE services/vision/vision_sim.c)

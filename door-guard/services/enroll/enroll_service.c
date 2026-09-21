@@ -63,8 +63,20 @@ static int on_feature(const event_t *e, void *ud)
     /* 编排语义:先在用户管理页建用户(含密码),再录特征;未建则报"用户不存在" */
     int rc = db_user_update(&rec);
 
-    if (rc == DG_OK)
+    if (rc == DG_OK) {
         vision_service_library_add(f->user_id, plain, len);  /* 特征库 INSERT */
+
+        /* 同帧头像:后端在特征提交前已按同一 seq 入照片槽(无照片 = 槽位
+         * NOT_FOUND,头像留空不算错——板上编码失败时的降级路径) */
+        static uint8_t jpeg[DG_AVATAR_JPEG_MAX];   /* 总线线程独占,不占栈 */
+        size_t jlen = 0;
+        if (vision_service_fetch_avatar(f->seq, jpeg, sizeof(jpeg), &jlen) == DG_OK) {
+            const int arc = db_user_set_avatar(f->user_id, jpeg, jlen);
+            if (arc != DG_OK)
+                DG_LOGW(TAG, "头像落库失败(%d):特征已入库,头像留空", arc);
+        }
+        memset(jpeg, 0, sizeof(jpeg));
+    }
 
     memset(plain, 0, sizeof(plain));            /* 明文用后擦除 */
     publish_result(f->user_id, DG_ENROLL_FACE, f->seq, rc);

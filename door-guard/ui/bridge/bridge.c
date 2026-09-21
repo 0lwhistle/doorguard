@@ -172,6 +172,18 @@ static int on_web_set_result(const event_t *e, void *ud)
     return 0;
 }
 
+/* 人脸质量判定 → 拍摄页实时提示(可拍/太糊/太小;主页等页面忽略) */
+static int on_vision_quality(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_QUALITY;
+    evt.quality = *(const ev_vision_quality_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
 /* 录入结果(人脸录入/清除/删除)→ 用户编辑页刷新与弹窗 */
 static int on_enroll_result(const event_t *e, void *ud)
 {
@@ -201,7 +213,8 @@ void bridge_init(void)
     event_bus_subscribe(EV_NET_WEB_STATE, on_web_state, NULL);
     event_bus_subscribe(EV_NET_WEB_SET_RESULT, on_web_set_result, NULL);
     event_bus_subscribe(EV_ENROLL_RESULT, on_enroll_result, NULL);
-    DG_LOGI("[BRIDGE]", "事件桥就绪(14 订阅)");
+    event_bus_subscribe(EV_VISION_QUALITY, on_vision_quality, NULL);
+    DG_LOGI("[BRIDGE]", "事件桥就绪(15 订阅)");
 }
 
 void bridge_btn(const ev_ui_btn_t *btn)

@@ -3,7 +3,51 @@
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
+
 ---
+
+## 2026-09-21 拍摄录入 + 头像 UI 全量落地(交接 §3 三步做完)
+
+**做了什么**(基线已验:30/29→重跑全绿、零告警后才动手):
+1. **新模块 `modules/jpeg/dg_jpeg`**:libjpeg 内存↔内存薄封装(错误不 exit、
+   损坏输入报错、容量不足显式报错);17 项宿主测试 `test_jpeg`。
+2. **同帧成对缓存**:vision_rknn 加 `s_snap`(160×160 对齐大图 = 112 参考矩阵
+   ×160/112 整体缩放),与 `s_cap` 一把锁成对写——照片与特征必同帧。
+3. **拍摄时才编码**:`on_capture_req` 用 `dg_jpeg_encode_rgb` 编一次 JPEG,
+   先 `vision_service_put_avatar(seq)` 入**照片槽**再 submit_feature
+   (事件契约未动;顺序不能反,否则 enroll 按同步分发会取空)。enroll 按
+   同一 seq 取头像 `db_user_set_avatar` 落库;槽位无照片=降级只跳过头像。
+4. **拍摄页 `page_capture`**(NAV_MAX_PAGES 9→10):实时预览(照抄主页
+   canvas 方案)+ 质量实时提示(新事件 `EV_VISION_QUALITY`,verdict 变化即发、
+   1s 兜底;不合格显示具体原因并禁用[拍摄])+ [拍摄][取消] / 回看照片 +
+   [重拍][完成],5s 回执超时。
+5. **头像显示 `ui/widgets/dg_avatar`**:DB 解密→libjpeg 解码→lv_img_dsc_t
+   (LVGL 的 PNG/SJPG/FS 全关,走原始像素路);列表 40×40 缩略图(1/4 缩放
+   解码)、编辑页预览;`db_user_clear_face` 改为连带头像清空;删用户随行。
+6. 编辑页「人脸·录入/重录」改为 push 拍摄页;清人脸仍走 DG_ENROLL_FACE_CLEAR。
+
+**测试**:30/30 ctest 绿(test_jpeg 新增;test_enroll_flow 扩头像链路:落库
+SOI 校验/清脸随删/删用户随删);dg-build 零告警;文案中英双语 + gen.sh 已重生。
+
+**踩坑(新)**:
+- **sysroot 里有假 libjpeg**:`usr/lib{,64}/libjpeg.so` 是混进来的旧 IJG 6b
+  (SONAME .62),板上只有 turbo 的 libjpeg.so.8——find_package(JPEG) 选中
+  .62 导致板上 rc=127 起不来。CMake 已显式链 `libjpeg.so.8`,别改回。
+- **总线线程栈仅 64KB**:拍摄编码的 ~110KB 大缓冲必须 static
+  (总线单线程分发无重入),局部数组板上必栈溢出。
+- **libjpeg 内存目的地必须实现 init_destination**:挂 NULL/0 第一个字节就
+  写空指针(段误);缓冲满不能"继续走完",要经 error_exit 长跳。
+- **截断 JPEG 会"体面收尾"**:伪 EOI 后返回 OK + 灰块,须用 num_warnings
+  判损坏(头像库都是自编的,出现任何警告即拒绝)。
+
+**没做完 / 下一步**:
+- **§6-1~7 待板上人工验收**(需真人对镜头):实时画面、质量提示与禁拍、
+  拍后回看/重拍、编辑页头像、列表缩略图、清脸/删人后头像消失、
+  站着不动不反复开门。服务已在板运行(pid 稳定、libjpeg.so.8 已映射、
+  rknn 后端就绪),`dg-deploy` 即验。
+- 质量阈值板上标定(blur_min=50 是拍脑袋值,看「质量闸门拦下」日志调)。
+- 交接文档 CAPTURE_AVATAR_HANDOFF.md 完成使命,后续以本条目为准。
+
 
 ## 2026-09-21 交接:拍摄录入 + 头像(UI 侧未完)
 

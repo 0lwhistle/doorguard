@@ -9,7 +9,8 @@
  * 为真,拼起来没人验。本测试把链钉死:请求→回执→DB 状态一致。
  *
  * 覆盖:录入(建用户后)/ 重录 / 清除人脸 / 对不存在用户录入(失败回执)/
- *       删除用户(DB + 特征库一致)。
+ *       删除用户(DB + 特征库一致);2026-09-21 拍摄录入追加:同帧头像
+ *       (照片槽 → enroll 落库 → 清脸随删)。
  */
 #include "dg_test.h"
 #include "event_bus.h"
@@ -57,6 +58,22 @@ static int user_face_len(const char *uid)
     if (db_user_get(uid, &rec) != DG_OK)
         return -1;
     return rec.face_vec_len;
+}
+
+/* 头像落库形态:返回 JPEG 字节数;0 = 未录头像;-1 = 用户不存在/形态异常 */
+static int user_avatar_len(const char *uid)
+{
+    static uint8_t jpeg[DG_AVATAR_JPEG_MAX];
+    size_t len = 0;
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    if (db_user_get(uid, &rec) != DG_OK)
+        return -1;                      /* 用户不存在 */
+    if (db_user_get_avatar(uid, jpeg, sizeof(jpeg), &len) == DG_ERR_NOT_FOUND)
+        return 0;                       /* 有用户没头像 */
+    if (len < 2 || jpeg[0] != 0xFF || jpeg[1] != 0xD8)
+        return -1;                      /* 不是 JPEG:加密链路或编码出错 */
+    return (int)len;
 }
 
 static void publish_req(const char *uid, int32_t kind)
@@ -127,6 +144,10 @@ int main(void)
     const int len1 = user_face_len("10001");
     DG_CHECK(len1 > 0);
     DG_CHECK(len1 <= DG_FEATURE_MAX);
+    /* 同帧头像:照片槽 → enroll 取件 → DB(伪头像 = 真 JPEG,SOI 头可见) */
+    const int av1 = user_avatar_len("10001");
+    DG_CHECK(av1 > 0);
+    printf("  avatar jpeg %d B\n", av1);
 
     /* ---- ② 重录:长度刷新(伪特征同人恒定,长度不变但流程要通) ---- */
     publish_req("10001", DG_ENROLL_FACE);
@@ -139,6 +160,7 @@ int main(void)
     wait_cnt(&s_result_cnt[DG_ENROLL_FACE_CLEAR], 1, 3000);
     DG_CHECK(atomic_load(&s_result_err[DG_ENROLL_FACE_CLEAR]) == DG_OK);
     DG_CHECK(user_face_len("10001") == 0);
+    DG_CHECK(user_avatar_len("10001") == 0);   /* 清人脸连带头像消失 */
 
     /* ---- ④ 对不存在用户录入:回执失败,而不是无声 ---- */
     publish_req("99999", DG_ENROLL_FACE);
@@ -150,10 +172,12 @@ int main(void)
     publish_req("10001", DG_ENROLL_FACE);
     wait_cnt(&s_result_cnt[DG_ENROLL_FACE], 4, 3000);
     DG_CHECK(user_face_len("10001") == len1);
+    DG_CHECK(user_avatar_len("10001") > 0);    /* 重录后头像回来 */
     publish_req("10001", DG_ENROLL_DELETE);
     wait_cnt(&s_result_cnt[DG_ENROLL_DELETE], 1, 3000);
     DG_CHECK(atomic_load(&s_result_err[DG_ENROLL_DELETE]) == DG_OK);
     DG_CHECK(user_face_len("10001") == -1);
+    DG_CHECK(user_avatar_len("10001") == -1);  /* 用户即删,头像随之消失 */
 
     cleanup();
     DG_TEST_EXIT();
