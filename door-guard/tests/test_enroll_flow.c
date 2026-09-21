@@ -69,7 +69,7 @@ static void publish_req(const char *uid, int32_t kind)
     EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
 }
 
-static char s_dir[96];
+static char s_dir[64];
 
 static void cleanup(void)
 {
@@ -83,7 +83,7 @@ int main(void)
 {
     DG_CHECK(event_bus_init() == EVENT_BUS_OK);
     snprintf(s_dir, sizeof(s_dir), "/tmp/dg_enroll_%d", (int)getpid());
-    char cmd[192];
+    char cmd[320];
     snprintf(cmd, sizeof(cmd), "rm -rf %s && mkdir -p %s", s_dir, s_dir);
     DG_CHECK(system(cmd) == 0);
     char db[192], key[192];
