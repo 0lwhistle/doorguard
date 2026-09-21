@@ -212,10 +212,21 @@ int npu_model_run(npu_model_t *m, const void *input, size_t in_bytes,
         return DG_ERR_NOT_INIT;
     if (!input || in_bytes == 0)
         return DG_ERR_PARAM;
-    /* 尺寸不符立即报错:喂错尺寸的缓冲是静默出错图的经典来法 */
-    if (m->in0.size && in_bytes != m->in0.size) {
-        DG_LOGE(TAG, "输入 %zu B 与模型期望 %u B 不符(按 npu_model_input_attr 准备)",
-                in_bytes, m->in0.size);
+
+    /* 期望的缓冲尺寸跟随**声明的输入类型**算(不是模型张量尺寸):
+     * 喂 U8 给 F16 模型时,缓冲是每元素 1 字节,运行时逐元素转换;
+     * 只有 OTHER(按模型类型裸送)才等于张量尺寸。 */
+    size_t expect;
+    switch (in_type) {
+    case DG_NPU_TYPE_U8: case DG_NPU_TYPE_I8:  expect = (size_t)m->in0.n_elems; break;
+    case DG_NPU_TYPE_F32: case DG_NPU_TYPE_I32: expect = (size_t)m->in0.n_elems * 4; break;
+    case DG_NPU_TYPE_F16: expect = (size_t)m->in0.n_elems * 2; break;
+    default: expect = m->in0.size; break;
+    }
+    if (in_bytes != expect) {
+        DG_LOGE(TAG, "输入 %zu B 与声明类型期望 %zu B 不符"
+                     "(elems=%u;喂错类型/尺寸会静默出错图,已拦下)",
+                in_bytes, expect, m->in0.n_elems);
         return DG_ERR_PARAM;
     }
 

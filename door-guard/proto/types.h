@@ -23,9 +23,11 @@ extern "C" {
 #define DG_NAME_LEN         64    /**< user_name 上限(含 '\0') */
 #define DG_IC_LEN           32    /**< IC 卡号字符串上限(含 '\0') */
 #define DG_PWD_MAX_LEN      32    /**< 明文密码输入上限(仅传参用,不落库) */
-/** 特征 BLOB 上限(加密后):实际尺寸以 ROCKIVA/指纹算法输出为准,
- *  存长度字段按需使用 —— 待硬件接入后回填确切值(DEVLOG 待确认) */
-#define DG_FEATURE_MAX      512
+/** 特征 BLOB 上限(加密后):人脸 = ArcFace-R50 512 维 float32 = 2048 B
+ *  (自组 rknn 路线,2026-09-21 实测);ROCKIVA 时代为 512。
+ *  users.features 是 BLOB 存长度按需使用,提上限免迁移;内存结构 user_rec_t
+ *  随之变大(2000 用户全量特征缓存 ≈ 4 MB,M2 特征缓存可容纳) */
+#define DG_FEATURE_MAX      2048
 #define DG_PWD_HASH_LEN     32    /**< PBKDF2-HMAC-SHA256 输出 256bit */
 #define DG_PWD_SALT_LEN     16    /**< 每用户随机盐(spec-database §3) */
 

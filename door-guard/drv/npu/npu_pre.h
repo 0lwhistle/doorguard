@@ -84,6 +84,18 @@ static inline void npu_letterbox_unmap(const npu_letterbox_t *lb,
 int npu_pre_nv12_letterbox_rgb(const uint8_t *nv12, int stride,
                                const npu_letterbox_t *lb, uint8_t *dst_rgb);
 
+/**
+ * RGA:从 NV12 帧裁一块矩形(可同时缩放)→ RGB888。识别用:把检测到的人脸
+ * 区域按**原始分辨率**抠出来再做 112×112 对齐——直接从 320×320 letterbox 画布
+ * 上对齐等于把脸放大 4 倍再喂识别,精度白白损失。
+ * @param rect 裁剪矩形(源图坐标;x/y/w/h 须为偶数,YUV420 色度对齐要求)
+ * @return DG_OK / DG_ERR_PARAM / DG_ERR_IO
+ */
+int npu_pre_nv12_crop_rgb(const uint8_t *nv12, int stride,
+                          int src_w, int src_h,
+                          int rx, int ry, int rw, int rh,
+                          uint8_t *dst_rgb, int dst_w, int dst_h);
+
 #ifdef __cplusplus
 }
 #endif

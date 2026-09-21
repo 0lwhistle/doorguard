@@ -380,3 +380,11 @@ float rknn_cosine(const float *a, const float *b, int n)
     const float d = sqrtf(na) * sqrtf(nb);
     return d > 0.0f ? dot / d : 0.0f;
 }
+
+void rknn_rgb_norm_f32(const uint8_t *rgb, int n_pixels, float *out)
+{
+    if (!rgb || !out || n_pixels <= 0)
+        return;
+    for (int i = 0; i < n_pixels * 3; i++)
+        out[i] = ((float)rgb[i] - 127.5f) / 127.5f;
+}

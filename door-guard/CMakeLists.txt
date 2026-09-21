@@ -205,6 +205,11 @@ if(NOT DG_SIM AND NOT DG_BUILD_TESTS)
     # "推理+解码",拿已知人脸位置的标准图验证链路,不必有人站镜头前。
     add_executable(rknn_det_test tools/rknn_det_test.c)
     target_link_libraries(rknn_det_test PRIVATE dg_npu dg_rknn_face)
+
+    # 特征链路验证(板上跑):三张 112×112(同人正常/变暗/纯色)算两两余弦,
+    # 验证 ArcFace 的输入归一化假设——错了这里立刻暴露,不会带到产品路径。
+    add_executable(rknn_rec_test tools/rknn_rec_test.c)
+    target_link_libraries(rknn_rec_test PRIVATE dg_npu dg_rknn_face)
 endif()
 
 # liveness:动作活体(B7 留口 on_face/pass;B8 状态机)

@@ -71,3 +71,38 @@ int npu_pre_nv12_letterbox_rgb(const uint8_t *nv12, int stride,
     }
     return DG_OK;
 }
+
+int npu_pre_nv12_crop_rgb(const uint8_t *nv12, int stride,
+                          int src_w, int src_h,
+                          int rx, int ry, int rw, int rh,
+                          uint8_t *dst_rgb, int dst_w, int dst_h)
+{
+    if (!nv12 || !dst_rgb)
+        return DG_ERR_PARAM;
+    if (src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0)
+        return DG_ERR_PARAM;
+    /* 越界/奇数坐标直接拒:YUV420 裁剪奇数偏移会拿到错色度,静默出错图 */
+    if (rx < 0 || ry < 0 || rw <= 0 || rh <= 0 ||
+        rx + rw > src_w || ry + rh > src_h ||
+        (rx & 1) || (ry & 1) || (rw & 1) || (rh & 1))
+        return DG_ERR_PARAM;
+    if (stride < src_w)
+        stride = src_w;
+
+    rga_buffer_t src = wrapbuffer_virtualaddr_t((void *)nv12,
+                                                src_w, src_h, stride, src_h,
+                                                RK_FORMAT_YCbCr_420_SP);
+    rga_buffer_t dst = wrapbuffer_virtualaddr_t(dst_rgb,
+                                                dst_w, dst_h, dst_w, dst_h,
+                                                RK_FORMAT_RGB_888);
+    im_rect srect = { rx, ry, rw, rh };
+    im_rect drect = { 0, 0, dst_w, dst_h };
+    im_rect prect = { 0, 0, 0, 0 };
+    IM_STATUS st = improcess(src, dst, (rga_buffer_t){ 0 }, srect, drect, prect,
+                             IM_SYNC);
+    if (!rga_ok(st)) {
+        DG_LOGE(TAG, "RGA 裁剪失败(%s)", imStrError_t(st));
+        return DG_ERR_IO;
+    }
+    return DG_OK;
+}

@@ -210,6 +210,20 @@ static void test_feature(void)
     DG_CHECK(zero[0] == 0.0f && zero[1] == 0.0f && zero[2] == 0.0f);
 }
 
+/* RGB→归一化 f32:0 → -1,255 → +1,127.5 → 0(板上实测的输入约定) */
+static void test_rgb_norm(void)
+{
+    const uint8_t rgb[6] = { 0, 128, 255, 127, 128, 10 };
+    float out[6];
+    rknn_rgb_norm_f32(rgb, 2, out);
+    DG_CHECK(feq(out[0], -1.0f));
+    DG_CHECK(feq(out[1], (128.0f - 127.5f) / 127.5f));
+    DG_CHECK(feq(out[2], 1.0f));
+    DG_CHECK(fabsf(out[3]) < 0.004f);
+    rknn_rgb_norm_f32(NULL, 2, out);                /* NULL 安全 */
+    DG_CHECK(1);
+}
+
 /* ---- RetinaFace 解码 ----------------------------------------------------
  * 用 64 输入的缩样(size=64 → 8²×2 + 4²×2 + 2²×2 = 168 个锚框),
  * 便于逐点核对:锚框 0 = (step 8, i=0, j=0, min_size 16)
@@ -301,5 +315,6 @@ int main(void)
     test_align_warp_identity();
     test_align_warp_oob_zero();
     test_feature();
+    test_rgb_norm();
     DG_TEST_EXIT();
 }

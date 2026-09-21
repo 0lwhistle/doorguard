@@ -115,6 +115,14 @@ void rknn_l2_normalize(float *v, int n);
 /** 余弦相似度(0~1 视用途;未归一化也正确,已归一化则退化为点积) */
 float rknn_cosine(const float *a, const float *b, int n);
 
+/**
+ * RGB888 → ArcFace 输入:逐像素 (x-127.5)/127.5 写入 float32。
+ * 板上实测(2026-09-21,models/README ⑤)w600k_r50 **未烤入归一化**,
+ * 必须喂预归一化 float——直接喂 uint8 会让全部 embedding 高度相似
+ * (cos(脸,纯色)≈0.79,识别"永远不命中"且无任何报错)。
+ */
+void rknn_rgb_norm_f32(const uint8_t *rgb, int n_pixels, float *out);
+
 #ifdef __cplusplus
 }
 #endif
