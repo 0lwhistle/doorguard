@@ -11,7 +11,7 @@
 - **目标**:RK3576 人脸识别门禁(LVGL 界面 + 官方 ROCKIVA 人脸识别 + 动作活体 + 预留指纹/IC 卡)
 - **硬件**:KickPi K7(RK3576,6T NPU)+ 5 寸 MIPI 屏 F050008M01(720×1280,触摸 IC 随屏组装为 FocalTech/GT9xx)+ 官方 IMX415 摄像头
 - **系统**:Buildroot 无桌面 Linux(内核 6.1,vendor 分支),LVGL 直跑 DRM,无 X11/Wayland
-- **技术栈已定**:UI=LVGL;取流/上屏=RKADK/RGA→DRM;远程推流=GStreamer RTSP;人脸=ROCKIVA;数据库=SQLite;联网=以太网(主)
+- **技术栈已定**:UI=LVGL;取流/上屏=RKADK/RGA→DRM;远程推流=GStreamer RTSP;**人脸=自组 rknn(RetinaFace 检测 + ArcFace 识别,rknn-toolkit2 转换,2026-09-21 起为主线)**(ROCKIVA 备选,本版 SDK 缺 rk3576 人脸模型);数据库=SQLite;联网=以太网(主)
 
 ---
 
@@ -27,6 +27,9 @@
 | WiFi/BT | SWT6621S(SDIO);**驱动编译失败(已知问题,见 §8),当前联网用以太网** |
 | 以太网 | GMAC 内核原生,正常 |
 | 串口调试 | **1500000 8N1**(不是 115200) |
+| NPU | `librknnrt.so` 在板 `/usr/lib`(6.6M);实测运行时 `api=2.0.0b0 drv=0.9.8`;6 TOPS 是 **int8** 口径,FP16 图会显著更慢(实测同一检测器 int8 320 输入 6.7ms vs F16 640 输入 178ms) |
+| 相机输出格式 | NV12 **1280×720, stride=1280**(= 宽,紧凑排布;日志 `mainpath 格式 … stride=1280` 可直接确认) |
+| 板上可用工具 | 有 `sqlite3`;**没有 python3**(板端脚本一律用 shell/sqlite3) |
 
 ---
 
@@ -77,7 +80,23 @@ cat /proc/bus/input/devices | grep -iA3 'fts\|goodix'  # 触摸(看实际枚举�
 grep -E "HOLDER|VISION" /var/log/door-guard.log | tail -30   # 模块状态表 + 视觉后端
 DG_IVA_LOG=3 /root/door-guard     # 前台跑并开 ROCKIVA 日志(看它找哪个模型文件)
 ls /usr/lib/*.data                # ROCKIVA 模型(缺人脸模型时 FACE_Init 返 -1)
+
+# ---- 自组 rknn 路线(2026-09-21 起主线)----
+ls -lh /userdata/doorguard/models/          # 视觉模型(持久分区;A/B 升级不丢)
+/root/npu_probe /userdata/doorguard/models/*.rknn   # 探针:张量规格+试跑+压测
+#   DG_NPU_BENCH=30 /root/npu_probe <model.rknn>     # 压测 30 次取稳态耗时
+/root/rknn_det_test <model.rknn> <raw_rgb_320x320x3> 0.5   # 检测链路离线对拍
+/root/rknn_rec_test <rec.rknn> f32 a.raw b.raw c.raw       # 识别链路(余弦自检)
+grep -E "rknn 就绪|检出|1:N 最高分|录入取特征" /var/log/door-guard.log | tail -20
+# 特征口径(换模型必改,否则命中被屏蔽——有意安全阀):
+sqlite3 /var/lib/door-guard/door-guard.db \
+  "SELECT * FROM device_config WHERE key='face_model_tag';"
+#   UPDATE device_config SET value='rknn-arcface-r50-v1' WHERE key='face_model_tag';
 ```
+
+**板端路径备忘**:应用 DB `/var/lib/door-guard/door-guard.db`(含 `device_config` 遗留键,
+如 `face_model_tag`);现用配置 `/userdata/doorguard/cur_config.json`(DB 已冻结,新配置只进 JSON);
+视觉模型 `/userdata/doorguard/models/`。
 
 注意:rootfs 裁剪过,缺什么工具优先想"buildroot defconfig 里没开",回 VM 加配置重编,不要板端乱装。
 

@@ -18,8 +18,11 @@ description: RK3576 K7 人脸识别门禁项目(door-guard)开发技能,含完�
 | 页面/待机/菜单/主题/多语言 | references/spec-ui.md |
 | web 上位机、OTA、NTP、mDNS | references/spec-network.md |
 | 新建模块、移植 ESP32 组件、构建体系 | references/architecture.md |
-| 架构 v2 全景:五层栈/线程归属/降级矩阵/跨服务调用规则/M2 待办 | docs/architecture-v2-proposal.md |
-| 硬件实测结论(WiFi 坏、摄像头在 cam2、串口参数等) | docs/DEV_HANDBOOK.md §2/§4 |
+| 架构 v2 全景:五层栈/线程归属/降级矩阵/跨服务调用规则/落地自查清单 | docs/architecture-v2-proposal.md |
+| 硬件实测结论(WiFi 坏、摄像头在 cam2、串口参数、板端路径等) | docs/DEV_HANDBOOK.md §2/§4 |
+| 人脸识别(检测/识别后端、rknn 链路、换模型、阈值) | door-guard/services/vision/README.md |
+| 视觉模型(清单/出处/重转步骤/板上实测耗时) | door-guard/models/README.md |
+| NPU 库(rknn 薄封装接口、RGA 预处理、模型探针) | door-guard/drv/npu/README.md |
 
 ## 1. 环境速查
 
@@ -31,6 +34,9 @@ dg-serial             # 串口控制台(1500000 8N1,不是 115200)
 ```
 
 - 工具链:`~/dg-toolchain`(gcc-arm-10.3 + 与固件同源 sysroot),细节见 `docs/tech/TOOLCHAIN.md`
+- 人脸识别 = **自组 rknn 主线**(RetinaFace 检测 + ArcFace 识别,模型在板 `/userdata/doorguard/models/`);
+  ROCKIVA 为备选(本版 SDK 缺 rk3576 人脸模型)。动视觉前先读 `services/vision/README.md`,
+  里面记着两条"无报错但全错"的坑(ArcFace 必须 f32 归一化、模型目标平台须匹配)
 - 板端:SSH root 登录(串口 `passwd` 设密);固件 20260917-B4;WiFi 不可用,用以太网
 - 代码流转只经 git,更改一律推 **origin = GitHub** `git@github.com:0lwhistle/doorguard.git`(master);禁止跨机复制目录。`gitea` remote 是 2026-09-18 历史重写前的旧归档(唯一含固件大文件的远程),平时不推、勿 force 覆盖
 - VM 只做固件/内核/rootfs 全量编译(SDK `./build.sh`);WSL 不碰 SDK

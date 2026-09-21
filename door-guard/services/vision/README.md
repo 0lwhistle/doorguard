@@ -4,10 +4,42 @@
 
 - **vision_service**(本模块的服务层):工作模式状态、特征槽(8 个环形槽)、
   库维护转发、录入抓取请求。**它不认识任何具体模型/推理框架**。
-- **后端**(可插拔):真正出特征的东西。当前有
-  - `vision_rockiva.c` — Rockchip 官方 ROCKIVA(板上默认,检测/关键点/识别/1:N 一体);
-  - `vision_sim.c` — PC mock(伪特征,只用于 UI/FSM 链路验证);
-  - 将来:`vision_rknn.c` 之类自建模型(见 §"新增一个后端")。
+- **后端**(可插拔):真正出特征的东西。当前有 **三个实现**(注册顺序 = 优先级,
+  缺省用第一个;运行时可用 `cfg face.backend` / env `DG_VISION_BACKEND` 按名字切):
+
+| 后端 | 文件 | 定位 | 状态 |
+|---|---|---|---|
+| `rknn` | `vision_rknn.c` | **自组 rknn 主线**:RetinaFace 检测 + ArcFace 识别 | 板上跑通(2026-09-21) |
+| `rockiva` | `vision_rockiva.c` | Rockchip 官方 ROCKIVA(检测/关键点/识别/1:N 一体) | 备选;本版 SDK 缺人脸模型 → 自行降级 ERROR |
+| `sim` | `vision_sim.c` | PC mock(伪特征) | 只用于 UI/FSM 链路验证(PC 模拟器) |
+
+  三者都只实现契约、都不认识业务:换后端不改服务层/FSM/UI/存储一行。
+
+### rknn 后端的链路与分层(改它之前先读这段)
+
+```
+camera NV12 1280×720
+  ├─[每帧] RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)→ rknn_retinaface_decode
+  │        → NMS → 最大脸 → 逆映射+旋到竖屏 → EV_VISION_FACE_BOX(10Hz)
+  └─[每 300ms 且非 IDLE] NV12 原分辨率裁 ROI → 5 点对齐 112×112
+           → (x-127.5)/127.5 → ArcFace@NPU(56ms)→ 512 维 → L2
+           → 录入缓存 / 1:1 比对 / 1:N 检索(内存特征库暴力余弦)
+```
+
+分层与"在哪测":
+
+| 层 | 文件 | 内容 | 怎么验 |
+|---|---|---|---|
+| 驱动 | `drv/npu/npu_model.c` | rknn 运行时薄封装(全仓唯一 include `<rknn_api.h>`) | `tools/npu_probe` |
+| 驱动 | `drv/npu/npu_pre.c` | RGA letterbox + ROI 裁剪(坐标数学头内联) | `tests/test_npu_pre`(数学) |
+| 算法 | `rknn_face.c` | SCRFD/RetinaFace 解码、NMS、5 点对齐、余弦、归一化 | `tests/test_rknn_face` |
+| 装配 | `vision_rknn.c` | 契约实现、调度、事件发布 | 板上(npu_probe/rknn_det_test/rknn_rec_test) |
+
+**两条血的教训**(踩过、有实测数据,别再踩):
+1. **ArcFace 未烤归一化**:必须喂 `(x-127.5)/127.5` 的 F32。直喂 uint8 会让所有
+   embedding 高度相似(cos(脸,纯色)≈0.79),识别永不命中且**没有任何报错**。
+2. **模型目标平台**:RetinaFace 原始件是 RK3588 的,本板驱动直接拒收
+   (`This rknn model is for RK3588`);重转见 `door-guard/models/README.md` §⑤。
 
 ```
 access_service ──EV_VISION_SET_MODE──▶ vision_service ──ops->on_mode──▶ 后端
@@ -98,15 +130,29 @@ RK3576 上的通行做法(见 `sdk-guide/README.md §5`):
 
 | 键 | 含义 | 默认 |
 |---|---|---|
-| `face.backend` | 想要的后端名,空 = 第一个注册的 | 空 |
-| `face.model_dir` | 模型目录(ROCKIVA 用;env `DG_IVA_MODEL_DIR` 优先) | `/usr/lib` |
+| `face.backend` | 想要的后端名,空 = 第一个注册的(rknn) | 空 |
+| `face.model_dir` | ROCKIVA 的模型目录(env `DG_IVA_MODEL_DIR` 优先) | `/usr/lib` |
 | `face.model_tag` | 特征口径标识,空 = 用后端自带默认 | 空 |
-| `face.match_threshold` | 1:N/1:1 命中阈值 | 0.42 |
-| `face.face_dup_threshold` | 录入查重阈值 | 0.90 |
+| `face.match_threshold` | 1:N/1:1 命中阈值(余弦分度,须实测标定) | 0.42 |
+| `face.face_dup_threshold` | 录入查重阈值(同上) | 0.90 |
 | `face.liveness_enable` | 动作活体开关(B8 算法) | 0 |
+
+rknn 后端的模型路径走 **env**(沿用 ROCKIVA 那套"现场诊断"惯例;模型文件与解码器
+强绑定,文件名是后端身份的一部分):
+
+| env | 含义 | 默认 |
+|---|---|---|
+| `DG_RKNN_MODEL_DIR` | 模型目录 | `/userdata/doorguard/models` |
+| `DG_RKNN_FACE_MODEL` | 检测模型文件名 | `RetinaFace_rk3576_i8.rknn` |
+| `DG_RKNN_REC_MODEL` | 识别模型文件名 | `w600k_r50.rknn` |
 
 ## 已知缺口 / 下一步
 
+- **质量闸门未上**(检测分 + 最小脸尺寸 + 清晰度):防抖动模糊脸进识别造成误判,
+  同时保护 1:N 检索与录入抓取两条路;位置见 architecture-v2-proposal 数据流图;
+- **阈值标定**:`face.match_threshold`/`face_dup_threshold` 的余弦分度需按板上
+  2s 节流日志"1:N 最高分"实测(ROCKIVA 时代的 0.42/0.90 只是起点);
 - B7:活体判定算法(B8);`face.model_tag` 的切换目前靠配置/DB 手工改,
   将来可在设备设置页加一项(需要时再说);
-- B10:把 ROCKIVA 人脸模型放进 buildroot IVA 包,别再手工拷 `/usr/lib`。
+- B10:把视觉模型放进 buildroot 包,别再手工拷(ROCKIVA 走 IVA 包;
+  rknn 自组模型考虑随固件入 `/userdata` 或整包下发)。

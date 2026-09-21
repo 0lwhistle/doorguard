@@ -17,7 +17,7 @@
 | Armbian SDK | `Rk3576-SDK/Armbian/kickpi-armbian` 仅作参考,主线用官方 SDK |
 | 编译机 | 同一台 Ubuntu VM:8 核 / 内存 7.2G(编译时 make -j 限 6)/ 磁盘 291G 可用 |
 | 磁盘 | SATA SSD 直连(已通过 6GB×3 写读一致性认证)。**历史教训:USB 桥接时代大文件静默损坏**,大文件纪律见第六节 |
-| 当前进度 | **door-guard 软件 Phase 1~10 完成**(2026-09-18 总验收自测过,已上 GitHub);固件 **B5 板上验收大部通过**(串口/屏/IMX415 出流/SSH ✅);**板上自启动+触摸+相机预览已打通**(S60 自启 ✅、fts_ts 触摸 ✅、V4L2+RGA+rkaiq 预览 ✅ B6 提前完成,方向/曝光待人工确认);**B7 应用侧完成并上板**(holder 注册表 14 模块 ✅、视觉工作模式联动 ✅、活体留口 ✅、特征长度自诊断 ✅、**视觉后端可插拔契约** ✅——换模型/换框架(如 rknn 开源模型)不改服务层,见 `door-guard/modules/vision/README.md`;板上 `vision_backend=ERROR` 只因**人脸模型文件缺失**——待把 SDK `models/rockiva_data_rk3576` 的 `face_landmark5.data`/`face_quality_v2.data` 等拷入板 `/usr/lib` 后联调,见 `docs/tech/B7_FACE_HANDOFF.md` §2.4);**业务链路打通**(验证按钮全流程:ID 输入/方式选择/密码/1:1 与失败原因文案 ✅;菜单入口:有管理员要认证、**无管理员免认证进菜单**(新机鸡生蛋死锁已修)、管理员验证通过进菜单 ✅;PC 模拟器可全流程演示,回归 `tests/test_verify_flow.c`;**输入体系完备**(屏幕键盘数字+字母两页、每个输入 UI 即时校验 + 存储层强制校验,规则唯一权威 `proto/valid.c`;中文姓名需上位机录入);仓库:origin=GitHub / gitea=旧历史归档;**web 上位机 = Vue 3 工程**(2026-09-18:分层 views/stores/api/components、六视图+路由、产物内嵌资源表、vitest 44 项 + frontend_check + 验收 63 项);**web 上位机 + mDNS 做实**(2026-09-18):页面重做(蓝白主题+动效,源文件 pages/ 生成入库)、鉴权重构(web_auth 凭据+登录风控 / web_session token 表,改密即踢下线)、WS 服务端主动推送(不再靠客户端 ping)、设备菜单新增「Web 管理」页(改账号/口令+局域网地址),mDNS 公告 `_http._tcp` 服务 + 探测防重名 + IP 变化重通告(局域网可直接 `http://doorguard.local:8080`);顺带修:WebSocket 握手在 OpenSSL 3 下段错误、NTP 服务从未装配、`/api/device` 的 uptime 是 epoch;待办:B7 人脸模型联调(录入人脸/1:N 命中)、指纹与读卡器接入(UI 已留"请按指纹/请刷卡"子步)、门控 GPIO 对拍、WiFi 驱动修复、web 页面浏览器像素级复核 + 监控画面接 capture 帧、recovery 延后;**2026-09-20 架构 v2 评审通过并落地**:五层栈重构(components/drv→modules→services+proto 契约)M1 机械迁移完成、22 项 ctest 全绿,方案/决议/迁移映射见 `docs/architecture-v2-proposal.md`;**2026-09-21 M2 行为升级四项完成**:config 双文件(DB 冻结迁移)/特征内存缓存只读快照/registry+看门狗+降级矩阵/OTA 按需线程流水线,ctest **25/25 全绿**,遗留单写者队列与 UI 降级提示渲染(见 proposal §9) |
+| 当前进度 | **2026-09-21:人脸识别主线已切到自组 rknn 并上板跑通。**① **自组 rknn 视觉链路**(RetinaFace 检测 + ArcFace 识别;模型与实测见 `door-guard/models/README.md`):检测 320×320 i8 **6.7ms/帧**、识别 112×112 **56ms**、特征 **512 维 float32 = 2048B**(`DG_FEATURE_MAX` 已 512→2048,BLOB 免迁移);板上**检测黄框跟随 ✅**、**离线解码对拍 ✅**(分数 0.999、关键点解剖正确)、`vision_backend READY`;第三后端实现 `vision_rknn.c`,整体见 `door-guard/services/vision/README.md`。② **ROCKIVA 搁置为备选**:本版 SDK 快照 `rockiva_data_rk3576` 只发布前级检测一个文件(rk3588/rv1126 目录才有人脸件),需厂商渠道补模型;`vision_rockiva.c` 保留,缺模型时自行降级 ERROR 不影响其余业务。③ **NPU 库落位** `drv/npu/`(架构预留位):rknn 运行时薄封装 + RGA letterbox;全仓唯一 include `<rknn_api.h>` 的文件;附 `tools/npu_probe`(模型探针)与 `tools/rknn_det_test`、`rknn_rec_test`(离线对拍,不必等人站镜头前)。④ **UI 按用户反馈重做**:用户管理改为**编辑页模板**(添加/编辑同一页、姓名/权限/密码/人脸/指纹/IC 卡全字段、缺项显示“无”、全部多语言)、弹窗补取消、按钮去图标改文字、脸框 LOST 600ms 滞回防闪。⑤ **测试 28/28 绿**(新增 `test_rknn_face`/`test_npu_pre`/`test_enroll_flow`);交叉编译零告警。⑥ **遗留**(见 DEVLOG 各条“下一步”):质量闸门(检测分+最小脸尺寸+清晰度)、1:N 阈值与查重阈值的余弦标定、指纹/IC 硬件接入、B8 活体算法、开机自动配网与 WiFi 驱动。 |
 
 ---
 
@@ -74,7 +74,9 @@
 ```
 IMX415 ─MIPI→ RKISP(rkaiq 3A)→ NV12 帧
    ├─① RGA 缩放 ─→ DRM video plane(屏幕预览,零拷贝)
-   ├─② 人脸区域 → ROCKIVA(检测/关键点/识别/1:N 检索,NPU,官方方案)
+   ├─② 检测:RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)→ 解码/NMS → 脸框
+   ├─②b 识别(每 300ms):NV12 原分辨率裁人脸 ROI → 5 点对齐 112×112 →
+   │      (x-127.5)/127.5 → ArcFace@NPU(56ms)→ 512 维 → 余弦 1:1/1:N
    ├─③ 关键点序列 → liveness_service(动作判定)
    └─④ GStreamer → RTSP 推流(远程实时预览,可选)
 比对/活体结果 → access_service → GPIO 继电器开锁 + SQLite 日志
@@ -97,14 +99,17 @@ door-guard/
 ├── services/       capture vision liveness verify{face,fingerprint,ic} access
 │                   enroll config web ota mdns ntp
 ├── modules/        camera display sqlite net(net_info);touch/as608/mfrc522 待接
-├── drv/            uart gpio npu;i2c/spi/pwm 随硬件接入
-├── components/     tasker event_bus holder logger(registry 待 M2)
+├── drv/            uart gpio **npu**(rknn 薄封装 npu_model + RGA letterbox npu_pre)
+├── components/     tasker event_bus holder logger registry(M2 已落)
 ├── proto/          events/types/valid/err(跨层契约,唯一横切层)
 ├── third_party/    lvgl、civetweb、cjson、stb_image、lv_drivers
-├── tools/          模型转换脚本(PC 端)、阈值标定脚本
-├── tests/          ctest 22 用例(宿主 gcc)
+├── models/         视觉模型清单(README+sha256;**二进制不入库**,板上放
+│                   /userdata/doorguard/models)
+├── tools/          npu_probe(模型探针)、rknn_det_test / rknn_rec_test(离线对拍)
+├── tests/          ctest **28 用例**(宿主 gcc;含 test_rknn_face/test_npu_pre/
+│                   test_enroll_flow)
 ├── sim/            PC 模拟器素材
-└── configs/        device.json(出厂值;M2 改 default.json 模板 + 设备 /userdata 现用配置)
+└── configs/        default.json 模板 + 设备 /userdata/doorguard/cur_config.json(现用)
 ```
 
 ---
@@ -133,17 +138,35 @@ door-guard/
   分工:上屏预览走 RKADK/RGA→DRM(§4.1),远程实时预览走 GStreamer RTSP 管线;
   两者共享取流源或各自开流,B8 阶段按 CPU 占用实测决定。
 
-### 4.3 人脸识别:官方 ROCKIVA 方案(已定,2026-09-17)
+### 4.3 人脸识别:自组 rknn 方案(主线,2026-09-21 切换;ROCKIVA 备选)
 
-- **采用 `external/iva` 的 ROCKIVA**(Rockchip 官方智能视觉分析 SDK):
-  - 能力:人脸检测 + 关键点 + **1:N 人脸检索(注册/搜索)** + 属性(性别/年龄/表情/眼镜等);模型自带,NPU 推理
-  - 板型适配:`librockiva/rockiva-rk3576-Linux`(预编译库)+ `models/rockiva_data_rk3576`
-  - API:`include/rockiva_face_api.h`(初始化/送帧 + 人脸注册/检索接口)
-  - 文档:`Rockchip_Developer_Guide_ROCKIVA_SDK_CN.pdf`(已拷入本仓库 sdk-guide/docs/)
-  - Buildroot:`BR2_PACKAGE_IVA=y` + `BR2_PACKAGE_IVA_RK3576=y`(已启用,装 staging 可直接链接)
-- **活体判定输入**:ROCKIVA 输出的关键点/姿态供 liveness_service 使用(张嘴判定二期接口部能力或补 landmark 模型)
-- **备选/扩展**:需自定义识别模型或更高精度时,再走 rknn-toolkit2 + rknn_model_zoo 自组 SCRFD+ArcFace(转换方法见 sdk-guide §5);无论哪条路,比对阈值都要实测 ROC 标定
-- 版本对齐:烧录后 `dmesg | grep rknpu` 查驱动版本
+**主线 —— rknn-toolkit2 + rknn_model_zoo 自组(RetinaFace + ArcFace),已上板跑通**
+
+| 环节 | 模型 | 输入 | 板上实测 | 出处 |
+|---|---|---|---|---|
+| 检测 | `RetinaFace_rk3576_i8.rknn` | 320×320×3 **I8**(归一化烤进图,喂原始 U8) | **6.7 ms/帧** | zoo `examples/RetinaFace`,按 rk3576+i8 **重转** |
+| 识别 | `w600k_r50.rknn`(ArcFace-R50) | 112×112×3 **F16**,须喂 `(x-127.5)/127.5` 的 **F32** | **56 ms** | InsightFace model zoo |
+| 特征 | 512 维 float32 = **2048 B** | — | 余弦比对 | `DG_FEATURE_MAX` 已 512→2048(BLOB 免迁移) |
+
+- **两个必须记住的实测结论**(否则会踩无报错的坑,详见 models/README §⑤ 与 DEVLOG):
+  1. RetinaFace 原始 `RetinaFace.rknn` 是 **RK3588 模型**,本板驱动直接拒收,必须按 rk3576 重转;
+  2. ArcFace **未烤归一化**——直接喂 uint8 会让所有 embedding 高度相似(cos(脸,纯色)≈0.79),
+     识别永不命中且**无任何报错**;必须喂 F32 预归一化(实测 cos(同人,变暗)=0.98、cos(脸,纯色)=0.11)。
+- **分层**:`drv/npu/`(rknn 薄封装 + RGA letterbox)、`services/vision/rknn_face.c`(解码/NMS/5 点对齐/余弦,
+  纯 C 宿主可测)、`services/vision/vision_rknn.c`(契约装配与事件发布)。
+- **换检测器/换模型**:解码规则随模型走,新增解码函数即可;RetinaFace 与 SCRFD 两套解码**均已实现**(`rknn_face.c`)。
+- **阈值**(`face.match_threshold` 1:N/1:1、`face.dup_threshold` 查重):余弦分度与 ROCKIVA 不同,
+  0.42/0.90 只是起点,**须按板上 2s 节流日志“1:N 最高分”实测标定**(遗留)。
+
+**备选 —— 官方 ROCKIVA(2026-09-17 原定方案,2026-09-21 搁置)**
+
+- 采用 `external/iva` 的 ROCKIVA(检测+关键点+1:N 检索一体,模型自带),`librockiva` 预编译库 + `BR2_PACKAGE_IVA*` 已启用。
+- **搁置原因**:本项目所用的 SDK 快照里 `models/rockiva_data_rk3576` **只有前级检测一个文件**
+  (`object_detection_v3_cls8.data`),人脸件(`face_landmark5.data`/`face_quality_v2.data`/识别模型)
+  仅在 rk3588/rv1126 目录存在;`iva.tar` 内亦无。**须走 Kickpi 厂商渠道补 rk3576 模型包**。
+- `vision_rockiva.c` 保留可用(缺模型时自行返回失败降级,不阻塞其余业务);
+  补到模型后按 `docs/tech/B7_FACE_HANDOFF.md` §2.4 拷贝即联调。
+- 版本对齐:烧录后 `dmesg | grep rknpu` 查驱动版本(`npu_hal_version()` 亦打印 api/drv 版本)。
 
 ### 4.4 活体检测(单目 RGB,动作指令式)
 

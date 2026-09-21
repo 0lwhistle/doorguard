@@ -1,5 +1,12 @@
 # B7 人脸识别 — 交接文档(2026-09-18,上下文压缩交接)
 
+> ⚠️ **2026-09-21 路线变更:本文的 ROCKIVA 方案已降为备选,主线改为自组 rknn
+> (RetinaFace + ArcFace)。** 新接手请先读 `door-guard/services/vision/README.md`
+> (三后端与 rknn 链路)与 `door-guard/models/README.md`(模型清单、重转步骤、板上实测)。
+> 本文仍有价值的部分:§0.1 数据流/模式状态机/线程模型、§0.2 holder 装配、
+> §3 的 API 与踩坑备忘(其中 ROCKIVA 专有项仅备选路线适用)。
+> 变更原因见 §2.4 末尾的补充。
+
 > 读本文前先读 `docs/DEVLOG.md` 顶部两条(B6 相机/OTA 已完成)。
 > 本文是 B7 的唯一交接事实源:已完成/待做/坑/API 备忘全在此。
 > **2026-09-18 晚更新**:§2 的 ①②③⑤(S60 env)⑦⑧⑨ 已完成并上板;
@@ -217,6 +224,14 @@ main.c 手工装配 → holder 注册表(`proto/holder/holder.h`,README 有用�
    建议全拷)。缺模型时 FACE_Init 返回 -1,日志 ERROR 明示,**系统降级不崩**。
    模型清单/校验和落 `door-guard/models/`(README+sha256,二进制不入 git)。
    后续固件(B10)应在 buildroot 的 IVA 包里带上这些模型,不再手工拷。
+
+   **2026-09-21 补充(重要)**:照此路径排查后发现,**本版 SDK 快照根本没有
+   rk3576 的人脸模型**——`external/iva/models/rockiva_data_rk3576` 与
+   buildroot 构建产物两处都只有前级检测 `object_detection_v3_cls8.data`,
+   `iva.tar` 内亦无;人脸件只存在于 rk3588/rv1126 目录(跨芯片不可用,
+   别拷)。**须走 Kickpi 厂商渠道要 rk3576 的 rockiva 人脸模型包**。
+   同期主线已切换为自组 rknn(RetinaFace + ArcFace,已上板跑通),
+   无需 ROCKIVA 模型即可交付检测+识别;本路线保留为备选。
 5. **部署联调**(模型到位后):`source env/env.sh && dg-build && dg-deploy`。
    看板日志(/var/log/door-guard.log):`ROCKIVA 就绪` + `人脸特征长度 N B` →
    用户管理页录入人脸(正对镜头 3s 内)→ 日志 `特征库装载` → 主页举脸:

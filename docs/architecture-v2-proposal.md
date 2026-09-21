@@ -313,12 +313,13 @@ capture 帧 ─→ vision:检测 → 质量闸门(评分达标才有资格) → 
 
 全部通过 = v2 落地完好;任一不符 = 有人动过,先查 git log 再继续开发。
 
-**① 提交链与远程**(`git log --oneline -6` + `git status -sb`):
+**① 提交链与远程**(`git status -sb` + `git log --oneline -12`):
 
-- 最新 6 条依次为:`91c4990` 收尾文档 → `2a8800e` M2④ ota 按需线程 →
-  `dc306a6` M2③ registry+看门狗 → `676bc07` M2② 特征缓存 →
-  `546833c` M2① config 双文件 → `89549b1` models 登记;
-- `## master...origin/master` 无 ahead/behind(工作树干净且已推送)。
+- `## master...origin/master` **无 ahead/behind**(工作树干净且已推送);
+- 提交历史未被人重写(不查具体哈希——哈希每次提交都会变,查形态):
+  `git log --oneline -12` 应能看到 `feat(npu)`/`feat(vision)`/`feat(ui)`/`docs(arch)`/
+  `refactor(arch)` 等本项目前缀,且最早的 M1/M2 提交仍在(若 `91c4990`、
+  `dc306a6` 这类近期哈希一个都找不到 = 历史被重写,先查 git reflog)。
 
 **② 目录形态**(v2 五层栈,`ls door-guard`):
 
@@ -326,13 +327,20 @@ capture 帧 ─→ vision:检测 → 质量闸门(评分达标才有资格) → 
   components 下有 `tasker event_bus holder registry logger`;
   services 下有 `capture vision liveness verify access enroll config web ota mdns ntp`;
   modules 下只有 `camera display sqlite net`;
+  **drv 下 `npu/` 已填**(`npu_model.c` rknn 薄封装 + `npu_pre.c` RGA letterbox;
+  全仓唯一 include `<rknn_api.h>` 的文件在 `npu_model.c`);
+  **`services/vision/` 有三个后端**:`vision_rknn.c`(主线)/`vision_rockiva.c`(备选)/
+  `vision_sim.c`(PC),外加纯算法单元 `rknn_face.c`(宿主可测);
 - **不应有**:`hal/`、`auth/`、顶层 `config/`、
   `modules/{capture,vision,liveness,access,enroll}`、`modules/net/{web,ota,mdns,ntp}`、
   `proto/{tasker,event_bus,holder,dg_log.*}`(均已在 M1 迁走)。
 
-**③ 测试**(WSL 宿主全新构建):`ctest` **25/25 全绿**(22 原有 + test_feat_cache /
-test_registry / test_ota);零警告以 python 全字节扫描构建日志判定
-(`grep -c warning` 对未落盘日志有竞态假象,不可作准)。
+**③ 测试**(WSL 宿主全新构建):`ctest` **28/28 全绿**(22 原有 + test_feat_cache /
+test_registry / test_ota + **test_rknn_face(解码/NMS/对齐/余弦)/
+test_npu_pre(letterbox 坐标数学)/ test_enroll_flow(录入链路端到端)**);
+零警告以 python 全字节扫描构建日志判定
+(`grep -c warning` 对未落盘日志有竞态假象,不可作准),
+且 `tests/test_i18n.c` 会拦住裸中文与字体缺字形。
 
 **④ 关键行为红线**(`grep` 核验):
 
@@ -347,9 +355,12 @@ test_registry / test_ota);零警告以 python 全字节扫描构建日志判定
 - `git push` 正常即可,**不需要 --force**(远程旧 lineage 已于 2026-09-21 替换,
   其他旧克隆须 `fetch + reset --hard` 对齐,勿 pull)。
 
-**⑤ 文档同步态**:DEVLOG 顶部有 2026-09-21(M2 四项)与 2026-09-20(M1)两条;
-PROJECT_PLAN 快照含"2026-09-21 M2 行为升级四项完成,25/25 全绿";本文 §9 已标注
-M1/M2 完成与遗留(DB 单写者队列、EV_SYS_SERVICE_STATE 的 UI 渲染、心跳仅 web、M3)。
+**⑤ 文档同步态**:DEVLOG 顶部为 2026-09-21 当日多条(自组 rknn 路线开工/检测上板/
+识别接通/UI 反馈三项/编辑页三缺陷);PROJECT_PLAN 快照与 §3.2 数据流、§3.4 目录、
+§4.3 人脸方案已按自组 rknn 主线更新;视觉细节在 `services/vision/README.md`,
+模型清单/重转/实测在 `door-guard/models/README.md`;B7 交接文档顶部已标注路线变更。
+本文 §9 标注 M1/M2 完成与遗留(DB 单写者队列、EV_SYS_SERVICE_STATE 的 UI 渲染、
+心跳仅 web、M3)。
 
 **遗留事项(有意未做,勿当缺陷报)**:见 §9 M2 ①③ 条内"遗留"注记与 DEVLOG
 "没做完/遗留"段。
