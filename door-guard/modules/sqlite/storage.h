@@ -39,6 +39,9 @@ int db_user_set_password(user_rec_t *rec, const char *plain_pwd);
 int db_user_add(const user_rec_t *in);
 /** 更新:按 rec->user_id 定位;非零长度特征/非零哈希才覆盖对应字段 */
 int db_user_update(const user_rec_t *in);
+/** 清除人脸特征(len 置 0)——db_user_update 的"len=0=保留"语义无法表达
+ *  清除,必须走本接口(2026-09-21 编辑页"清除人脸"落此坑) */
+int db_user_clear_face(const char *user_id);
 int db_user_del(const char *user_id);
 int db_user_get(const char *user_id, user_rec_t *out);
 int db_user_count(uint32_t *n);

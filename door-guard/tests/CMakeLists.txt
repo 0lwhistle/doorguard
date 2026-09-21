@@ -31,6 +31,11 @@ set_tests_properties(test_auth_fsm PROPERTIES TIMEOUT 60)
 dg_add_test(test_rknn_face dg_rknn_face)
 # letterbox 是头内联的纯数学,测试只需那个头目录(不需要 dg_npu:它含 RGA,宿主编不了)
 dg_add_test(test_npu_pre dg_rknn_face)
+
+# 录入链路端到端(sim mock 后端应答抓取):请求→回执→DB 状态一致
+dg_add_test(test_enroll_flow dg_enroll dg_vision dg_storage dg_config
+                             dg_tasker dg_event_bus dg_proto cjson)
+set_tests_properties(test_enroll_flow PROPERTIES TIMEOUT 120)
 target_include_directories(test_npu_pre PRIVATE ${CMAKE_SOURCE_DIR}/drv/npu)
 add_executable(test_e2e test_e2e.c)
 target_include_directories(test_e2e PRIVATE ${CMAKE_SOURCE_DIR}/services/access ${CMAKE_SOURCE_DIR}/services/vision)

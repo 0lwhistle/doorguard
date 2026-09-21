@@ -132,11 +132,8 @@ static void refresh(void)
         val_set(s_val_face, _("无"));
         val_set(s_val_finger, _("无"));
         val_set(s_val_ic, _("无"));
-        if (s_btn_pwd) {
-            lv_obj_t *btn = lv_obj_get_child(s_btn_pwd, lv_obj_get_child_cnt(s_btn_pwd) - 1);
-            (void)btn;
+        if (s_btn_pwd)
             dg_btn_set_label(s_btn_pwd, _("设置"));
-        }
         if (s_btn_face)
             lv_obj_add_flag(s_btn_face, LV_OBJ_FLAG_HIDDEN);
         if (s_btn_save)
@@ -282,6 +279,32 @@ static void enroll_request(int32_t kind)
     EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
 }
 
+/* 录入回执 5s 超时:链路里任何一环没响应(3s 内无人脸/后端异常),此前 UI
+ * 永远无声——用户以为“录入功能没提供”。有超时,至少明确告知重试。 */
+static lv_timer_t *s_enroll_wait;
+
+static void enroll_timeout_cb(lv_timer_t *t)
+{
+    (void)t;
+    s_enroll_wait = NULL;
+    dg_popup_fail(_("录入超时,请正对摄像头重试"), 3000, NULL, NULL);
+}
+
+static void enroll_wait_cancel(void)
+{
+    if (s_enroll_wait) {
+        lv_timer_del(s_enroll_wait);
+        s_enroll_wait = NULL;
+    }
+}
+
+static void enroll_wait_start(void)
+{
+    enroll_wait_cancel();
+    s_enroll_wait = lv_timer_create(enroll_timeout_cb, 5000, NULL);
+    lv_timer_set_repeat_count(s_enroll_wait, 1);
+}
+
 static void on_face(lv_event_t *e)
 {
     (void)e;
@@ -295,6 +318,7 @@ static void on_face(lv_event_t *e)
         return;
     }
     enroll_request(DG_ENROLL_FACE);
+    enroll_wait_start();
     dg_popup_success(_("请正对摄像头"), 1500, NULL, NULL);
 }
 
@@ -303,6 +327,7 @@ static void apply_face_pick(void *ud, int idx)
     (void)ud;
     if (idx == 0) {
         enroll_request(DG_ENROLL_FACE);
+        enroll_wait_start();
         dg_popup_success(_("请正对摄像头"), 1500, NULL, NULL);
     } else {
         enroll_request(DG_ENROLL_FACE_CLEAR);
@@ -392,6 +417,9 @@ static void on_evt(const ui_evt_t *evt)
 
 void page_user_edit_evt(const ui_evt_t *evt)
 {
+    if (evt->kind != UI_EVT_ENROLL_RESULT)
+        return;
+    enroll_wait_cancel();               /* 有回执即撤超时定时器 */
     on_evt(evt);
 }
 
@@ -464,6 +492,7 @@ void page_user_edit_create(lv_obj_t *parent)
 
 void page_user_edit_destroy(void)
 {
+    enroll_wait_cancel();
     s_title = s_val_name = s_val_role = s_val_pwd = NULL;
     s_val_face = s_val_finger = s_val_ic = NULL;
     s_btn_pwd = s_btn_face = s_btn_save = s_btn_del = NULL;

@@ -547,6 +547,8 @@ static int on_capture_req(const event_t *e, void *ud)
         DG_LOGW(TAG, "录入取特征:近 3s 无合格人脸(请正对镜头重试)");
         return 0;
     }
+    DG_LOGI(TAG, "录入取特征:%u B(滞后 %lldms)→ %s", len, (long long)age,
+            r->user_id);
     vision_service_submit_feature(r->user_id, r->seq, buf, len);
     return 0;
 }

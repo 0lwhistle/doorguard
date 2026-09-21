@@ -828,6 +828,35 @@ int db_user_del(const char *user_id)
     return rc;
 }
 
+int db_user_clear_face(const char *user_id)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!user_id || !*user_id)
+        return DG_ERR_PARAM;
+
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    int rc = DG_OK;
+    if (sqlite3_prepare_v2(s_db,
+                           "UPDATE users SET face_vec=NULL WHERE user_id=?1",
+                           -1, &st, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    sqlite3_bind_text(st, 1, user_id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) != SQLITE_DONE || sqlite3_changes(s_db) == 0)
+        rc = sqlite3_changes(s_db) == 0 ? DG_ERR_NOT_FOUND : DG_ERR_DB;
+    sqlite3_finalize(st);
+    /* M2 特征缓存同步:人脸已清,1:N 缓存里该用户一并移除(缓存恢复兜底) */
+    if (rc == DG_OK && cache_del_locked(user_id) != DG_OK) {
+        DG_LOGE(TAG, "特征缓存增量更新失败(clear face),触发全量重载");
+        cache_recover_locked();
+    }
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
 int db_user_get(const char *user_id, user_rec_t *out)
 {
     if (!s_db)

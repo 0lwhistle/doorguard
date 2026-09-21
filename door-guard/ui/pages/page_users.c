@@ -72,7 +72,10 @@ static void refresh_list(void)
 
 static void on_row_click(lv_event_t *e)
 {
-    page_user_edit_open((const char *)lv_event_get_user_data(e));
+    /* 注意:lv_event_get_user_data 返回的是“回调注册时的 user_data”(此处为
+     * NULL),不是 lv_obj_set_user_data 设置的行数据——旧版用户管理因此拿到
+     * “(null)”,点行进的编辑页全部显示“无”、保存必败(2026-09-21 用户反馈)。 */
+    page_user_edit_open((const char *)lv_obj_get_user_data(lv_event_get_target(e)));
     navigator_push("user_edit");
 }
 
