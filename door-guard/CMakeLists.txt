@@ -107,6 +107,7 @@ add_library(dg_ui STATIC
     ui/pages/page_standby.c
     ui/pages/page_menu.c
     ui/pages/page_users.c
+    ui/pages/page_user_edit.c
     ui/pages/page_device.c
     ui/pages/page_access_set.c
     ui/pages/page_logs.c
@@ -115,6 +116,7 @@ add_library(dg_ui STATIC
     ui/presenters/presenter_standby.c
     ui/presenters/presenter_menu.c
     ui/presenters/presenter_users.c
+    ui/presenters/presenter_user_edit.c
     ui/presenters/presenter_device.c
     ui/presenters/presenter_access_set.c
     ui/presenters/presenter_logs.c

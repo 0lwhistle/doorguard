@@ -82,6 +82,19 @@ static int on_request(const event_t *e, void *ud)
         publish_result(r->user_id, r->kind, r->seq, rc);
         return 0;
     }
+    if (r->kind == DG_ENROLL_FACE_CLEAR) {
+        /* 清除人脸(保留用户):len 置 0 + 特征库 DELETE(经事件走,视觉库才同步) */
+        user_rec_t rec;
+        memset(&rec, 0, sizeof(rec));
+        int rc = db_user_get(r->user_id, &rec);
+        if (rc == DG_OK && rec.face_vec_len > 0) {
+            rec.face_vec_len = 0;
+            rc = db_user_update(&rec);
+            vision_service_library_remove(r->user_id);
+        }
+        publish_result(r->user_id, r->kind, r->seq, rc);
+        return 0;
+    }
     if (r->kind == DG_ENROLL_FACE) {
         /* 向视觉服务请求抓取特征(板上走 ROCKIVA,sim 走 mock) */
         ev_capture_req_t req;

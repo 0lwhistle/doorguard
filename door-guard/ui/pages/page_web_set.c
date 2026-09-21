@@ -173,12 +173,12 @@ void page_web_set_create(lv_obj_t *parent)
     s_warn = make_line(parent, "", INFO_Y + 90);
     lv_obj_set_style_text_color(s_warn, DG_COL_ERR(), 0);
 
-    lv_obj_t *b_user = dg_btn_create(parent, LV_SYMBOL_EDIT, _("修改账号"));
+    lv_obj_t *b_user = dg_btn_create(parent, NULL, _("修改账号"));
     lv_obj_set_size(b_user, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
     lv_obj_align(b_user, LV_ALIGN_TOP_MID, 0, BTN_Y);
     lv_obj_add_event_cb(b_user, on_edit_user_click, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *b_pwd = dg_btn_create(parent, LV_SYMBOL_KEYBOARD, _("修改密码"));
+    lv_obj_t *b_pwd = dg_btn_create(parent, NULL, _("修改密码"));
     lv_obj_set_size(b_pwd, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
     lv_obj_align(b_pwd, LV_ALIGN_TOP_MID, 0, BTN_Y + DG_BTN_H + DG_PAD);
     lv_obj_add_event_cb(b_pwd, on_edit_pwd_click, LV_EVENT_CLICKED, NULL);
@@ -187,7 +187,7 @@ void page_web_set_create(lv_obj_t *parent)
                                BTN_Y + 2 * (DG_BTN_H + DG_PAD) + 10);
     lv_obj_set_style_text_color(hint, DG_COL_TEXT(), 0);
 
-    lv_obj_t *back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));
+    lv_obj_t *back = dg_btn_create_light(parent, NULL, _("返回"));
     lv_obj_set_size(back, 200, DG_BTN_H);
     lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 0, -DG_PAD);
     lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);

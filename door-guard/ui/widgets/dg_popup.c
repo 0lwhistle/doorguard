@@ -268,7 +268,7 @@ void dg_popup_input(const dg_popup_input_cfg_t *cfg)
     };
     dg_kbd_create(card, cfg->start_alpha, &ops);
 
-    lv_obj_t *cancel = dg_btn_create_light(card, LV_SYMBOL_CLOSE, _("取消"));
+    lv_obj_t *cancel = dg_btn_create_light(card, NULL, _("取消"));
     lv_obj_add_event_cb(cancel, input_cancel_click, LV_EVENT_CLICKED, cfg->on_cancel);
     DG_LOGI("[POPUP]", "input: %s", cfg->title);
 }
@@ -294,6 +294,15 @@ static void choice_pick(lv_event_t *e)
         cb(ud, idx);
 }
 
+static void choice_cancel_click(lv_event_t *e)
+{
+    void (*cb)(void *) = lv_event_get_user_data(e);
+    void *ud = s_choice.ud;
+    dg_popup_close();
+    if (cb)
+        cb(ud);
+}
+
 void dg_popup_choice(const char *title, const char *const *options, int cnt,
                      void (*on_pick)(void *ud, int idx),
                      void (*on_cancel)(void *ud), void *ud)
@@ -309,5 +318,10 @@ void dg_popup_choice(const char *title, const char *const *options, int cnt,
         lv_obj_set_user_data(btn, (void *)(intptr_t)i);
         lv_obj_add_event_cb(btn, choice_pick, LV_EVENT_CLICKED, NULL);
     }
+    /* 取消按钮:此前 on_cancel 回调存了却没有任何入口能触发——
+     * 用户点错必须硬着头皮选一项,没有反悔权(2026-09-21 用户反馈) */
+    lv_obj_t *cancel = dg_btn_create_light(card, NULL, _("取消"));
+    lv_obj_add_event_cb(cancel, choice_cancel_click, LV_EVENT_CLICKED,
+                        s_choice.on_cancel);
     DG_LOGI("[POPUP]", "choice: %s (%d 项)", title, cnt);
 }

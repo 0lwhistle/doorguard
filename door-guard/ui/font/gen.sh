@@ -21,7 +21,7 @@ PY
 npx --yes lv_font_conv --no-compress --bpp 4 --size 16 \
   --font "${DG_FONT_LATIN:-/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf}" -r 0x20-0x7f \
   --font "$FONT_SRC" \
-  --symbols "$(cat /tmp/dg_font_symbols.txt)" \
+  --symbols " $(cat /tmp/dg_font_symbols.txt)" \
   --format lvgl --lv-include lvgl.h \
   --no-prefilter -o font/dg_font_cn_16.c
 echo "生成 ui/font/dg_font_cn_16.c"

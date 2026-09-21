@@ -28,6 +28,7 @@ typedef enum {
     UI_EVT_NTP_RESULT,     /**< NTP 校正结果(设备管理页显示) */
     UI_EVT_WEB_STATE,      /**< web 上位机状态快照(Web 管理页显示) */
     UI_EVT_WEB_SET_RESULT, /**< web 账号/口令修改结果(Web 管理页弹窗) */
+    UI_EVT_ENROLL_RESULT,  /**< 录入结果(用户编辑页:人脸录入/清除/删除) */
 } ui_evt_kind_t;
 
 typedef struct {
@@ -43,6 +44,7 @@ typedef struct {
     ev_ntp_result_t ntp;           /* UI_EVT_NTP_RESULT */
     ev_web_state_t web_state;      /* UI_EVT_WEB_STATE */
     ev_web_set_result_t web_set_result; /* UI_EVT_WEB_SET_RESULT */
+    ev_enroll_result_t enroll;     /* UI_EVT_ENROLL_RESULT */
 } ui_evt_t;
 
 /** 入队(任意线程;队满丢弃并计数) */

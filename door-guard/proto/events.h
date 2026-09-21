@@ -143,6 +143,7 @@ typedef enum {
     DG_ENROLL_FACE = 0,                   /**< 采集人脸特征 */
     DG_ENROLL_FINGER = 1,                 /**< 采集指纹特征 */
     DG_ENROLL_DELETE = 2,                 /**< 删除用户 */
+    DG_ENROLL_FACE_CLEAR = 3,             /**< 清除已录人脸(保留用户) */
 } dg_enroll_kind_t;
 
 typedef struct {

@@ -9,6 +9,7 @@
  */
 #include "dg_kbd.h"
 #include "dg_btn.h"
+#include "../i18n.h"
 #include "../theme.h"
 #include "dg_log.h"
 
@@ -195,10 +196,10 @@ lv_obj_t *dg_kbd_create(lv_obj_t *parent, bool start_alpha, const dg_kbd_ops_t *
                                           "7", "8", "9" };
     for (int i = 0; i < 9; i++)
         add_key(k->num_page, k, digits[i], 32, KEY_H, false, emit_key);
-    add_key(k->num_page, k, LV_SYMBOL_BACKSPACE, 32, KEY_H, true, emit_backspace);
+    add_key(k->num_page, k, _("删除"), 32, KEY_H, true, emit_backspace);
     add_key(k->num_page, k, "0", 32, KEY_H, false, emit_key);
     {
-        lv_obj_t *ok = add_key(k->num_page, k, LV_SYMBOL_OK, 32, KEY_H, false, emit_ok);
+        lv_obj_t *ok = add_key(k->num_page, k, _("确认"), 32, KEY_H, false, emit_ok);
         lv_obj_set_style_bg_color(ok, DG_COL_OK(), 0);
     }
 
@@ -219,17 +220,17 @@ lv_obj_t *dg_kbd_create(lv_obj_t *parent, bool start_alpha, const dg_kbd_ops_t *
     lv_obj_t *r2 = add_row(k->alpha_page, KEY_H);
     for (int i = 0; rows_abc[1][i]; i++)
         add_letter_key(r2, k, rows_abc[1][i]);
-    add_key(r2, k, LV_SYMBOL_BACKSPACE, 10, KEY_H, true, emit_backspace);
+    add_key(r2, k, _("删除"), 10, KEY_H, true, emit_backspace);
 
     lv_obj_t *r3 = add_row(k->alpha_page, KEY_H);
-    add_key(r3, k, LV_SYMBOL_UP, 15, KEY_H, true, on_shift);      /* ⇧ 大小写 */
+    add_key(r3, k, "Aa", 15, KEY_H, true, on_shift);              /* 大小写(纯 ASCII,必有字形) */
     for (int i = 0; rows_abc[2][i]; i++)
         add_letter_key(r3, k, rows_abc[2][i]);
 
     lv_obj_t *r4 = add_row(k->alpha_page, KEY_H);
     add_key(r4, k, " ", 60, KEY_H, true, emit_key);               /* 空格(姓名) */
     {
-        lv_obj_t *ok = add_key(r4, k, LV_SYMBOL_OK, 40, KEY_H, false, emit_ok);
+        lv_obj_t *ok = add_key(r4, k, _("确认"), 40, KEY_H, false, emit_ok);
         lv_obj_set_style_bg_color(ok, DG_COL_OK(), 0);
     }
 

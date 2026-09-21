@@ -75,6 +75,7 @@ static npu_letterbox_t s_lb;
 static int s_lb_src_w, s_lb_src_h;
 static float s_score_thresh = 0.5f;
 static bool s_face_present;
+static int64_t s_last_det_ms;          /* 最近一次检出的时刻:LOST 滞回用 */
 
 /* 识别侧 */
 static int      s_rec_dim;            /* 实际输出维度(=512 时才启用识别) */
@@ -441,9 +442,13 @@ static void on_frame_push(const uint8_t *data, int w, int h, uint32_t frame_id)
 
     if (n <= 0) {
         camera_nv12_release(frame_id);
-        pub_face_lost();
+        /* 滞回:单帧漏检(分数抖动/识别帧占用造成的检测间隙)立刻发 LOST 会让
+         * 脸框闪烁——600ms 内保持最后位置不发,超时才真正判定"人走了" */
+        if (s_face_present && now_ms() - s_last_det_ms > 600)
+            pub_face_lost();
         return;
     }
+    s_last_det_ms = now_ms();
 
     /* 最大脸(检测模型空间)→ 源图坐标 */
     int best = 0;
