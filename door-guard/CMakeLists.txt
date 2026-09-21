@@ -176,6 +176,22 @@ target_include_directories(dg_uart PUBLIC ${CMAKE_SOURCE_DIR}/drv/uart
                                           ${CMAKE_SOURCE_DIR}/proto)
 target_link_libraries(dg_uart PUBLIC dg_log)
 
+# npu:NPU 推理库(RKNN 运行时薄封装)
+# 宿主没有 rknn 头/驱动,只在交叉编译里编(与 vision_rockiva.c 同一条守卫);
+# 全仓只有 drv/npu/npu_model.c include <rknn_api.h>,上层只认 npu_model.h。
+if(NOT DG_SIM AND NOT DG_BUILD_TESTS)
+    add_library(dg_npu STATIC drv/npu/npu_model.c)
+    target_include_directories(dg_npu PUBLIC ${CMAKE_SOURCE_DIR}/drv/npu
+                                             ${CMAKE_SOURCE_DIR}/proto)
+    target_link_libraries(dg_npu PUBLIC dg_log rknnrt)
+    target_include_directories(dg_npu PRIVATE ${CMAKE_SYSROOT}/usr/include/rknn)
+
+    # NPU 模型探针(板上跑,不进 door-guard 主程序):打印 .rknn 的输入输出规格
+    # 并零输入试跑。换模型第一件事——解码要按真实张量形状写,不能猜。
+    add_executable(npu_probe tools/npu_probe.c)
+    target_link_libraries(npu_probe PRIVATE dg_npu)
+endif()
+
 # liveness:动作活体(B7 留口 on_face/pass;B8 状态机)
 add_library(dg_liveness STATIC services/liveness/liveness_service.c)
 target_include_directories(dg_liveness PUBLIC ${CMAKE_SOURCE_DIR}/services/liveness)

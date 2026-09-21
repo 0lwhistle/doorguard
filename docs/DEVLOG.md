@@ -5,6 +5,45 @@
 
 ---
 
+## 2026-09-21 自组 rknn 路线开工:NPU 推理库落位 + 三模型板上实测
+
+**背景**:ROCKIVA 官方 rk3576 人脸模型包在这版 SDK 快照里缺失(external 与 buildroot
+两处、iva.tar 内均只有前级检测 `object_detection_v3_cls8.data`;rk3588/rv1126 目录才有
+人脸件)。官方模型须走 Kickpi 厂商渠道,不阻塞——改走用户拍板的自组 rknn 路线。
+
+**做了什么**
+- **建库 `drv/npu/`**(架构里预留的空位):`npu_model.c/h` = RKNN 运行时薄封装
+  (加载/查张量/喂输入/推理/取输出/释放),**全仓唯一 include `<rknn_api.h>`** 的文件;
+  不认识任何具体模型,模型专属后处理留在 services/vision(与 drv/gpio 同纪律)。
+  输入尺寸不写死——加载后查出来,换模型不必改代码。附 README(定位/接口/坑)。
+- **`tools/npu_probe.c`**:模型探针,打印真实张量规格 + 零输入试跑 + 压测
+  (`DG_NPU_BENCH=N`)。换模型第一件事,避免猜输入尺寸。
+- CMake:`dg_npu` + `npu_probe`(`NOT DG_SIM AND NOT DG_BUILD_TESTS` 守卫,宿主无 rknn);
+  交叉编译零告警。
+
+**板上实测结论(记进 `models/README.md`)**
+- **`RetinaFace.rknn` 不可用**:驱动直报 `This rknn model is for RK3588, but current
+  platform is RK3576`——转换时目标平台选错。要用须按 RK3576 重转。
+- **`det_10g.rknn`(SCRFD-10G)可用**:输入 640×640×3 NHWC F16,9 输出 = 3 stride ×
+  (score/bbox/kps)、每位置 2 anchor;顺序 = `[s8,s16,s32,b8,b16,b32,k8,k16,k32]`。
+- **`w600k_r50.rknn` 可用**:输入 112×112×3 NHWC F16,输出 `[1,512]`=512 维
+  → 证实 `DG_FEATURE_MAX` 须 512→2048 B 才能装下。
+- **稳态耗时**(压测 30 次):检测 177.6ms(≈6fps)、识别 55.6ms(≈18fps),
+  一次「检测+识别」≈240ms。门禁站定刷脸可用,框跟踪不顺滑;提速杠杆(int8 量化重转 >
+  降输入分辨率 > 每 N 帧检测)已记进 models/README。
+
+**踩坑**
+- 探针输出缓冲写死 4096 → SCRFD 的 12800 元素 score 头被 `npu_model_output_f32`
+  正确拒掉(不截断,报 DG_ERR_PARAM)——库的行为对,是探针该按 attr 分配。
+- `snprintf` 拼两个 256B 版本串触发 `-Wformat-truncation`;定长 `%.255s` + 放大缓冲消除。
+
+**下一步(会话①续)**:SCRFD 解码(3 stride/2 anchor/9 输出还原 + NMS)+ 5 点对齐
+(纯 C,宿主单测)→ `vision_rknn.c` 后端起(相机 NV12 → RGA letterbox → NPU → 解码
+→ 脸框事件)→ 上板看框。**注意**:两模型输入是 **F16**,预处理要产 F16 归一化数据
+(不是 UINT8),归一化系数需按实测分数校准。
+
+---
+
 ## 2026-09-21 仓库对账:拉齐 GitHub + 清 M1 迁移残留(proposal §11 全项核验过)
 
 **做了什么**

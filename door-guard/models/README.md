@@ -55,3 +55,50 @@ cd <SDK>/rockiva_data_rk3576 && sha256sum *.data > sha256sums.txt
 - ArcFace-R50 输出 512 维 float32 = **2048 B**,超过 `DG_FEATURE_MAX(512)`
   (proto/types.h),须先提上限(users.features 是 BLOB,免迁移);
 - 特征空间 ≠ `rockiva-face-v1`,自组后端须用**独立 `face.model_tag`**(如 `arcface-r50-v1`)。
+
+### 板上实测(2026-09-21,`tools/npu_probe.c`;板端 `/userdata/doorguard/models/`)
+
+`npu_probe <model.rknn>` 打印真实张量规格并试跑/压测(`DG_NPU_BENCH=N`)。结论:
+
+**① `RetinaFace.rknn` 不可用——它是 RK3588 模型。**
+
+```
+E RKNN: This rknn model is for RK3588, but current platform is RK3576
+E RKNN: Import rknn model failed!   → npu_model_load 返回 NULL
+```
+
+转换时目标平台选成了 RK3588。要用它必须用 rknn-toolkit2 **重新按 RK3576 转换**。
+当前检测器用 `det_10g.rknn`(同为 InsightFace 系,输出契约一致,见下)。
+
+**② `det_10g.rknn`(SCRFD-10G)可用**,输入 **640×640×3 NHWC F16**,9 个输出 =
+3 个 stride × 3 个头(score/bbox/kps),**每位置 2 anchor**:
+
+| stride | 网格 | anchor 数 | score | bbox | kps(5 点) |
+|---|---|---|---|---|---|
+| 8  | 80×80 | 12800 | `[12800,1]` | `[12800,4]` | `[12800,10]` |
+| 16 | 40×40 | 3200  | `[3200,1]`  | `[3200,4]`  | `[3200,10]` |
+| 32 | 20×20 | 800   | `[800,1]`   | `[800,4]`   | `[800,10]` |
+
+输出顺序 = `[score_8, score_16, score_32, bbox_8, bbox_16, bbox_32, kps_8, kps_16, kps_32]`
+(rknn_model_zoo 的 SCRFD 约定)。bbox/kps 是**相对 anchor 中心的距离×stride**,需按
+stride 还原;零输入时 score≈0.02(无脸),符合预期。
+
+**③ `w600k_r50.rknn` 可用**,输入 **112×112×3 NHWC F16**(与 InsightFace 对齐约定
+一致),输出 `[1,512]` = 512 维 embedding,证实 ① 的 `DG_FEATURE_MAX` 必须提到 2048 B。
+
+**④ 稳态耗时(压测 30 次)**:
+
+| 模型 | 最快 | 均值 | 上限 |
+|---|---|---|---|
+| det_10g 640×640 | 177.6 ms | 187.7 ms | ~6 fps |
+| w600k_r50 112×112 | 55.6 ms | 59.4 ms | ~18 fps |
+
+一次完整「检测+识别」≈ 240 ms(≈4 fps)。门禁场景(站定刷脸)可用,但**盒子跟踪不顺滑**。
+提速杠杆(按收益排序,均需 VM 侧重转):
+
+1. **int8 量化**(带标定集重转):输入输出都是 F16 提示当前很可能是 FP16 图,
+   6 TOPS 是 int8 口径,量化后通常有数倍收益——**收益最大的一步**;
+2. **降输入分辨率**:门口人脸离镜头近,320×320 足够,算量约降 4 倍;
+3. 软件侧缓解(无需重转):每 N 帧检测一次 + 帧间沿用上次框。
+
+SDK/驱动版本(板上实测):`api=2.0.0b0 (35a6907d79@2024-03-24) drv=0.9.8`。
