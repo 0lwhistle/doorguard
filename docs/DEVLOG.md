@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-09-21 仓库对账:拉齐 GitHub + 清 M1 迁移残留(proposal §11 全项核验过)
+
+**做了什么**
+- 本地落后 origin 1 个提交(`1cc0013` §11 自查清单 + camera/display README 旧 include
+  修复);工作树里未提交的 §11 与远端提交**逐字节重复**,restore 丢弃后 ff 拉取对齐。
+- 删 M1 迁移残留目录 `modules/net/web/`(旧路径 node_modules + dist;dist 与现役
+  `services/web/frontend/dist` 逐字节一致,依赖可按 package-lock `npm ci` 重建)。
+- 修 M1 漏改的旧路径**活引用**:`tests/web/web_test.sh` 4 处(前端单测目录、
+  build_frontend.sh 提示、pages 产物比对)、`services/web/README.md` 3 处
+  (目录树根、cd 路径、vitest 路径)。
+
+**核验(proposal §11 清单)**
+- ② 目录形态 ✓;④ 红线 ✓(cfg.c 无 db_config_set / 无旧 include / models 只 README+sha256sums)
+- ③ build-tests 重新 cmake 配置后 **25/25 全绿、构建 0 警告**。坑:旧构建目录只认 22 个
+  测试,M2 新增的 3 个要重跑 `cmake .` 才纳入——**M 级提交新增测试后,旧构建目录须重配置**。
+
+**踩坑**
+- web_test.sh 的前端检查自 M1 起指向旧路径:若旧路径装过 node_modules 会"静默通过",
+  残留目录一删才暴露。全库旧路径活引用已清零(DEVLOG 历史条目按约定不改)。
+
+**下一步**
+- B7 人脸模型联调;遗留项同上一条 2026-09-21(§9 注记)。
+
+---
+
 ## 2026-09-21 架构 v2 M2 行为升级四项落地(25/25 测试绿)
 
 **做了什么**(每项独立提交,WSL 全新构建回归后才提交)

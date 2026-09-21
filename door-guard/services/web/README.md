@@ -7,7 +7,7 @@
 ## 目录构成
 
 ```
-modules/net/web/
+services/web/
 ├── web_server.c/h     路由、鉴权包装、响应工具、WebSocket 连接表与推送线程
 ├── web_auth.c/h       上位机凭据(device_config + PBKDF2)与登录风控
 ├── web_session.c/h    token 表:签发/校验(滑动续期)/注销/容量驱逐
@@ -37,7 +37,7 @@ modules/net/web/
 dg-build && dg-deploy -r <IP>
 
 # 改前端(需要 node/npm)
-cd modules/net/web
+cd services/web
 ./build_frontend.sh --install     # 只有依赖变了才加 --install(npm ci)
 git add frontend pages web_pages.c
 ```
@@ -109,7 +109,7 @@ components/      纯展示:只吃 props、只发 emits(不 import store / api / 
 
 ```bash
 # 前端逻辑与产物(需要 node/npm;不需要板子)
-cd modules/net/web/frontend && npx vitest run    # 44 项
+cd services/web/frontend && npx vitest run    # 44 项
 
 # 交付面静态检查(不需要 node)
 python3 door-guard/tests/web/frontend_check.py

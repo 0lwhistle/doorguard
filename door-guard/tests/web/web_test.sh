@@ -68,15 +68,15 @@ fi
 echo "== 0b. 前端单测(Vue:api/stores/组件/集成/产物冒烟) =="
 if [ "${SKIP_FRONTEND_UNIT:-0}" = "1" ]; then
     echo "(跳过:已设 SKIP_FRONTEND_UNIT=1)"
-elif [ -d modules/net/web/frontend/node_modules ]; then
-    if (cd modules/net/web/frontend && npx vitest run --silent > /tmp/dg_webtest/vitest.out 2>&1); then
+elif [ -d services/web/frontend/node_modules ]; then
+    if (cd services/web/frontend && npx vitest run --silent > /tmp/dg_webtest/vitest.out 2>&1); then
         chk "前端 44 项单测通过" true
     else
         chk "前端 44 项单测通过" false
         tail -25 /tmp/dg_webtest/vitest.out
     fi
 else
-    echo "(跳过:前端依赖未安装,跑 ./modules/net/web/build_frontend.sh --install 后可用)"
+    echo "(跳过:前端依赖未安装,跑 ./services/web/build_frontend.sh --install 后可用)"
 fi
 
 echo "== 1. 静态资源 =="
@@ -94,7 +94,7 @@ curl -s "$BASE/" | grep -q '/assets/app.js' && chk "首页引用构建产物" tr
 # 服务端吐出的字节必须与仓库里内嵌的那份**逐字节一致**(防资源表长度/截断问题)
 js_size=$(curl -s -o /tmp/dg_webtest/app.js -w "%{size_download}" "$BASE/assets/app.js")
 chk "构建产物尺寸合理($js_size)" "[ '$js_size' -gt 1000 ]"
-if cmp -s /tmp/dg_webtest/app.js modules/net/web/pages/assets/app.js; then
+if cmp -s /tmp/dg_webtest/app.js services/web/pages/assets/app.js; then
     chk "构建产物与仓库内嵌字节一致" true
 else
     chk "构建产物与仓库内嵌字节一致" false
