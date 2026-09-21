@@ -471,6 +471,81 @@ static void test_concurrency(void)
     storage_deinit();
 }
 
+/* 头像:加密落库、取回一致、清除、超限拒绝、未录/用户不存在区分 */
+static void test_avatar(void)
+{
+    printf("[S8] avatar: set/get roundtrip, encrypted at rest, clear, oversize, cases\n");
+    fresh_setup();
+    user_rec_t u = make_user("20001", "李四", "pwd1");
+    DG_CHECK(db_user_add(&u) == DG_OK);
+
+    /* 未录头条 = NOT_FOUND(调用方显示占位) */
+    uint8_t buf[DG_FEATURE_MAX];
+    size_t len = 0;
+    DG_CHECK(db_user_get_avatar("20001", buf, sizeof(buf), &len) == DG_ERR_NOT_FOUND);
+
+    /* 造一段"JPEG"(内容无关,验的是封装与一致性;含 0 字节防截断实现) */
+    uint8_t jpg[512];
+    for (int i = 0; i < 512; i++)
+        jpg[i] = (uint8_t)(i * 7 + (i == 100 ? 0 : 0));   /* 同人恒定即可 */
+    /* 用 16 字节 ASCII 标记做"明文泄露"探针:三字节 JPEG 头在 MB 级随机密文里
+     * 有可观概率偶然撞上(=偶发红),16 字节 ASCII 序列则实际不可能 */
+    static const char MARK[] = "DG-AVATAR-PLAINTXT";   /* 16 字节 + NUL */
+    memcpy(jpg, MARK, sizeof(MARK) - 1);
+    DG_CHECK(db_user_set_avatar("20001", jpg, sizeof(jpg)) == DG_OK);
+
+    uint8_t got[1024];
+    DG_CHECK(db_user_get_avatar("20001", got, sizeof(got), &len) == DG_OK);
+    DG_CHECK(len == sizeof(jpg));
+    DG_CHECK(memcmp(got, jpg, sizeof(jpg)) == 0);
+
+    /* 落库必须是密文。WAL 模式下新写入可能只在 -wal 文件里,两个都要扫——
+     * 只扫主库会"因为数据还在 WAL"而假通过,安全测试假通过比没有更糟。 */
+    {
+        static const char *const files[] = { "db.sqlite", "db.sqlite-wal" };
+        int scanned = 0, leaked = 0;
+        for (int fi = 0; fi < 2; fi++) {
+            char dbpath[160];
+            snprintf(dbpath, sizeof(dbpath), "%s/%s", s_dir, files[fi]);
+            FILE *f = fopen(dbpath, "rb");
+            if (!f)
+                continue;                /* 无 WAL 文件属正常 */
+            scanned++;
+            static uint8_t raw[1 << 20];
+            size_t n = fread(raw, 1, sizeof(raw), f);
+            fclose(f);
+            for (size_t i = 0; i + 16 <= n; i++)
+                if (memcmp(&raw[i], MARK, 16) == 0)
+                    leaked = 1;
+        }
+        DG_CHECK(scanned >= 1);          /* 至少扫到一个文件(否则测了个寂寞) */
+        DG_CHECK(!leaked);               /* 明文 JPEG 头不出现 = 确实加密了 */
+    }
+
+    /* 覆盖写:长度可变(先短后长) */
+    DG_CHECK(db_user_set_avatar("20001", jpg, 64) == DG_OK);
+    DG_CHECK(db_user_get_avatar("20001", got, sizeof(got), &len) == DG_OK);
+    DG_CHECK(len == 64);
+
+    /* 清除(len=0)后回落 NOT_FOUND */
+    DG_CHECK(db_user_set_avatar("20001", NULL, 0) == DG_OK);
+    DG_CHECK(db_user_get_avatar("20001", got, sizeof(got), &len) == DG_ERR_NOT_FOUND);
+
+    /* 超限拒绝(不撑大库) */
+    static uint8_t big[40000];
+    memset(big, 1, sizeof(big));
+    DG_CHECK(db_user_set_avatar("20001", big, sizeof(big)) == DG_ERR_PARAM);
+
+    /* 用户不存在 / 参数非法 */
+    DG_CHECK(db_user_set_avatar("99999", jpg, 10) == DG_ERR_NOT_FOUND);
+    DG_CHECK(db_user_get_avatar("99999", got, sizeof(got), &len) == DG_ERR_NOT_FOUND);
+    DG_CHECK(db_user_get_avatar(NULL, got, sizeof(got), &len) == DG_ERR_PARAM);
+
+    /* 删用户后头像随之消失(同行记录,天然一致) */
+    DG_CHECK(db_user_del("20001") == DG_OK);
+    DG_CHECK(db_user_get_avatar("20001", got, sizeof(got), &len) == DG_ERR_NOT_FOUND);
+}
+
 int main(void)
 {
     test_add();          /* 含 2000 边界,最慢 */
@@ -480,6 +555,7 @@ int main(void)
     test_config();
     test_crypto();
     test_concurrency();
+    test_avatar();
 
     snprintf(s_dir, sizeof(s_dir), "/tmp/dg_st_%d", (int)getpid());
     char cmd[96];

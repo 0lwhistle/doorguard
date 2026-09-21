@@ -39,6 +39,16 @@ int db_user_set_password(user_rec_t *rec, const char *plain_pwd);
 int db_user_add(const user_rec_t *in);
 /** 更新:按 rec->user_id 定位;非零长度特征/非零哈希才覆盖对应字段 */
 int db_user_update(const user_rec_t *in);
+/* ---- 头像(spec-database:与特征同属生物特征数据,同密钥加密落库) ----
+ * 独立接口而非塞进 user_rec_t:头像是 KB 级 BLOB,而 user_rec_t 在认证/检索
+ * 热路径上每次都要整份拷贝——放进去等于每取一个用户多拷 10KB。 */
+
+/** 写入/替换头像(JPEG 字节,≤32KB;len=0 表示清除)。落库前 AES-256-CTR 加密 */
+int db_user_set_avatar(const char *user_id, const uint8_t *jpeg, size_t len);
+
+/** 读头像(自动解密)。返回 DG_ERR_NOT_FOUND = 用户不存在**或**未录头像 */
+int db_user_get_avatar(const char *user_id, uint8_t *out, size_t cap, size_t *out_len);
+
 /** 清除人脸特征(len 置 0)——db_user_update 的"len=0=保留"语义无法表达
  *  清除,必须走本接口(2026-09-21 编辑页"清除人脸"落此坑) */
 int db_user_clear_face(const char *user_id);

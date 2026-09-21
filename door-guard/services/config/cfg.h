@@ -15,6 +15,8 @@
 #ifndef DG_CFG_H
 #define DG_CFG_H
 
+#include <stdint.h>   /* int32_t(质量闸门等整型配置字段) */
+
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -36,6 +38,11 @@ typedef struct {
     char face_backend[16];     /**< 想要的后端名("rockiva"/"rknn"/"sim"),空=第一个注册的 */
     char face_model_dir[128];  /**< 模型目录,默认 /usr/lib(env DG_IVA_MODEL_DIR 优先) */
     char face_model_tag[64];   /**< 特征口径标识;换模型必须改它(旧特征作废) */
+
+    /* 人脸质量闸门(face_quality.h;0 = 该项不启用,便于板上先只开清晰度标定) */
+    int32_t face_min_px;        /**< 人脸框较小边最小像素,40~400,默认 80 */
+    double  face_blur_min;      /**< 清晰度下限(Laplacian 方差),默认 50,须实测标定 */
+    double  face_det_score_min; /**< 检测分数下限,0.30~1.00,默认 0.70 */
     /* UI(spec-ui) */
     int  standby_timeout_s;    /**< 待机超时,15~60(spec 上限),默认 30 */
     char language[16];         /**< zh-CN / en-US,默认 zh-CN */

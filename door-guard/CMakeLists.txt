@@ -161,7 +161,8 @@ endif()
 # rknn 人脸后处理(SCRFD 解码/NMS/5 点对齐/特征比对)
 # 纯 C、零硬件依赖 → 宿主与板上都编:这是"能在宿主验证"的部分,
 # 硬件侧(喂帧/推理)在 drv/npu,契约装配在 vision_rknn.c。
-add_library(dg_rknn_face STATIC services/vision/rknn_face.c)
+add_library(dg_rknn_face STATIC services/vision/rknn_face.c
+                                services/vision/face_quality.c)
 target_include_directories(dg_rknn_face PUBLIC ${CMAKE_SOURCE_DIR}/services/vision)
 target_link_libraries(dg_rknn_face PUBLIC m)
 

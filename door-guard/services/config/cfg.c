@@ -48,6 +48,9 @@ static const cfg_meta_t META[] = {
     { "pwd_fail_lock_s",      "access.pwd_fail_lock_s",   CK_INT,   10,  3600 },
     { "face_dup_threshold",   "face.face_dup_threshold",  CK_DBL, 0.50,  1.00 },
     { "face_match_threshold", "face.match_threshold",     CK_DBL, 0.30,  1.00 },
+    { "min_face_px",         "face.min_face_px",          CK_INT,   40,   400 },
+    { "blur_min",            "face.blur_min",             CK_DBL,  0.0, 50000 },
+    { "det_score_min",       "face.det_score_min",        CK_DBL, 0.30,  1.00 },
     { "liveness_enable",      "face.liveness_enable",     CK_INT,    0,     1 },
     { "standby_timeout_s",    "ui.standby_timeout_s",     CK_INT,   15,    60 },
     { "language",             "ui.language",              CK_STR,    0,    15 },
@@ -218,6 +221,9 @@ static void defaults_apply(dg_cfg_t *c)
     c->pwd_fail_lock_s = 60;
     c->face_dup_threshold = 0.90;
     c->face_match_threshold = 0.42;      /* 与 default.json face.match_threshold 一致 */
+    c->face_min_px = 80;                /* 人脸框较小边 ≥80px 才做识别 */
+    c->face_blur_min = 50.0;            /* 清晰度下限(板上标定,见日志"清晰度") */
+    c->face_det_score_min = 0.70;       /* 检测分数下限 */
     c->liveness_enable = 0;              /* 活体算法 B8 落地前默认关 */
     /* 后端名/口径留空 = 用"第一个注册的后端"+该后端自带口径:同一份模板在
      * PC(sim)与板上(rockiva)都成立,不用两套配置 */
@@ -264,6 +270,12 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         double v = item->valuedouble;
         if (!strcmp(m->key, "face_dup_threshold"))
             c->face_dup_threshold = clamp_dbl(v, m->lo, m->hi, c->face_dup_threshold, m->key);
+        if (!strcmp(m->key, "min_face_px"))
+            c->face_min_px = (int32_t)clamp_dbl(v, m->lo, m->hi, c->face_min_px, m->key);
+        else if (!strcmp(m->key, "blur_min"))
+            c->face_blur_min = clamp_dbl(v, m->lo, m->hi, c->face_blur_min, m->key);
+        else if (!strcmp(m->key, "det_score_min"))
+            c->face_det_score_min = clamp_dbl(v, m->lo, m->hi, c->face_det_score_min, m->key);
         else if (!strcmp(m->key, "face_match_threshold"))
             c->face_match_threshold = clamp_dbl(v, m->lo, m->hi, c->face_match_threshold, m->key);
     } else { /* CK_STR */

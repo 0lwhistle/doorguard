@@ -173,7 +173,8 @@ static const char *const s_ddl[] = {
     "    role        INTEGER NOT NULL DEFAULT 0 CHECK (role IN (0,1,2)),\n"
     "    auth_flags  INTEGER NOT NULL DEFAULT 0,\n"
     "    created_at  INTEGER NOT NULL,\n"
-    "    updated_at  INTEGER NOT NULL\n"
+    "    updated_at  INTEGER NOT NULL,\n"
+    "    avatar      BLOB\n"
     ");",
     "CREATE TABLE IF NOT EXISTS access_logs (\n"
     "    id         INTEGER PRIMARY KEY AUTOINCREMENT,\n"
@@ -237,6 +238,29 @@ int storage_init(const char *db_path, const char *key_path)
             s_db = NULL;
             pthread_mutex_unlock(&s_mtx);
             return DG_ERR_DB;
+        }
+    }
+
+    /* 迁移(幂等):老库补 avatar 列。加在最后 = 新库与迁移库列序一致,
+     * row_to_user 的既有列下标不受影响。 */
+    {
+        bool has_avatar = false;
+        sqlite3_stmt *st = NULL;
+        if (sqlite3_prepare_v2(s_db, "PRAGMA table_info(users);", -1, &st, NULL) == SQLITE_OK) {
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                const unsigned char *nm = sqlite3_column_text(st, 1);
+                if (nm && !strcmp((const char *)nm, "avatar"))
+                    has_avatar = true;
+            }
+            sqlite3_finalize(st);
+        }
+        if (!has_avatar) {
+            if (sqlite3_exec(s_db, "ALTER TABLE users ADD COLUMN avatar BLOB;",
+                             NULL, NULL, NULL) != SQLITE_OK)
+                DG_LOGW(TAG, "users.avatar 迁移失败(头像功能不可用):%s",
+                        sqlite3_errmsg(s_db));
+            else
+                DG_LOGI(TAG, "迁移:users 表已补 avatar 列");
         }
     }
 
@@ -824,6 +848,85 @@ int db_user_del(const char *user_id)
         DG_LOGE(TAG, "特征缓存增量更新失败(del),触发全量重载");
         cache_recover_locked();
     }
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
+/** 头像上限:160×160 JPEG 约 8KB,给足余量;超限拒绝而非撑大库 */
+#define DG_AVATAR_MAX 32768
+
+int db_user_set_avatar(const char *user_id, const uint8_t *jpeg, size_t len)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!user_id || !*user_id)
+        return DG_ERR_PARAM;
+    if (len > DG_AVATAR_MAX)
+        return DG_ERR_PARAM;
+
+    /* 加密再落库:与特征同一把设备密钥、同一 AES-256-CTR 封装(随机 IV 前缀)。
+     * 理由:人脸照片与特征同属生物特征数据,库文件泄露时不该只有特征受保护;
+     * 机制现成,不额外引入依赖。len=0 表示清除头像(存 NULL)。 */
+    uint8_t enc[DG_AVATAR_MAX + 16];
+    size_t enc_len = 0;
+    if (len > 0) {
+        if (!jpeg)
+            return DG_ERR_PARAM;
+        int rc = dg_feature_wrap(jpeg, len, enc, sizeof(enc), &enc_len);
+        if (rc != DG_OK)
+            return rc;
+    }
+
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    int rc = DG_OK;
+    if (sqlite3_prepare_v2(s_db, "UPDATE users SET avatar=?1 WHERE user_id=?2",
+                           -1, &st, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    if (len > 0)
+        sqlite3_bind_blob(st, 1, enc, (int)enc_len, SQLITE_TRANSIENT);
+    else
+        sqlite3_bind_null(st, 1);
+    sqlite3_bind_text(st, 2, user_id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) != SQLITE_DONE || sqlite3_changes(s_db) == 0)
+        rc = sqlite3_changes(s_db) == 0 ? DG_ERR_NOT_FOUND : DG_ERR_DB;
+    sqlite3_finalize(st);
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
+int db_user_get_avatar(const char *user_id, uint8_t *out, size_t cap, size_t *out_len)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!user_id || !*user_id || !out || !out_len)
+        return DG_ERR_PARAM;
+
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(s_db, "SELECT avatar FROM users WHERE user_id=?1",
+                           -1, &st, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    sqlite3_bind_text(st, 1, user_id, -1, SQLITE_TRANSIENT);
+    const int step = sqlite3_step(st);
+    if (step != SQLITE_ROW) {
+        sqlite3_finalize(st);
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_NOT_FOUND;
+    }
+    const void *blob = sqlite3_column_blob(st, 0);
+    const int nbytes = sqlite3_column_bytes(st, 0);
+    int rc;
+    if (!blob || nbytes <= 0) {
+        rc = DG_ERR_NOT_FOUND;              /* 有用户但未录头像:非错误,调用方显示占位 */
+    } else {
+        rc = dg_feature_unwrap(blob, (size_t)nbytes, out, cap, out_len);
+    }
+    sqlite3_finalize(st);
     pthread_mutex_unlock(&s_mtx);
     return rc;
 }
