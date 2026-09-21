@@ -25,8 +25,9 @@ if (!m) return DG_ERR_IO;               /* 原因已进日志 */
 npu_attr_t in;
 npu_model_input_attr(m, 0, &in);        /* 输入尺寸/布局/类型随模型文件走,不写死 */
 
-/* 按 in.width/in.height/in.channels/in.type 准备缓冲(RGA 预处理见下) */
-npu_model_run(m, buf, in.nbytes);
+/* 按 in.width/in.height/in.channels 准备缓冲(原始 uint8 图 / 已归一化的 F16,
+ * 两者字节数可能相同 → 必须显式声明缓冲里是什么,喂错会静默出错图) */
+npu_model_run(m, buf, in.nbytes, DG_NPU_TYPE_U8);
 
 npu_attr_t out;
 npu_model_output_attr(m, 0, &out);      /* out.elems / out.dims 解码用 */

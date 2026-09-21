@@ -91,7 +91,7 @@ static void probe(const char *path)
         if (buf) {
             struct timespec t0, t1;
             clock_gettime(CLOCK_MONOTONIC, &t0);
-            int rc = npu_model_run(m, buf, in.nbytes);
+            int rc = npu_model_run(m, buf, in.nbytes, DG_NPU_TYPE_U8);
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double ms = (t1.tv_sec - t0.tv_sec) * 1000.0 +
                         (t1.tv_nsec - t0.tv_nsec) / 1e6;
@@ -105,7 +105,7 @@ static void probe(const char *path)
                 for (int i = 0; i < n; i++) {
                     struct timespec a, b;
                     clock_gettime(CLOCK_MONOTONIC, &a);
-                    if (npu_model_run(m, buf, in.nbytes) != DG_OK)
+                    if (npu_model_run(m, buf, in.nbytes, DG_NPU_TYPE_U8) != DG_OK)
                         break;
                     clock_gettime(CLOCK_MONOTONIC, &b);
                     double t = (b.tv_sec - a.tv_sec) * 1000.0 +

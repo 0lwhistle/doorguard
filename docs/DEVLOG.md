@@ -5,7 +5,7 @@
 
 ---
 
-## 2026-09-21 自组 rknn 路线开工:NPU 推理库落位 + 三模型板上实测
+## 2026-09-21 自组 rknn 路线开工:NPU 推理库 + RetinaFace 重转成功 + 解码单元(49 项宿主测试绿)
 
 **背景**:ROCKIVA 官方 rk3576 人脸模型包在这版 SDK 快照里缺失(external 与 buildroot
 两处、iva.tar 内均只有前级检测 `object_detection_v3_cls8.data`;rk3588/rv1126 目录才有
@@ -37,10 +37,41 @@
   正确拒掉(不截断,报 DG_ERR_PARAM)——库的行为对,是探针该按 attr 分配。
 - `snprintf` 拼两个 256B 版本串触发 `-Wformat-truncation`;定长 `%.255s` + 放大缓冲消除。
 
-**下一步(会话①续)**:SCRFD 解码(3 stride/2 anchor/9 输出还原 + NMS)+ 5 点对齐
-(纯 C,宿主单测)→ `vision_rknn.c` 后端起(相机 NV12 → RGA letterbox → NPU → 解码
-→ 脸框事件)→ 上板看框。**注意**:两模型输入是 **F16**,预处理要产 F16 归一化数据
-(不是 UINT8),归一化系数需按实测分数校准。
+**RetinaFace 重转成功(本机 rknn-toolkit2 2.3.2,用户提供 zoo + toolkit)**
+- `RetinaFace.rknn` 是 RK3588 模型(板上驱动拒收)。用 zoo 的
+  `examples/RetinaFace/model/RetinaFace_mobile320.onnx` 按 **rk3576 + i8** 重转,
+  标定集用 zoo 的 COCO 20 张子集 + 例程 test.jpg(单张标不准量化范围)。
+- 新文件 `RetinaFace_rk3576_i8.rknn`(1.4MB):输入 320×320×3 **I8**、
+  3 输出 `[1,4200,4]/[1,4200,2]/[1,4200,10]`;**压测均值 6.7ms、最快 5.8ms**。
+- **比 SCRFD 快 30 倍**(178ms→6.7ms):320 vs 640 输入 + int8 量化 + 1.4MB vs 9.4MB。
+  一次「检测+识别」≈66ms(15fps),框跟踪顺滑。RetinaFace 由"不可用"变首选。
+- 关键便利:`convert.py` 已配 mean/std → **归一化烤进图**,运行时喂原始 uint8 RGB,
+  不必自己写 F16 归一化。全流程记进 `models/README.md ⑤`。
+
+**做了什么(第二批:后处理单元)**
+- **`services/vision/rknn_face.c/h`**(纯 C 零依赖 → 宿主与板上都编):
+  SCRFD 解码(3 stride/2 anchor)、**RetinaFace 解码**(PriorBox + variance,与 zoo
+  参考实现逐条对齐;锚框数 320→4200 与板上实测互证)、NMS、5 点相似变换对齐
+  (ArcFace 112×112 参考布局)、余弦/归一化。附 `tests/test_rknn_face.c` **49 项**:
+  合成数据钉死 anchor 编号/stride 还原/0.5 偏移/阈值/截断上报、对齐用"参考点自映射
+  =单位阵"自检、warp 越界填零。
+- **修一个真 bug**:`npu_model_run` 原先按模型自带类型喂输入——**int8 与 uint8 缓冲
+  字节数相同**,喂错不会报错只会静默出错图。改为显式声明 `in_type`
+  (RetinaFace 喂 U8 由运行时量化、SCRFD 喂 F16),接口层面挡住这类静默错误。
+
+**踩坑**
+- 探针输出缓冲写死 4096 → SCRFD 的 12800 元素 score 头被 `npu_model_output_f32`
+  正确拒掉(不截断,报 DG_ERR_PARAM)——库的行为对,是探针该按 attr 分配。
+- `snprintf` 拼两个 256B 版本串触发 `-Wformat-truncation`;定长 `%.255s` + 放大缓冲消除。
+- 测试里两处**我自己算错**:正交向量 {-4,3,0,0} 与 {1,2,3,4} 点积是 2 不是 0;
+  size=0 该返回参数错(-1)而非 -2。宿主单测当场抓出——这正是把数学留在可测层的价值。
+- `test_ota` 偶发失败(单跑必过),是测试自身时序抖动,非本轮改动(已复跑全绿 26/26)。
+
+**下一步**
+- `vision_rknn.c` 后端起:相机 NV12 → **RGA letterbox 320×320(补边 114)** →
+  NPU(U8 输入)→ `rknn_retinaface_decode` → NMS → 质量闸门 → `EV_VISION_FACE_BOX`
+  → 上板看框;随后接 ArcFace(112×112 对齐 → 512 维 → 余弦)与 1:N(复用 M2 特征快照)。
+  `DG_FEATURE_MAX` 512→2048B 与独立 `face.model_tag` 在接识别时一并落。
 
 ---
 

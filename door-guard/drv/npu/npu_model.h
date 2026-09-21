@@ -88,13 +88,20 @@ int npu_model_input_attr(const npu_model_t *m, uint32_t idx, npu_attr_t *out);
 int npu_model_output_attr(const npu_model_t *m, uint32_t idx, npu_attr_t *out);
 
 /**
- * 跑一帧:设输入(按模型自带的 type/fmt,驱动负责必要转换)→ 推理 →
- * 取输出(want_float,驱动负责反量化)。
- * 输入缓冲须按 npu_model_input_attr(0) 的属性准备。
- * @param in_bytes 输入缓冲字节数(与属性不符返回 DG_ERR_PARAM,不静默)
+ * 跑一帧:设输入 → 推理 → 取输出(want_float,驱动负责反量化)。
+ *
+ * @param in_bytes 输入缓冲字节数(与输入张量尺寸不符返回 DG_ERR_PARAM,不静默)
+ * @param in_type  **缓冲里实际是什么**(不是模型要什么):最常用
+ *        `DG_NPU_TYPE_U8` —— 原始 uint8 图像,由运行时按模型量化参数转换
+ *        (RetinaFace 这类把 mean/std 烤进图的模型就该这样喂);
+ *        `DG_NPU_TYPE_F16` —— 已按模型要求归一化好的半精度数据(SCRFD 是这种);
+ *        传 `DG_NPU_TYPE_OTHER` = 按模型自带类型原样送,不做转换。
+ *        这个参数不能省:int8 与 uint8 的缓冲**字节数相同**,喂错类型不会报错,
+ *        只会静默出错图——必须显式声明。
  * @return DG_OK / DG_ERR_NOT_INIT / DG_ERR_PARAM / DG_ERR_IO
  */
-int npu_model_run(npu_model_t *m, const void *input, size_t in_bytes);
+int npu_model_run(npu_model_t *m, const void *input, size_t in_bytes,
+                  dg_npu_type_t in_type);
 
 /**
  * 取第 idx 个输出为 float32(驱动已反量化)。下次 run 后失效。

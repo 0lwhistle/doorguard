@@ -57,6 +57,19 @@ static dg_npu_fmt_t map_fmt(rknn_tensor_format f)
     }
 }
 
+/* 本库枚举 → rknn 类型(输入侧要告诉运行时"缓冲里是什么") */
+static rknn_tensor_type unmap_type(dg_npu_type_t t)
+{
+    switch (t) {
+    case DG_NPU_TYPE_U8:  return RKNN_TENSOR_UINT8;
+    case DG_NPU_TYPE_I8:  return RKNN_TENSOR_INT8;
+    case DG_NPU_TYPE_F16: return RKNN_TENSOR_FLOAT16;
+    case DG_NPU_TYPE_F32: return RKNN_TENSOR_FLOAT32;
+    case DG_NPU_TYPE_I32: return RKNN_TENSOR_INT32;
+    default:              return RKNN_TENSOR_FLOAT32;
+    }
+}
+
 /* 维度顺序随布局:NHWC=[n,h,w,c] / NCHW=[n,c,h,w];非 4 维(dims 不描述的
  * 向量输出)只保证 elems/nbytes 可用,宽高尽力而为 */
 static void fill_attr(const rknn_tensor_attr *a, npu_attr_t *o)
@@ -192,7 +205,8 @@ int npu_model_output_attr(const npu_model_t *m, uint32_t idx, npu_attr_t *out)
     return query_io(m, idx, false, out);
 }
 
-int npu_model_run(npu_model_t *m, const void *input, size_t in_bytes)
+int npu_model_run(npu_model_t *m, const void *input, size_t in_bytes,
+                  dg_npu_type_t in_type)
 {
     if (!m)
         return DG_ERR_NOT_INIT;
@@ -217,7 +231,8 @@ int npu_model_run(npu_model_t *m, const void *input, size_t in_bytes)
     in.index        = 0;
     in.buf          = (void *)input;
     in.size         = (uint32_t)in_bytes;
-    in.type         = m->in0.type;
+    /* OTHER = 声明"缓冲就是模型自带类型的裸数据",不做转换 */
+    in.type         = (in_type == DG_NPU_TYPE_OTHER) ? m->in0.type : unmap_type(in_type);
     in.fmt          = m->in0.fmt;
     in.pass_through = 0;
 

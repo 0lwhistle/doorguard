@@ -67,8 +67,10 @@ E RKNN: This rknn model is for RK3588, but current platform is RK3576
 E RKNN: Import rknn model failed!   → npu_model_load 返回 NULL
 ```
 
-转换时目标平台选成了 RK3588。要用它必须用 rknn-toolkit2 **重新按 RK3576 转换**。
-当前检测器用 `det_10g.rknn`(同为 InsightFace 系,输出契约一致,见下)。
+转换时目标平台选成了 RK3588。**已于 2026-09-21 用 rknn-toolkit2 重转,新文件见 ⑤**——
+重转后 320×320 输入、int8 量化,比 SCRFD 快 30 倍(见 ⑥),**RetinaFace 已成首选检测器**。
+(`det_10g.rknn` 仍可用:同为 InsightFace 系,5 点输出契约一致,但当前是 F16 未量化、
+640×640,慢得多;若要留作 A/B,按 ⑤ 同法重转即可。)`
 
 **② `det_10g.rknn`(SCRFD-10G)可用**,输入 **640×640×3 NHWC F16**,9 个输出 =
 3 个 stride × 3 个头(score/bbox/kps),**每位置 2 anchor**:
@@ -86,19 +88,39 @@ stride 还原;零输入时 score≈0.02(无脸),符合预期。
 **③ `w600k_r50.rknn` 可用**,输入 **112×112×3 NHWC F16**(与 InsightFace 对齐约定
 一致),输出 `[1,512]` = 512 维 embedding,证实 ① 的 `DG_FEATURE_MAX` 必须提到 2048 B。
 
-**④ 稳态耗时(压测 30 次)**:
+**④ 稳态耗时(压测 30~40 次)**:
 
 | 模型 | 最快 | 均值 | 上限 |
 |---|---|---|---|
-| det_10g 640×640 | 177.6 ms | 187.7 ms | ~6 fps |
+| `RetinaFace_rk3576_i8` 320×320 | **5.8 ms** | **6.7 ms** | ~174 fps |
+| det_10g 640×640(F16 未量化) | 177.6 ms | 187.7 ms | ~6 fps |
 | w600k_r50 112×112 | 55.6 ms | 59.4 ms | ~18 fps |
 
-一次完整「检测+识别」≈ 240 ms(≈4 fps)。门禁场景(站定刷脸)可用,但**盒子跟踪不顺滑**。
-提速杠杆(按收益排序,均需 VM 侧重转):
-
-1. **int8 量化**(带标定集重转):输入输出都是 F16 提示当前很可能是 FP16 图,
-   6 TOPS 是 int8 口径,量化后通常有数倍收益——**收益最大的一步**;
-2. **降输入分辨率**:门口人脸离镜头近,320×320 足够,算量约降 4 倍;
-3. 软件侧缓解(无需重转):每 N 帧检测一次 + 帧间沿用上次框。
+用重转后的 RetinaFace:一次完整「检测+识别」≈ **66 ms(≈15 fps)**——**框跟踪顺滑**,
+且检测只用 6.7ms,给活体/质量闸门留足预算。对比 SCRFD 路线的 240ms(≈4 fps),
+差距来自三处:输入 320 vs 640(像素少 4 倍)、int8 量化 vs F16、模型体积 1.4MB vs 9.4MB。
 
 SDK/驱动版本(板上实测):`api=2.0.0b0 (35a6907d79@2024-03-24) drv=0.9.8`。
+
+### ⑤ RetinaFace 重转记录(2026-09-21,主机 `rknn-toolkit2 2.3.2`)
+
+```bash
+# 素材:rknn_model_zoo/examples/RetinaFace/model/RetinaFace_mobile320.onnx(320×320)
+# 标定集:zoo 的 COCO 20 张子集 + 该例程 test.jpg = 21 张(单张标定估不准量化范围)
+find <zoo>/datasets/COCO/subset -name '*.jpg' > calib.txt
+python3 convert.py <zoo>/examples/RetinaFace/model/RetinaFace_mobile320.onnx \
+        rk3576 i8 out/RetinaFace_rk3576_i8.rknn
+```
+
+- 例程 `convert.py` 已配 `mean_values=[[104,117,123]] std=[[1,1,1]]` → **归一化烤进图**,
+  所以运行时喂**原始 uint8 RGB** 即可(`npu_model_run(..., DG_NPU_TYPE_U8)`),
+  不必自己在 C 里做 F16 归一化(SCRFD 那种没烤归一化的才要)。
+- 预处理照 zoo 参考:`letterbox` 到 320×320、**补边值 114**、BGR→RGB。
+- 转换警告:输入 dtype float32→int8;`onnx::Conv_613` 有 outlier(21.96),
+  可能影响量化精度——**上线前用真实人脸比对一下检出率**。
+- 板上实测:输入 `320×320×3 I8 NHWC`(quant scale=1.074510 zp=-14);
+  3 个输出 = `[1,4200,4]` 框 / `[1,4200,2]` 分数 / `[1,4200,10]` 5 关键点。
+- 解码已实现并对齐 zoo 参考:`services/vision/rknn_face.c` 的
+  `rknn_retinaface_decode()`(PriorBox:min_sizes=[[16,32],[64,128],[256,512]]、
+  steps=[8,16,32]、中心 +0.5 偏移、variance=[0.1,0.2]);宿主单测见
+  `tests/test_rknn_face.c`(锚框数 320→4200 与板上实测互证)。
