@@ -56,6 +56,7 @@ tar czf doorguard-sysroot.tar.gz sysroot
 | configure 打印"暂用编译器自带 libc" | sysroot 未安装/路径不对 | 跑 `dg-tc-install`;确认 `~/dg-toolchain/sysroot/usr/include` 存在 |
 | 板上运行 `No such file or directory`(文件明明在) | 缺动态加载器/库架构不对(编成 x86_64) | `file` 确认 aarch64;确认用了工具链文件而不是宿主 gcc |
 | 板上 `version 'GLIBC_2.3x' not found` | 用了比板新的 sysroot 编译 | sysroot 与固件版本配套(见 §3),重导对应版本的 sysroot |
+| 板上 `libjpeg.so.62: cannot open shared object file`(rc=127) | sysroot 里混进了两套 libjpeg:dev 名 `usr/lib{,64}/libjpeg.so` 实为旧 IJG 6b(SONAME .62),板上运行库只有 turbo 的 `libjpeg.so.8` | **别用 find_package(JPEG)/`-ljpeg`**(会选中 .62);项目已显式链 `${CMAKE_SYSROOT}/usr/lib/libjpeg.so.8`(见 CMakeLists dg_jpeg 段,2026-09-21) |
 | 想在 WSL 直接试跑 aarch64 程序 | — | `sudo apt install qemu-user-static`,然后 `qemu-aarch64 -L ~/dg-toolchain/sysroot ./build/door-guard`(可选,非必需) |
 
 ## 6. 分工边界
