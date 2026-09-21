@@ -17,9 +17,15 @@
 | `DG_COLOR_OK` | `0x2E7D32` | 成功(绿) |
 | `DG_COLOR_ERR` | `0xC62828` | 失败(红) |
 | `DG_COLOR_WARN` | `0xF9A825` | 脸框黄(检测中) |
+| `DG_COLOR_SCRIM` | `0x000000` | 推流/照片上的文字衬底(半透明黑 chip) |
 
+- **层次感 token(2026-09-22)**:`DG_OPA_SCRIM`(衬底 40%)、
+  `DG_OPA_CARD_LINE`(卡片半透明白描边 60%)、`DG_OPA_TEXT_DIM`(次要文字
+  50%)——行标题/「无」占位值降透明度,卡片与按钮加半透明白边,推流上的
+  时钟/网络/提示文字一律加黑色半透明衬底 chip
 - **每个按钮 = 图标 + label**:统一 `ui/widgets/dg_btn_create(icon_sym, label)` 创建,
   图标优先用 LVGL 内置 symbol(如 `LV_SYMBOL_SETTINGS`),不合适用户后续会换
+  (例外:菜单宫格卡片为页内自定义组件——浅蓝底+白描边,按下变主蓝)
 - 所有 label 文本一律 `_("原文")` 包裹(`ui/i18n.h` 提供 `_()`)
 - 弹窗统一走 `ui/widgets/dg_popup.h`:`dg_popup_success() / dg_popup_fail() / dg_popup_input() /
   dg_popup_choice()`,自动处理图层、自动关闭定时、回调

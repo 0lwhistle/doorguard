@@ -59,16 +59,17 @@
   rootfs 不动;boot 切换用 uboot env(`boot_app` A/B + `bootcount` 限次回退)
 - **方案 B**:rootfs 级 A/B —— 改动大(两份 rootfs 空间、uboot altbootcmd),留作后续
 
-### 2.2 升级流程
+### 2.2 升级流程(2026-09-22 与实现对齐:ota_service.h / web_server.c / env/bin/dg-ota-upload)
 
 ```
-主机脚本 dg_ota_upload.sh <板IP> <升级包>
-  → POST /ota/upload 流式上传(边收边写目标 B 分区,不落 tmp,控内存)
-  → 板收完:校验 manifest.json 里 sha256/大小/版本号,不符即弃并报错
-  → 置 uboot env:boot_app=b、upgrade_ok=0、bootcount=0,自动重启
-  → 新分区启动后应用上报"升级成功"→ upgrade_ok=1;
-    若 bootcount 超限仍无上报 → uboot 自动切回 A(回滚)
-升级包格式:tar.gz{ manifest.json(version, sha256, size, 分区名), payload }
+主机脚本 dg-ota-upload <板IP> <升级包>
+  → POST /api/ota/upload 流式上传(应用内线程接收,落盘暂存文件
+    /tmp/ota_staging.bin,不占内存;支持 X-OTA-Offset 断点续传)
+  → manifest 字段走 HTTP 请求头:X-OTA-Version / X-OTA-Size / X-OTA-SHA256
+    (大小预检超 MAX 拒收;sha256 流式校验;不符即弃并报错)
+  → 提交:校验闭环到暂存文件为止,**不写真实分区**(分区写入与 uboot env
+    方案见 docs/tech/OTA_PLAN.md:boot_app=b、upgrade_ok、bootcount 回滚约定)
+升级包:单文件流(镜像/固件包本体),manifest 信息由请求头携带
 ```
 
 - 板上监听是 door-guard 应用内线程(不是独立守护),端口默认 **9000**(device_config)

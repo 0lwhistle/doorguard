@@ -57,9 +57,35 @@
 #endif
 
 /* 看门狗参数(巡检频率 5s;心跳超龄 = 连续 3 个巡检周期未刷新) */
-#define WD_INTERVAL_MS  5000
-#define WD_STALE_MS     (WD_INTERVAL_MS * 3)
+#define WD_INTERVAL_MS 5000
+#define WD_STALE_MS    (WD_INTERVAL_MS * 3)
 #define WD_MAX_RESTARTS 1
+
+/* 主循环心跳监控:registry 看门狗巡检在主循环里跑,主循环自己卡死时它
+ * 一样卡死(管不了自己)。独立线程盯主循环心跳,超龄即退出进程——
+ * 表现为"画面冻在某一帧"的主循环卡死,转成 3s 内被 S60 拉起重启 */
+#define WD_LOOP_STALE_MS 10000
+static int64_t now_ms(void);
+static volatile int64_t s_loop_beat_ms;
+static volatile bool s_loop_started;
+
+static void *loop_watchdog_thread(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        struct timespec ts = { 2, 0 };
+        nanosleep(&ts, NULL);
+        if (!s_loop_started)
+            continue;
+        const int64_t now = now_ms();
+        if (now - s_loop_beat_ms > WD_LOOP_STALE_MS) {
+            DG_LOGE("[MAIN]", "主循环 %lldms 无心跳(渲染/取流卡死),退出交 S60 重拉",
+                    (long long)(now - s_loop_beat_ms));
+            exit(1);
+        }
+    }
+    return NULL;
+}
 
 /* 装配参数(依赖 init_fn 无参数,故经静态变量传给包装函数) */
 static const char *s_def_path;      /* 出厂模板(只读) */
@@ -374,11 +400,19 @@ int main(int argc, char *argv[])
 
     fprintf(stderr, "door-guard 运行中(看门狗巡检 %ds;Ctrl-C 退出)\n",
             WD_INTERVAL_MS / 1000);
+    pthread_t wd_tid;
+    if (pthread_create(&wd_tid, NULL, loop_watchdog_thread, NULL) == 0)
+        pthread_detach(wd_tid);
+    else
+        DG_LOGW("[MAIN]", "主循环监控线程创建失败(卡死只能人工复位)");
     int64_t next_scan = now_ms() + WD_INTERVAL_MS;
+    s_loop_beat_ms = now_ms();
+    s_loop_started = true;
     for (;;) {
         camera_poll();
         ui_poll();
-        int64_t now = now_ms();
+        s_loop_beat_ms = now_ms();
+        int64_t now = s_loop_beat_ms;
         if (now >= next_scan) {
             watchdog_once();
             next_scan = now + WD_INTERVAL_MS;

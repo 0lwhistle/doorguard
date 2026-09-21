@@ -67,23 +67,30 @@ static void goto_capture(void)
     navigator_push("capture");
 }
 
-/* ---- 小构件:一行 = 标题 + 值 + 动作按钮 ---- */
+/* ---- 小构件:一行 = 标题 + 值 + 动作按钮 ----
+ * 层次:行卡片 = 浅蓝底 + 半透明白描边;标题降透明度(次要),值保持全黑
+ * (主要);「无」占位值降透明度,与「已录入」拉开视觉层级 */
 
-static lv_obj_t *row_create(lv_obj_t *parent, const char *title,
-                            lv_obj_t **val_out, lv_obj_t **btn_out)
+static lv_obj_t *row_create_h(lv_obj_t *parent, const char *title,
+                              lv_obj_t **val_out, lv_obj_t **btn_out,
+                              lv_coord_t h)
 {
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, DG_SCREEN_W - 2 * DG_PAD, 96);
+    lv_obj_set_size(row, DG_SCREEN_W - 2 * DG_PAD, h);
     lv_obj_set_style_bg_color(row, DG_COL_BG_LIGHT(), 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(row, DG_RADIUS, 0);
+    lv_obj_set_style_border_width(row, 2, 0);
+    lv_obj_set_style_border_color(row, DG_COL_BG(), 0);
+    lv_obj_set_style_border_opa(row, DG_OPA_CARD_LINE, 0);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *lbl = lv_label_create(row);
     lv_label_set_text(lbl, title);
     lv_obj_set_style_text_font(lbl, DG_FONT_CN, 0);
     lv_obj_set_style_text_color(lbl, DG_COL_TEXT(), 0);
+    lv_obj_set_style_text_opa(lbl, DG_OPA_TEXT_DIM, 0);
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 16, 0);
 
     lv_obj_t *val = lv_label_create(row);
@@ -101,10 +108,20 @@ static lv_obj_t *row_create(lv_obj_t *parent, const char *title,
     return row;
 }
 
+static lv_obj_t *row_create(lv_obj_t *parent, const char *title,
+                            lv_obj_t **val_out, lv_obj_t **btn_out)
+{
+    return row_create_h(parent, title, val_out, btn_out, 96);
+}
+
 static void val_set(lv_obj_t *lbl, const char *text)
 {
     lv_label_set_text(lbl, text);
     lv_obj_set_style_text_color(lbl, DG_COL_TEXT(), 0);
+    /* 「无」是占位不是数据:降透明度,与「已录入/已设置」拉开层级 */
+    lv_obj_set_style_text_opa(lbl,
+                              strcmp(text, _("无")) == 0 ? DG_OPA_TEXT_DIM
+                                                         : LV_OPA_COVER, 0);
 }
 
 /* 行右侧动作按钮(统一尺寸/对齐) */
@@ -166,12 +183,12 @@ static void refresh(void)
     val_set(s_val_face, rec.face_vec_len > 0 ? _("已录入") : _("无"));
     val_set(s_val_finger, rec.finger_vec_len > 0 ? _("已录入") : _("无"));
     val_set(s_val_ic, _("无"));
-    /* 头像预览:有人脸才有头像(同一生命周期);行高 96,预览缩到 80×80 */
+    /* 头像预览:有人脸才有头像(同一生命周期);人脸行加高到 128,预览 96×96 */
     if (s_img_face) {
         const lv_img_dsc_t *av = dg_avatar_get(s_uid, DG_AVATAR_FULL);
         if (av && rec.face_vec_len > 0) {
             lv_img_set_src(s_img_face, av);
-            lv_img_set_zoom(s_img_face, (uint16_t)(256 * 80 / 160));
+            lv_img_set_zoom(s_img_face, (uint16_t)(256 * 96 / 160));
             lv_obj_update_layout(s_img_face);
             lv_obj_clear_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
         } else {
@@ -443,12 +460,14 @@ void page_user_edit_create(lv_obj_t *parent)
     row_create(col, _("密码"), &s_val_pwd, &s_btn_pwd);
     lv_obj_add_event_cb(s_btn_pwd, on_pwd, LV_EVENT_CLICKED, NULL);
 
-    /* 人脸行:值与按钮之外再挂一个头像预览位(无头像时隐藏,值区显示「无」) */
-    lv_obj_t *face_row = row_create(col, _("人脸"), &s_val_face, &s_btn_face);
+    /* 人脸行:值与按钮之外再挂一个头像预览位(无头像时隐藏,值区显示「无」)。
+     * 行加高到 128:160 宽的 img 部件缩放绘制到 96px,原 96 行高下头像
+     * 会滑进右侧「修改」按钮底下(布局重叠),加高 + 右移让开按钮 */
+    lv_obj_t *face_row = row_create_h(col, _("人脸"), &s_val_face, &s_btn_face, 128);
     lv_obj_add_event_cb(s_btn_face, on_face, LV_EVENT_CLICKED, NULL);
     s_img_face = lv_img_create(face_row);
     /* 不加边框:zoom 只缩小绘制,部件包围盒仍是 160×160,边框会画到行外 */
-    lv_obj_align(s_img_face, LV_ALIGN_RIGHT_MID, -180, 0);
+    lv_obj_align(s_img_face, LV_ALIGN_RIGHT_MID, -218, 0);
     lv_obj_add_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
 
     row = row_create(col, _("指纹"), &s_val_finger, NULL);

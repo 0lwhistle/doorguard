@@ -1,29 +1,10 @@
 {
-  "_comment": "door-guard 设备配置(出厂默认;用户改动落 DB device_config 并覆盖本文件)— 业务键见 config/cfg.h",
-  "camera": {
-    "sensor": "imx415",
-    "width": 1920,
-    "height": 1080,
-    "fps": 30,
-    "format": "NV12",
-    "iqfile": "auto"
-  },
-  "display": {
-    "backend": "drm",
-    "ui_plane": "auto",
-    "video_plane": "auto",
-    "width": 720,
-    "height": 1280,
-    "touch": "/dev/input/event1"
-  },
+  "_comment": "door-guard 设备配置(出厂默认;用户改动落 DB device_config 并覆盖本文件)— 键集=services/config/cfg.c META 表+json-only 键,只列代码实际读取的键;相机/显示参数走环境变量(见 modules/camera/camera_board.c 头注释)",
   "face": {
-    "provider": "rockiva",
+    "backend": "",
     "model_dir": "/usr/lib",
-    "detect_interval_ms": 200,
+    "model_tag": "",
     "liveness_enable": false,
-    "liveness_actions_min": 2,
-    "liveness_actions_max": 3,
-    "liveness_timeout_ms": 2000,
     "match_threshold": 0.42,
     "face_dup_threshold": 0.9,
     "min_face_px": 80,
@@ -33,29 +14,19 @@
   "access": {
     "relay_gpio_chip": "/dev/gpiochip0",
     "relay_gpio_line": 0,
-    "door_sensor_gpio_line": -1,
     "door_open_ms": 3000,
     "pwd_fail_lock_n": 5,
     "pwd_fail_lock_s": 60
   },
-  "stream": {
-    "rtsp_enable": false,
-    "rtsp_port": 8554,
-    "rtsp_path": "/preview",
-    "bitrate_kbps": 2048
-  },
   "network": {
     "ntp_server": "ntp.aliyun.com",
-    "timezone": "Asia/Shanghai",
     "web_port": 8080,
     "ota_port": 9000,
     "ota_url": ""
   },
-  "storage": {
-    "db_path": "/data/door-guard/door.db"
-  },
   "ui": {
     "language": "zh-CN",
-    "standby_timeout_s": 30
+    "standby_timeout_s": 30,
+    "menu_timeout_s": 15
   }
 }

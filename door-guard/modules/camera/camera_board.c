@@ -56,9 +56,10 @@ static struct {
     size_t size;
 } s_cap[CAM_BUF_CNT];
 
-/* 双缓冲:capture_service(tasker 线程)与 UI 轮询并发读,
- * 翻转保证 pixels 指针指向的旧缓冲在本轮读完后才被覆盖 */
-static uint8_t *s_out[2];
+/* 三缓冲:capture/视觉(worker 线程)与 UI 轮询并发读,轮转写入——
+ * 双缓冲下主循环偶尔连投两帧、UI 还没拷走时第三帧会写回 s_frame 正指向的
+ * 缓冲(撕裂);三缓冲给读方两帧周期的拷贝窗口(约 66ms,30fps 下足够) */
+static uint8_t *s_out[3];
 static int s_out_idx;
 static camera_frame_t s_frame;
 static uint32_t s_seq;
@@ -266,7 +267,7 @@ int camera_init(const char *res_path, camera_frame_fn cb, void *ud)
     s_rot = rot_from_env();
     s_out_w = (s_rot == 90 || s_rot == 270) ? CAM_OUT_W : s_cap_w;
     s_out_h = (s_rot == 90 || s_rot == 270) ? CAM_OUT_H : s_cap_h;
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 3; i++) {
         s_out[i] = malloc((size_t)s_out_w * s_out_h * 4);
         if (!s_out[i]) {
             DG_LOGE(CAM_TAG, "输出缓冲分配失败");
@@ -362,11 +363,11 @@ void camera_poll(void)
                 sum += y[i];
             DG_LOGI(CAM_TAG, "首帧已导出 /tmp/dg_cam.raw,Y 均值=%lu", sum / (s_cap_w * s_cap_h));
         }
-        /* 先投内容再翻序号:读方见到新 seq 时缓冲必已完整 */
+        /* 先投内容再轮转序号:读方见到新 seq 时缓冲必已完整 */
         s_frame.pixels = s_out[s_out_idx];
         s_frame.w = s_out_w;
         s_frame.h = s_out_h;
-        s_out_idx ^= 1;
+        s_out_idx = (s_out_idx + 1) % 3;
         s_frame.seq = ++s_seq;
 
         /* NV12 出口:视觉占用期间不归还,等 release 回调再 QBUF */

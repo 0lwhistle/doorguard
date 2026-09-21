@@ -43,9 +43,10 @@ const camera_frame_t *camera_latest(void);
 void camera_sim_set_interval(uint32_t ms);
 
 /* ---- NV12 出口(板端视觉专用;sim 无实现) ----
- * on_frame 在相机轮询线程调用,data 指向 V4L2 缓冲(零拷贝),
- * 消费方异步使用期间驱动不会回填——直到消费方调 on_release(frame_id)。
- * 未设置监听时缓冲用完立即归还(现状)。 */
+ * on_frame 在 camera_poll 调用线程执行(板上=主循环:UI/渲染/触摸同线程)。
+ * 硬契约:回调必须快、绝不阻塞——重活(推理/编码/写库)自行转线程,回调里
+ * 只做投递;不处理的帧必须立刻 on_release(frame_id),否则 4 个 V4L2 缓冲
+ * 耗尽,相机永久断流。 */
 typedef void (*camera_nv12_fn)(const uint8_t *data, int w, int h,
                                uint32_t frame_id);
 typedef void (*camera_nv12_release_fn)(uint32_t frame_id);

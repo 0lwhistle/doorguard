@@ -18,11 +18,15 @@
 ### rknn 后端的链路与分层(改它之前先读这段)
 
 ```
-camera NV12 1280×720
-  ├─[每帧] RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)→ rknn_retinaface_decode
-  │        → NMS → 最大脸 → 逆映射+旋到竖屏 → EV_VISION_FACE_BOX(10Hz)
-  └─[每 300ms 且非 IDLE] NV12 原分辨率裁 ROI → 5 点对齐 112×112
-           → (x-127.5)/127.5 → ArcFace@NPU(56ms)→ 512 维 → L2
+camera NV12 1280×720(主循环 camera_poll 投递)
+  ├─ on_frame_push 只投"信箱"(最新帧;worker 忙时顶掉旧帧立即归还)——
+  │  回调跑在主循环,绝不允许阻塞(2026-09-22 起推理移入 worker 线程,
+  │  此前内联在主循环:人脸一出现识别 56ms 就把 UI/取流拖卡)
+  └─ worker 线程:[每帧] RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)
+           → rknn_retinaface_decode → NMS → 最大脸 → 逆映射+旋到竖屏
+           → EV_VISION_FACE_BOX(黄框,15Hz 节流)
+     [每 300ms 且非 IDLE] NV12 原分辨率裁 ROI(正方形,偶对齐)→ 5 点对齐
+           112×112 → (x-127.5)/127.5 → ArcFace@NPU(56ms)→ 512 维 → L2
            → 录入缓存 / 1:1 比对 / 1:N 检索(内存特征库暴力余弦)
 ```
 
@@ -111,8 +115,9 @@ enroll_service ──vision_service_library_add/remove──▶ ops->lib_add/lib
 2. 出站一律 `EVENT_BUS_PUBLISH`(回调在推理线程,禁止碰 LVGL/长事务);
 3. 发布 1:N/1:1 命中前必须查 `vision_service_features_compatible()`,
    false 时不得发布 —— **宁可不开门,不可错开门**;
-4. 帧回调里未就绪/推不动的帧必须立刻 `camera_nv12_release()`,否则 4 个 V4L2
-   缓冲耗尽,相机永久断流。
+4. 帧回调(主循环)里**不许做任何重活**:未就绪的帧立即 `camera_nv12_release()`;
+   正常帧投入后端内部的信箱由 worker 处理(处理完/被新帧顶掉时归还)。任何
+   一条路把 V4L2 缓冲攥住不放,4 个缓冲耗尽相机就永久断流。
 
 服务层负责的一次性注入(后端不必自己做):`storage_set_feature_cmp(compare)`、
 lib ops 转发、模式钩子、口径校验。
@@ -191,10 +196,9 @@ rknn 后端的模型路径走 **env**(沿用 ROCKIVA 那套"现场诊断"惯例;
 
 ## 已知缺口 / 下一步
 
-- **质量闸门未上**(检测分 + 最小脸尺寸 + 清晰度):防抖动模糊脸进识别造成误判,
-  同时保护 1:N 检索与录入抓取两条路;位置见 architecture-v2-proposal 数据流图;
 - **阈值标定**:`face.match_threshold`/`face_dup_threshold` 的余弦分度需按板上
   2s 节流日志"1:N 最高分"实测(ROCKIVA 时代的 0.42/0.90 只是起点);
+  质量阈值 `face.min_face_px`/`face.blur_min`/`face.det_score_min` 同样待板上标定;
 - B7:活体判定算法(B8);`face.model_tag` 的切换目前靠配置/DB 手工改,
   将来可在设备设置页加一项(需要时再说);
 - B10:把视觉模型放进 buildroot 包,别再手工拷(ROCKIVA 走 IVA 包;

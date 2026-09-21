@@ -4,6 +4,52 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-22 视觉离线主循环 + 在场判定闸 + 头像歪斜修复 + UI 层次感(用户六项反馈集中修)
+
+**做了什么**(基线 30/30 绿、零告警;完成后同):
+1. **推理移出主循环(卡顿/死机总根因)**:camera_poll 与 LVGL 同在主循环,
+   vision 推理原内联其中(检测 6.7ms/帧 + 识别 56ms/300ms),人脸一出现
+   UI 即卡死。vision_rknn 新增 worker 线程:主循环回调只投"信箱"(容量 1,
+   新帧顶旧帧立即归还),推理/编码全在 worker;V4L2 缓冲最多占 2 不饿死。
+2. **误弹窗修复(FSM 在场闸)**:1.5s 判定窗原被逐帧 DETECTED 重置→人走后
+   补弹「验证失败」+垃圾日志;现 window_done 一次在场只判一次、FACE_LOST
+   撤销未决窗(路过不弹不落日志)。access 原先没订阅 EV_VISION_FACE_LOST
+   (FSM 该分支是死代码),已补接线;FSM_ACT_FACEBOX_HIDE 改发
+   EV_UI_FACEBOX(state=-1),避免 LOST 订阅回环。
+3. **头像歪斜(歪 ~45°)修复**:ROI 裁剪原各边独立夹取,rw≠rh 时 kps 被各向
+   异性挤压,相似变换拟合在畸变坐标上→对齐结果整体歪斜;改**正方形 ROI**
+   整体平移夹取(sx==sz 恒成立)。新增「对齐旋转角」2s 节流日志:正常应
+   ≈摄像头安装角(±90°),明显偏离=关键点/模板问题(板上验歪斜第一入口)。
+4. **死机兜底**:main 增独立监控线程盯主循环心跳(10s 无心跳=卡死,退出交
+   S60 重拉,替代人工断电);camera 预览缓冲 2→3 防撕裂;主页画布按帧 seq
+   去重拷贝;脸框节流 10Hz→15Hz。
+5. **UI 层次感**:theme 增 DG_COLOR_SCRIM 与 OPA token;主页时钟/网络/提示
+   与拍摄页提示加黑色半透明衬底 chip,主页去冗余红叉图标;菜单宫格改浅蓝
+   卡片+半透明白描边(按下变主蓝);编辑页行加白描边、标题/「无」降透明度、
+   人脸行加高修复头像滑入「修改」按钮;按钮统一半透明白高光边;弹窗遮罩
+   60%→50%、卡片描边 6→3px。
+6. **文档对齐(任务二,逐条有代码证据)**:default.json 只留代码实际读取的
+   键(face.provider/camera/display/stream/storage 等死键清除,补
+   ui.menu_timeout_s);config/README 重写为 default/cur 双文件模型;
+   door-guard/README(30 用例/十页面/rknn 主线);DEV_HANDBOOK(§1 rknn、
+   B5/§8 状态表、face_model_tag 改 JSON);models/README 头两段;spec-
+   database(DDL 补 avatar、DG_ERR_ 前缀、网络配置标注未实现);spec-network
+   OTA 契约对齐实现(/api/ota/upload+请求头 manifest+暂存文件);
+   architecture.md/SKILL.md/FLASHING.md/access README 过时处;vision README
+   线程模型与 15Hz;spec-auth §1/§2.4 在场闸语义。
+
+**测试**:30/30 绿(test_auth_fsm 新增 F13 在场判定窗;test_rknn_face 新增
+90°/45° 旋转还原用例;test_e2e 场景间补 FACE_LOST 适配在场闸);交叉编译
+零告警。
+
+**坑**:Windows 侧 python3 是 Store 占位跑不了脚本(文档批处理必须走 WSL);
+test_i18n 连注释里的 ASCII 引号都拦(第三次踩,新注释一律「」)。
+
+**下一步**:板上人工逐条过(脸框跟手性/路过不再误弹/头像正/有人脸时点击
+跟手;「对齐旋转角」日志应 ≈±90°,偏差大则查关键点或模板);质量阈值与
+1:N 阈值板上标定不变。
+
+---
 ## 2026-09-21 主页时钟/网络图标 + 待机与菜单超时重做(全页触摸计数)
 
 **做了什么**(基线 30/30 绿、零告警):

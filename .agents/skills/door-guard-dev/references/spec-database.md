@@ -19,7 +19,8 @@ CREATE TABLE users (
     role        INTEGER NOT NULL DEFAULT 0 CHECK (role IN (0,1,2)),  -- 0 普通 1 管理员 2 黑名单
     auth_flags  INTEGER NOT NULL DEFAULT 0,          -- bit0 人脸 bit1 指纹 bit2 密码 bit3 IC
     created_at  INTEGER NOT NULL,                    -- unix 秒
-    updated_at  INTEGER NOT NULL
+    updated_at  INTEGER NOT NULL,
+    avatar      BLOB                                 -- 160x160 JPEG 头像(AES-256-CTR,2026-09-21;幂等迁移补列)
 );
 ```
 
@@ -31,16 +32,16 @@ CREATE TABLE users (
 - **密码必填**(`NOT NULL`):添加用户时必须设置密码,否则拒绝添加 —— 业务层在 INSERT 前
   校验,不靠 DB 约束兜底
 - **密码可重复**:验证语义是 ID+密码,重复无歧义;每用户独立盐,存哈希不存明文
-- **用户上限 2000**:添加前 `SELECT COUNT(*)` 校验,超限返回失败(错误码 `ERR_USER_LIMIT`)
+- **用户上限 2000**:添加前 `SELECT COUNT(*)` 校验,超限返回失败(错误码 `DG_ERR_USER_LIMIT`)
 
 ## 2. 唯一性规则(添加/编辑时校验,全部违反即失败,错误码区分)
 
 | 冲突项 | 校验层 | 规则 |
 |---|---|---|
-| user_id | SQL UNIQUE + 业务预检 | 与任何已有用户重复 → `ERR_DUP_UID` |
-| IC 卡号 | SQL UNIQUE + 业务预检 | 与任何已有用户重复 → `ERR_DUP_IC` |
-| 人脸特征 | **业务层 1:N 查重** | 提取特征后与库内所有 face_vec 比对,相似度 ≥ 阈值(默认 0.90,进 device_config)→ `ERR_DUP_FACE` |
-| 指纹特征 | **业务层 1:N 查重** | 同上,指纹算法比对分 ≥ 阈值 → `ERR_DUP_FINGER` |
+| user_id | SQL UNIQUE + 业务预检 | 与任何已有用户重复 → `DG_ERR_DUP_UID` |
+| IC 卡号 | SQL UNIQUE + 业务预检 | 与任何已有用户重复 → `DG_ERR_DUP_IC` |
+| 人脸特征 | **业务层 1:N 查重** | 提取特征后与库内所有 face_vec 比对,相似度 ≥ 阈值(默认 0.90,进 device_config)→ `DG_ERR_DUP_FACE` |
+| 指纹特征 | **业务层 1:N 查重** | 同上,指纹算法比对分 ≥ 阈值 → `DG_ERR_DUP_FINGER` |
 | 密码 | 不校验 | 允许重复 |
 
 **为什么特征查重不在 SQL 层**:特征向量是浮点/量化数据,"重复"是相似度语义而非逐字节相等,
@@ -53,9 +54,9 @@ SQL UNIQUE 无法表达;必须复用识别算法(ROCKIVA/指纹算法)做一次�
 
 | 字段 | 规则 | 违反错误码 |
 |---|---|---|
-| user_id | 3~31 字节;字母/数字/`-`/`_`;**首字符必须字母或数字**(避免 `-`/`_` 打头与命令行/URL 混用);区分大小写;不含空格 | `ERR_BAD_UID`(-26) |
-| user_name | 1~63 字节;非空;无前导/尾随空格;不含控制字符(允许中文、空格、`·`、`-`) | `ERR_BAD_NAME`(-27) |
-| password | 4~31 字节;**可见 ASCII**(0x21~0x7E),不含空格/制表/换行 | `ERR_BAD_PWD`(-28) |
+| user_id | 3~31 字节;字母/数字/`-`/`_`;**首字符必须字母或数字**(避免 `-`/`_` 打头与命令行/URL 混用);区分大小写;不含空格 | `DG_ERR_BAD_UID`(-26) |
+| user_name | 1~63 字节;非空;无前导/尾随空格;不含控制字符(允许中文、空格、`·`、`-`) | `DG_ERR_BAD_NAME`(-27) |
+| password | 4~31 字节;**可见 ASCII**(0x21~0x7E),不含空格/制表/换行 | `DG_ERR_BAD_PWD`(-28) |
 
 - **两处执行同一份规则**:①设备 UI 输入弹窗按 OK 时即时校验(不合格就地红字提示,
   不提交、不占 5s 超时);②存储层 `db_user_add/db_user_update/db_user_set_password`
@@ -107,7 +108,7 @@ CREATE TABLE device_config (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_a
 
 预置键:`language`、`standby_timeout_s`(15~60)、`face_dup_threshold`、`ota_url`、
 `ntp_server`、`door_open_ms`、`pwd_fail_lock_n`(连续错 N 次锁定)、`pwd_fail_lock_s`。
-网络配置(DHCP/静态 IP/掩码/网关)也存这里,由网络服务在开机与变更时应用。
+(原计划网络配置(DHCP/IP/掩码/网关)也存这里,截至 2026-09-22 未实现——无代码读取网络键,net_info 仅只读显示,勿当现状依赖。)
 
 ## 6. 存储服务接口(modules/sqlite,示意)
 

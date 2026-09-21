@@ -49,6 +49,13 @@ static void cancel_timers(auth_fsm_t *fsm)
     emit_none(fsm, FSM_ACT_CANCEL_TIMERS);
 }
 
+/* 定点撤一个定时器(不动其他):到期事件按 timer_seq 丢弃机制自然失效。
+ * cancel_timers 会连 RESULT_3S 一起撤,不能用在这里 */
+static void cancel_timer(auth_fsm_t *fsm, fsm_timer_t id)
+{
+    fsm->timer_active[id] = 0;
+}
+
 /* 成功弹窗(ok 分支;失败走 fail_and_back/popup_fail_not_admin,原因各不同) */
 static void popup_success(auth_fsm_t *fsm)
 {
@@ -254,6 +261,7 @@ static void on_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now_ms)
 
     snprintf(fsm->cur_uid, sizeof(fsm->cur_uid), "%s", m->user_id);
     snprintf(fsm->cur_name, sizeof(fsm->cur_name), "%s", m->user_name);
+    fsm->window_done = true;            /* 本次在场已有结论,不再开新判定窗 */
 
     /* 命中重绘只改颜色:框位置沿用 FACE_DETECTED 的最近一次(UI 端保持) */
     fsm_action_data_t d;
@@ -335,14 +343,24 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
             d.facebox.state = DG_BOX_DETECTED;
             emit(fsm, FSM_ACT_FACEBOX, &d);
         }
-        /* 1.5s 判定窗只在普通态(每此出现重置) */
-        if (fsm->state == ST_NORMAL)
+        /* 1.5s 判定窗:一次在场只开一次(每帧 DETECTED 都重置会让窗永远
+         * 打不响,人走了才补一枪——表现为「人已离开却弹验证失败」+垃圾日志)。
+         * 已出过判定(window_done)或窗还开着时不重开;LOST 复位重新武装 */
+        if (fsm->state == ST_NORMAL && !fsm->window_done &&
+            fsm->timer_active[FSM_TMR_MATCH_WINDOW] == 0)
             set_timer(fsm, FSM_TMR_MATCH_WINDOW, 1500);
         return;
 
     case FSM_EV_FACE_LOST:
-        if (fsm->state == ST_NORMAL)
-            emit_none(fsm, FSM_ACT_FACEBOX_HIDE);
+        /* 人走了:未决的 1.5s 窗撤掉(不给"人已离开还弹失败"),本次在场
+         * 作废——下次到场重新判定。RESULT 期间到 LOST 也要复位,否则在场
+         * 闸卡死,同一个人第二次到场不再判定 */
+        fsm->window_done = false;
+        if (fsm->state == ST_NORMAL || fsm->state == ST_RESULT) {
+            cancel_timer(fsm, FSM_TMR_MATCH_WINDOW);
+            if (fsm->state == ST_NORMAL)
+                emit_none(fsm, FSM_ACT_FACEBOX_HIDE);
+        }
         return;
 
     case FSM_EV_MATCH_1N:
@@ -378,7 +396,9 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
         fsm->timer_active[t->timer_id] = 0;
 
         if (t->timer_id == FSM_TMR_MATCH_WINDOW && fsm->state == ST_NORMAL) {
-            /* 1.5s 未命中:红框 + 失败弹窗 reason=1 陌生人(spec §2.4) */
+            /* 1.5s 未命中:红框 + 失败弹窗 reason=1 陌生人(spec §2.4)。
+             * 本次在场出了结论:结果弹窗关掉后不再重开判定窗(防误报循环) */
+            fsm->window_done = true;
             fsm_action_data_t d;
             memset(&d, 0, sizeof(d));
             d.facebox.state = DG_BOX_FAILED;

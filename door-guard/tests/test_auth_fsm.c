@@ -654,6 +654,86 @@ static void t12_menu_entry_and_verify_flow(void)
     DG_CHECK(last_act(FSM_ACT_WRITE_LOG)->d.log.reason == DG_REASON_TIMEOUT);
 }
 
+/* ================= 13 在场判定窗(2026-09-22 语义收紧) ================= */
+
+/* 通用:按记录里的 SET_TIMER 回执触发对应定时器 */
+static void timer_fire(fsm_timer_t id)
+{
+    const act_rec_t *tr = last_act(FSM_ACT_SET_TIMER);
+    DG_CHECK(tr && tr->d.timer.timer_id == id);
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.timer.timer_id = id;
+    d.timer.seq = tr->d.timer.seq;
+    auth_fsm_handle(&s_fsm, FSM_EV_TIMER, &d);
+}
+
+static void face_lost(void)
+{
+    auth_fsm_handle(&s_fsm, FSM_EV_FACE_LOST, NULL);
+}
+
+static void t13_presence_window(void)
+{
+    printf("[F13] 路过不弹失败;站着只判一次;命中后不再弹失败;离开重新武装\n");
+
+    /* --- 路过(<1.5s 离开):不弹窗、不落日志(此前会"人走了才弹失败") --- */
+    fsm_reset();
+    face_detected();
+    face_detected();                        /* 10Hz 连续上报:不得重置窗口 */
+    face_lost();
+    DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 0);
+    DG_CHECK(count_act(FSM_ACT_WRITE_LOG) == 0);
+    /* 未决窗口已撤:旧 seq 的到期事件必须被丢弃 */
+    timer_fire(FSM_TMR_MATCH_WINDOW);
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+    DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 0);
+    DG_CHECK(count_act(FSM_ACT_WRITE_LOG) == 0);
+
+    /* --- 陌生人站着不走:1.5s 恰好判一次;结果弹窗关掉后不重复弹 --- */
+    fsm_reset();
+    face_detected();
+    timer_fire(FSM_TMR_MATCH_WINDOW);       /* 1.5s 未命中 */
+    DG_CHECK(s_fsm.state == ST_RESULT);
+    DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 1);
+    DG_CHECK(count_act(FSM_ACT_WRITE_LOG) == 1);
+    timer_fire(FSM_TMR_RESULT_3S);          /* 3s 结果展示结束 */
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+    face_detected();                        /* 人还站着:window_done 挡住重开 */
+    const act_rec_t *tr = last_act(FSM_ACT_SET_TIMER);
+    DG_CHECK(tr->d.timer.timer_id != FSM_TMR_MATCH_WINDOW);
+    face_detected();
+    DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 1);   /* 仍是 1 次 */
+
+    /* --- 命中后仍站在门口:结果关闭后不得紧跟"验证失败" --- */
+    fsm_reset();
+    face_detected();
+    handle_match(mk_match("10001", "张三", DG_ROLE_NORMAL, true));
+    DG_CHECK(count_act(FSM_ACT_POPUP_SUCCESS) == 1);
+    timer_fire(FSM_TMR_RESULT_3S);
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+    face_detected();                        /* 人还在:不开新判定窗 */
+    const act_rec_t *tr2 = last_act(FSM_ACT_SET_TIMER);
+    DG_CHECK(tr2->d.timer.timer_id != FSM_TMR_MATCH_WINDOW);
+
+    /* --- 离开再回来:重新武装,新的在场重新判定 --- */
+    face_lost();
+    face_detected();
+    DG_CHECK(last_act(FSM_ACT_SET_TIMER)->d.timer.timer_id == FSM_TMR_MATCH_WINDOW);
+    timer_fire(FSM_TMR_MATCH_WINDOW);
+    DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 1);   /* 第二次在场:又判一次 */
+
+    /* --- RESULT 期间到 LOST:在场闸复位(同一人第二次到场可再判) --- */
+    fsm_reset();
+    face_detected();
+    handle_match(mk_match("10002", "李四", DG_ROLE_NORMAL, true));
+    face_lost();                            /* 弹窗显示期间人走了 */
+    timer_fire(FSM_TMR_RESULT_3S);
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+    face_detected();
+    DG_CHECK(last_act(FSM_ACT_SET_TIMER)->d.timer.timer_id == FSM_TMR_MATCH_WINDOW);
+}
+
 int main(void)
 {
     t01_normal_hit();
@@ -669,6 +749,7 @@ int main(void)
     t10b_menu_timeout();
     t11_misc_invariants();
     t12_menu_entry_and_verify_flow();
+    t13_presence_window();
 
     DG_TEST_EXIT();
 }

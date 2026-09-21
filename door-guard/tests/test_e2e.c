@@ -197,7 +197,11 @@ int main(void)
     DG_CHECK(page.total == 1);
     DG_CHECK(rows[0].result == DG_RESULT_PASS);
 
-    /* ---- E2E-3 陌生人:脸出现 + 1.5s 无命中 → 失败 reason=1 ---- */
+    /* ---- E2E-3 陌生人:脸出现 + 1.5s 无命中 → 失败 reason=1 ----
+     * 先补一个 FACE_LOST(上一场的人走了):在场判定窗一次在场只判一次,
+     * 不离场则新场景不会重新判定(2026-09-22 在场闸) */
+    EVENT_BUS_PUBLISH_EMPTY(EV_VISION_FACE_LOST);
+    sleep(1);                                   /* LOST 分发完再进场 */
     ev_face_box_t box = { .x = 1, .y = 2, .w = 3, .h = 4,
                           .state = DG_BOX_DETECTED };
     EVENT_BUS_PUBLISH(EV_VISION_FACE_BOX, &box);

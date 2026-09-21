@@ -10,7 +10,7 @@ RK3576 K7 人脸识别门禁主应用。业务规格唯一权威:仓库根 `.age
 source env/env.sh            # 仓库根执行
 dg-build                     # 板上(aarch64)构建,-c 全新配置
 dg-build-pc [-r]             # PC 模拟器(SDL2 720×1280),调 UI 一律先过模拟器
-dg-test [--tsan]             # 宿主 ctest 全量(22 用例);--tsan 并发检查
+dg-test [--tsan]             # 宿主 ctest 全量(30 用例,含 demo 冒烟);--tsan 并发检查
 dg-deploy [-r] <IP>          # 推板运行(默认 192.168.2.95)
 dg-ota-upload <IP> <包>       # OTA 上传+校验闭环
 tests/web/web_test.sh        # web 上位机功能验收
@@ -26,25 +26,25 @@ tests/web/web_test.sh        # web 上位机功能验收
 | `components/tasker/` | 短任务调度(≤500ms 约定;cond 超时等待/原子化/自旋熔断) | components/tasker/README.md |
 | `components/holder/` | 模块注册表(依赖分批初始化/循环依赖检测) | components/holder/README.md |
 | `components/logger/` | 极简日志 dg_log(移植组件共用;统一日志体系落地前的基础设施) | — |
-| `services/config/` | 配置服务:默认→device.json→DB 三层覆盖;cfg_set 校验+持久化 | services/config/README.md |
+| `services/config/` | 配置服务:内置默认→default.json(出厂)→cur_config.json(现用)双文件;DB 仅首启迁移读一次(已冻结);cfg_set 校验+持久化 | services/config/README.md |
 | `modules/sqlite/` | SQLite(users/access_logs/device_config,DDL=spec)+ PBKDF2/AES-CTR + 特征查重迭代器 | modules/sqlite/README.md |
 | `drv/gpio/` | 门控 GPIO(sysfs;libgpiod 待 rootfs) | drv/gpio/README.md |
 | `drv/uart/` | 串口框架+mock 回环(协议等手册,不臆造) | drv/uart/README.md |
-| `drv/npu/` | NPU 驱动封装(占位;vision 后端可插拔契约) | — |
-| `modules/camera/` | 相机模块:sim(图片循环)/board(rkaiq+V4L2,Phase 8/B7) | — |
-| `modules/display/` | 显示后端:sim=SDL2 720×1280 / board=DRM dumb-buffer + 触摸 evdev | — |
+| `drv/npu/` | RKNN 运行时薄封装 + RGA 预处理(全仓唯一 include rknn_api.h) | drv/npu/README.md |
+| `modules/camera/` | 相机模块:sim(图片循环)/board(rkaiq+V4L2 NV12→RGA 旋转出 RGB) | modules/camera/README.md |
+| `modules/display/` | 显示后端:sim=SDL2 720×1280 / board=DRM dumb-buffer + 触摸 evdev | modules/display/README.md |
 | `services/access/` | **验证状态机 auth_fsm + access_service**(日志/开门唯一出口) | services/access/README.md |
-| `services/vision/` | 视觉服务:特征槽位句柄 + sim mock / rockiva 占位(后端可插拔) | — |
+| `services/vision/` | 视觉服务:特征槽位句柄 + sim/rknn/rockiva 三后端可插拔(板上主线 rknn) | services/vision/README.md |
 | `services/enroll/` | 录入编排(请求→抓取→查重→入库→回执) | — |
 | `services/capture/` | 取流状态服务(EV_CAPTURE_STATE) | — |
 | `services/liveness/` | 活体占位(接口预留;认证管线强制阶段) | — |
 | `services/verify/` | auth_provider 统一认证抽象 + face/fingerprint/ic provider(B10b) | services/verify/auth_provider.h |
-| `services/web/` | web 上位机(civetweb+Vue 前端 `frontend/`,产物内嵌) | — |
+| `services/web/` | web 上位机(civetweb+Vue 前端 `frontend/`,产物内嵌) | services/web/README.md |
 | `services/ota/` | OTA(流式+sha256,方案 docs/tech/OTA_PLAN.md) | — |
 | `services/ntp/` `services/mdns/` | 时间同步 / mDNS 服务通告 | — |
 | `modules/net/` | 网络模块(net_info:网口信息;网络服务族的地基) | — |
-| `ui/` | LVGL 七页面+widgets+theme+多语言+生成字体 | ui/README.md |
-| `configs/device.json` | 设备配置(出厂值;用户改动落 DB 覆盖;M2 改 default/cur 双文件) | services/config/README.md |
+| `ui/` | LVGL 十页面+widgets+theme+多语言+生成字体 | ui/README.md |
+| `configs/default.json` | 设备配置出厂模板(现用值落 /userdata 的 cur_config.json 稀疏覆盖;DB 已冻结) | services/config/README.md |
 | `tests/` | ctest 用例(宿主 gcc;test_i18n 键覆盖/裸中文=0/字形覆盖) | — |
 | `third_party/` | lvgl 8.3 / cjson / civetweb 1.16 / stb_image / lv_drivers(drm) / 字体生成工具说明 | 各 LICENSE |
 

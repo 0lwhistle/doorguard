@@ -231,7 +231,14 @@ static void on_fsm_action(fsm_action_t act, const fsm_action_data_t *d, void *ud
         break;
     }
     case FSM_ACT_FACEBOX_HIDE:
-        EVENT_BUS_PUBLISH_EMPTY(EV_VISION_FACE_LOST);   /* 复用"隐藏脸框"语义 */
+        /* 撤框走 FSM→UI 契约(state=-1),不回发 EV_VISION_FACE_LOST——
+         * 本服务订阅了该事件(喂 FSM_EV_FACE_LOST),回发同一事件会自激成环 */
+        {
+            ev_ui_facebox_t ev;
+            memset(&ev, 0, sizeof(ev));
+            ev.state = -1;                           /* UI 侧 <0 = 隐藏脸框 */
+            EVENT_BUS_PUBLISH(EV_UI_FACEBOX, &ev);
+        }
         break;
     case FSM_ACT_OPEN_DOOR: {
         /* 门控:gpio_hal 脉冲(引脚配置 default.json;失败不阻断结果事件) */
@@ -294,6 +301,16 @@ static int on_face_box(const event_t *e, void *ud)
     memset(&d, 0, sizeof(d));
     d.box.x = b->x; d.box.y = b->y; d.box.w = b->w; d.box.h = b->h;
     fsm_feed(FSM_EV_FACE_DETECTED, &d);
+    return 0;
+}
+
+static int on_face_lost(const event_t *e, void *ud)
+{
+    (void)e;
+    (void)ud;
+    /* 人离开 → FSM 撤未决的 1.5s 判定窗并复位在场闸(在场合上前,
+     * 这个事件没人喂,FSM 的 LOST 分支是死代码;2026-09-22 补上接线) */
+    fsm_feed(FSM_EV_FACE_LOST, NULL);
     return 0;
 }
 
@@ -459,6 +476,7 @@ int access_service_start(void)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_MATCH_1N, on_match, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_VERIFY_11, on_verify_11, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_FACE_BOX, on_face_box, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_FACE_LOST, on_face_lost, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_BTN, on_btn, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_TEXT_INPUT, on_text_input, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_METHOD_PICK, on_method_pick, NULL);

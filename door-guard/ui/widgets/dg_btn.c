@@ -11,7 +11,11 @@ static void style_init(lv_obj_t *btn, lv_color_t bg, lv_color_t bg_pressed)
     lv_obj_set_style_bg_color(btn, bg, 0);
     lv_obj_set_style_bg_color(btn, bg_pressed, LV_PART_MAIN | LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(btn, 0, 0);
-    lv_obj_set_style_border_width(btn, 0, 0);
+    /* 半透明白描边:实心控件顶部加一道高光边,轻推层次感(不引入阴影,
+     * 全屏重绘架构下阴影是渲染税) */
+    lv_obj_set_style_border_width(btn, 2, 0);
+    lv_obj_set_style_border_color(btn, DG_COL_BG(), 0);
+    lv_obj_set_style_border_opa(btn, DG_OPA_CARD_LINE, 0);
 }
 
 lv_obj_t *dg_btn_create(lv_obj_t *parent, const char *icon, const char *label)

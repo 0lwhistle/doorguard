@@ -47,7 +47,7 @@ static lv_obj_t *base_create(lv_color_t accent)
     lv_obj_remove_style_all(mask);
     lv_obj_set_size(mask, DG_SCREEN_W, DG_SCREEN_H);
     lv_obj_set_style_bg_color(mask, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(mask, LV_OPA_60, 0);
+    lv_obj_set_style_bg_opa(mask, LV_OPA_50, 0);
     lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *card = lv_obj_create(mask);
@@ -55,7 +55,9 @@ static lv_obj_t *base_create(lv_color_t accent)
     lv_obj_center(card);
     lv_obj_set_style_radius(card, DG_RADIUS * 2, 0);
     lv_obj_set_style_bg_color(card, DG_COL_BG(), 0);
-    lv_obj_set_style_border_width(card, 6, 0);
+    /* 描边 3px(原 6px 喧宾夺主):卡片本身浮在暗遮罩上已有层次,彩色描边
+     * 只做状态点缀(成功绿/失败红/输入蓝) */
+    lv_obj_set_style_border_width(card, 3, 0);
     lv_obj_set_style_border_color(card, accent, 0);
     lv_obj_set_style_pad_all(card, 24, 0);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);

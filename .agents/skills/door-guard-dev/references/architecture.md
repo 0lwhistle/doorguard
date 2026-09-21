@@ -8,7 +8,7 @@
 UI 层        ui/ 页面与弹窗(LVGL;PC 模拟器 + 板上双构建)
              只发事件/收事件,不做业务决策
 ──────────────────────────────────────────────────
-服务层       services/(注册进 registry[待 M2];线程归属表见 proposal §3.3)
+服务层       services/(注册进 registry,已落地;线程归属表见 proposal §3.3)
              capture   取流:rkaiq 3A + V4L2/RKADK → NV12 环形缓冲(dma-buf)
              vision    检测/质量闸门/特征/1:N 检索、1:1 比对(后端可插拔契约)
              liveness  动作活体状态机(认证管线强制阶段)
@@ -24,7 +24,7 @@ UI 层        ui/ 页面与弹窗(LVGL;PC 模拟器 + 板上双构建)
 驱动层       drv/ 总线级薄封装、可替换;PC 模拟器 = 同接口的 sim 后端
              uart(指纹+读卡)/ gpio / npu(librknnrt);i2c/spi/pwm 随硬件接入
 ──────────────────────────────────────────────────
-组件层       components/ 机制:tasker / event_bus / holder / logger(registry 待 M2)
+组件层       components/ 机制:tasker / event_bus / holder / logger / registry
 契约层       proto/ events·types·valid·err(唯一横切层,被所有层引用)
 ──────────────────────────────────────────────────
 平台层       官方 SDK(kernel 6.1 + rkaiq + rknpu2 + rga + mpp + libmali + buildroot)
@@ -70,8 +70,8 @@ FreeRTOS 依赖被隔离在 port 层,移植 = 实现对应 pthread port,不动�
 | 目标 | 命令 | 说明 |
 |---|---|---|
 | 板上(aarch64) | `source env/env.sh && dg-build` | 工具链文件 `cmake/aarch64.cmake`,产物 scp 推板 |
-| PC 模拟器(x86_64) | `dg-build-pc`(待建,包一层 `cmake -DDG_SIM=ON`) | SDL2 窗口 720×1280;摄像头用 sim 后端;**调 UI 一律先过模拟器** |
-| 单元测试 | `dg-test`(待建,ctest) | 纯逻辑(db 校验/状态机/i18n json 一致性)WSL 宿主跑,不依赖板/SDK |
+| PC 模拟器(x86_64) | `dg-build-pc`(包一层 `cmake -DDG_SIM=ON`) | SDL2 窗口 720×1280;摄像头用 sim 后端;**调 UI 一律先过模拟器** |
+| 单元测试 | `dg-test`(ctest) | 纯逻辑(db 校验/状态机/i18n json 一致性)WSL 宿主跑,不依赖板/SDK |
 
 - 代码里 `#ifdef DG_SIM` 只允许出现在 HAL sim 后端与 main 装配处,业务与 UI 层禁止
 - rootfs 集成(B10):door-guard 做成 buildroot 包,开机自启替换 LVGL demo
@@ -81,5 +81,5 @@ FreeRTOS 依赖被隔离在 port 层,移植 = 实现对应 pthread port,不动�
 `app/` 装配启动 · `ui/` 界面 · `services/{capture,vision,liveness,verify,access,enroll,config,web,ota,mdns,ntp}` ·
 `modules/{camera,display,sqlite,jpeg,net}` · `drv/{uart,gpio,npu}` ·
 `components/{tasker,event_bus,holder,logger}` · `proto/` 消息与事件契约 ·
-`configs/device.json` · `tests/` · `tools/` · `third_party/`
+`configs/default.json` · `tests/` · `tools/` · `third_party/`
 (职责细表见 door-guard/README.md;目标形态与迁移映射见 docs/architecture-v2-proposal.md)

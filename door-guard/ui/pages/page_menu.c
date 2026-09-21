@@ -38,6 +38,46 @@ static void on_logs(lv_event_t *e)
     navigator_push("logs");
 }
 
+/* 菜单宫格卡片(本页自定义,不复用 dg_btn):浅蓝底 + 半透明白描边的
+ * 大卡片,图标主蓝、按下整卡变主蓝——四个 352×380 实心蓝按钮在一屏里
+ * 过重(2026-09-22 用户反馈「控件太大、缺层次」),入口页用轻底色承载 */
+static lv_obj_t *cell_create(lv_obj_t *parent, const char *icon, const char *label,
+                             lv_event_cb_t open)
+{
+    lv_obj_t *cell = lv_btn_create(parent);
+    lv_obj_set_size(cell, (DG_SCREEN_W - 3 * DG_PAD) / 2, 380);
+    lv_obj_set_style_radius(cell, DG_RADIUS * 2, 0);
+    lv_obj_set_style_bg_color(cell, DG_COL_BG_LIGHT(), 0);
+    lv_obj_set_style_bg_color(cell, DG_COLOR_PRIM(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(cell, 2, 0);
+    lv_obj_set_style_border_color(cell, DG_COL_BG(), 0);
+    lv_obj_set_style_border_opa(cell, DG_OPA_CARD_LINE, 0);
+    lv_obj_set_style_shadow_width(cell, 0, 0);
+
+    lv_obj_t *col = lv_obj_create(cell);
+    lv_obj_remove_style_all(col);
+    lv_obj_set_size(col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_center(col);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(col, 20, 0);
+    lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *sym = lv_label_create(col);
+    lv_label_set_text(sym, icon);
+    lv_obj_set_style_text_font(sym, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(sym, DG_COLOR_PRIM(), 0);
+
+    lv_obj_t *txt = lv_label_create(col);
+    lv_label_set_text(txt, label);
+    lv_obj_set_style_text_font(txt, DG_FONT_CN, 0);
+    lv_obj_set_style_text_color(txt, DG_COL_TEXT(), 0);
+
+    lv_obj_add_event_cb(cell, open, LV_EVENT_CLICKED, NULL);
+    return cell;
+}
+
 void page_menu_create(lv_obj_t *parent)
 {
     DG_LOGI("[MENU]", "page create");
@@ -70,11 +110,8 @@ void page_menu_create(lv_obj_t *parent)
     lv_obj_set_style_pad_column(grid, DG_PAD, 0);
     lv_obj_set_style_pad_row(grid, DG_PAD, 0);
 
-    for (int i = 0; i < 4; i++) {
-        lv_obj_t *b = dg_btn_create(grid, cells[i].icon, cells[i].label);
-        lv_obj_set_size(b, (DG_SCREEN_W - 3 * DG_PAD) / 2, 380);
-        lv_obj_add_event_cb(b, cells[i].open, LV_EVENT_CLICKED, NULL);
-    }
+    for (int i = 0; i < 4; i++)
+        cell_create(grid, cells[i].icon, cells[i].label, cells[i].open);
 
     lv_obj_t *back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));
     lv_obj_set_size(back, 200, DG_BTN_H);

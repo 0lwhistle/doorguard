@@ -152,6 +152,46 @@ static void test_align_scale_translate(void)
     DG_CHECK(feq(m[3] * x + m[4] * y + m[5], k_ref[0][1]));
 }
 
+/* 旋转还原:板上的脸相对参考模板是"躺着"的(摄像头横装,人竖着站),
+ * 相似变换必须带任意角度旋转。src = R(θ)·参考 + t,拟合后应逐点还原回参考
+ * ——歪斜头像/对齐方向反了这类 bug 在这里直接现形 */
+static void test_align_rotate(void)
+{
+    const float theta = 90.0f * (float)M_PI / 180.0f;   /* 横装摄像头典型角 */
+    const float c = cosf(theta), s = sinf(theta);
+    const float tx = 300.0f, ty = 200.0f;
+
+    float src[RKNN_FACE_KPS][2];
+    for (int i = 0; i < RKNN_FACE_KPS; i++) {
+        src[i][0] = c * k_ref[i][0] - s * k_ref[i][1] + tx;
+        src[i][1] = s * k_ref[i][0] + c * k_ref[i][1] + ty;
+    }
+    float m[6];
+    DG_CHECK(rknn_align_plan(src, m) == 0);
+    /* 拟合出的矩阵必须是纯旋转+平移(det=1、正交),且逐点还原回参考 */
+    DG_CHECK(feq(m[0] * m[4] - m[1] * m[3], 1.0f));
+    DG_CHECK(feq(m[0], m[4]));
+    DG_CHECK(feq(m[1], -m[3]));
+    for (int i = 0; i < RKNN_FACE_KPS; i++) {
+        const float x = src[i][0], y = src[i][1];
+        DG_CHECK(feq(m[0] * x + m[1] * y + m[2], k_ref[i][0]));
+        DG_CHECK(feq(m[3] * x + m[4] * y + m[5], k_ref[i][1]));
+    }
+
+    /* 45° 也要对(用户报告的歪斜量级);逆旋转后比例不变 */
+    const float t45 = 45.0f * (float)M_PI / 180.0f;
+    const float c45 = cosf(t45), s45 = sinf(t45);
+    for (int i = 0; i < RKNN_FACE_KPS; i++) {
+        src[i][0] = c45 * k_ref[i][0] - s45 * k_ref[i][1];
+        src[i][1] = s45 * k_ref[i][0] + c45 * k_ref[i][1];
+    }
+    DG_CHECK(rknn_align_plan(src, m) == 0);
+    DG_CHECK(feq(m[0], c45) && feq(m[1], s45));   /* 逆旋转矩阵 [[c,s],[-s,c]] */
+    const float x = src[0][0], y = src[0][1];
+    DG_CHECK(feq(m[0] * x + m[1] * y + m[2], k_ref[0][0]));
+    DG_CHECK(feq(m[3] * x + m[4] * y + m[5], k_ref[0][1]));
+}
+
 static void test_align_warp_identity(void)
 {
     uint8_t src[8 * 8 * 3];
@@ -312,6 +352,7 @@ int main(void)
     test_nms();
     test_align_identity();
     test_align_scale_translate();
+    test_align_rotate();
     test_align_warp_identity();
     test_align_warp_oob_zero();
     test_feature();

@@ -38,8 +38,8 @@ FSM 内部维护;`match_enabled` 仅普通态且无弹窗时为真。
 
 ```c
 auth_fsm_init(&fsm, cfg_get()->door_open_ms, cfg_get()->standby_timeout_s,
-              cfg_get()->pwd_fail_lock_n, cfg_get()->pwd_fail_lock_s,
-              on_fsm_action, page_ctx);
+              cfg_get()->menu_timeout_s, cfg_get()->pwd_fail_lock_n,
+              cfg_get()->pwd_fail_lock_s, on_fsm_action, page_ctx);
 ```
 
 ## 测试(tests/test_auth_fsm.c + tests/test_verify_flow.c,ctest)

@@ -76,6 +76,6 @@ BootROM 的 Maskrom 模式不依赖 eMMC 内容:短接 Maskrom 孔/按键进 Mas
 - [ ] `dmesg | grep rknpu` 有 NPU 驱动加载记录
 - [ ] `ls /dev/video*` 存在;`media-ctl -p` 能看到 imx415 链路
 - [ ] 5 寸屏点亮背光
-- [ ] `cat /proc/bus/input/devices` 有 goodix 触摸设备
+- [ ] `cat /proc/bus/input/devices` 有触摸设备(goodix 或 fts/focaltech,随屏装配)
 - [ ] 网口 link up,dhcp 拿到 IP;`ping` 外网通
 - [ ] dropbear SSH 可登录

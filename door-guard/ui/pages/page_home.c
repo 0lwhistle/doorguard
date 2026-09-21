@@ -25,9 +25,10 @@ static lv_obj_t *s_facebox = NULL;
 static lv_obj_t *s_hint = NULL;
 static lv_obj_t *s_clock = NULL;
 static lv_obj_t *s_net = NULL;         /* WiFi 图标(绿=在线/红=离线) */
-static lv_obj_t *s_net_x = NULL;       /* 离线时的红叉(叠在图标右下) */
 static lv_timer_t *s_pump_timer = NULL;
 static lv_timer_t *s_status_timer = NULL;
+static uint32_t s_last_seq;            /* 上次画到画布的帧序号(去重:相机比刷屏
+                                          慢时不再重复整屏 invalidate) */
 
 /* ---- 相机帧 → 画布(33ms 轮询,30fps) ---- */
 
@@ -45,8 +46,10 @@ static void canvas_timer_cb(lv_timer_t *t)
             return;
         lv_canvas_set_buffer(s_canvas, s_canvas_buf, w, h, LV_IMG_CF_TRUE_COLOR);
         lv_obj_center(s_canvas);
+        s_last_seq = 0;
     }
-    if (f->w == w && f->h == h) {
+    if (f->w == w && f->h == h && f->seq != s_last_seq) {
+        s_last_seq = f->seq;
         lv_canvas_copy_buf(s_canvas, (const lv_color_t *)f->pixels, 0, 0, w, h);
         lv_obj_invalidate(s_canvas);
     }
@@ -73,13 +76,8 @@ static void status_timer_cb(lv_timer_t *t)
         char ip[64];
         const bool online =
             net_info_primary_ipv4(ip, sizeof(ip)) == DG_OK;
+        /* 图标颜色已含全部状态语义(绿=在线/红=离线),不再叠红叉图标 */
         lv_obj_set_style_text_color(s_net, online ? DG_COL_OK() : DG_COL_ERR(), 0);
-        if (s_net_x) {
-            if (online)
-                lv_obj_add_flag(s_net_x, LV_OBJ_FLAG_HIDDEN);
-            else
-                lv_obj_clear_flag(s_net_x, LV_OBJ_FLAG_HIDDEN);
-        }
     }
 }
 
@@ -121,31 +119,39 @@ void page_home_create(lv_obj_t *parent)
     lv_obj_set_style_bg_opa(s_facebox, LV_OPA_TRANSP, 0);
     lv_obj_add_flag(s_facebox, LV_OBJ_FLAG_HIDDEN);
 
+    /* 提示条:黑色半透明衬底 chip(直接叠在推流上,白字/黄字才可读) */
     s_hint = lv_label_create(parent);
     lv_obj_set_style_text_font(s_hint, DG_FONT_CN, 0);
-    lv_obj_set_style_text_color(s_hint, DG_COL_TEXT(), 0);
+    lv_obj_set_style_text_color(s_hint, DG_COL_BG(), 0);
+    lv_obj_set_style_bg_color(s_hint, DG_COL_SCRIM(), 0);
+    lv_obj_set_style_bg_opa(s_hint, DG_OPA_SCRIM, 0);
+    lv_obj_set_style_radius(s_hint, 8, 0);
+    lv_obj_set_style_pad_hor(s_hint, 14, 0);
+    lv_obj_set_style_pad_ver(s_hint, 6, 0);
     lv_obj_align(s_hint, LV_ALIGN_TOP_MID, 0, 24);
     lv_obj_add_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
 
-    /* 状态栏:左上实时时钟,右上网络图标(不可点,别拦主页按钮) */
+    /* 状态栏:左上实时时钟,右上网络图标。同款衬底 chip,从推流里「浮」出来 */
     s_clock = lv_label_create(parent);
     lv_obj_set_style_text_font(s_clock, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_color(s_clock, DG_COL_TEXT(), 0);
-    lv_obj_align(s_clock, LV_ALIGN_TOP_LEFT, 16, 16);
+    lv_obj_set_style_text_color(s_clock, DG_COL_BG(), 0);
+    lv_obj_set_style_bg_color(s_clock, DG_COL_SCRIM(), 0);
+    lv_obj_set_style_bg_opa(s_clock, DG_OPA_SCRIM, 0);
+    lv_obj_set_style_radius(s_clock, 8, 0);
+    lv_obj_set_style_pad_hor(s_clock, 10, 0);
+    lv_obj_set_style_pad_ver(s_clock, 4, 0);
+    lv_obj_align(s_clock, LV_ALIGN_TOP_LEFT, DG_PAD, DG_PAD);
     lv_obj_clear_flag(s_clock, LV_OBJ_FLAG_CLICKABLE);
 
     s_net = lv_label_create(parent);
     lv_label_set_text(s_net, LV_SYMBOL_WIFI);
     lv_obj_set_style_text_font(s_net, &lv_font_montserrat_28, 0);
-    lv_obj_align(s_net, LV_ALIGN_TOP_RIGHT, -16, 16);
+    lv_obj_set_style_bg_color(s_net, DG_COL_SCRIM(), 0);
+    lv_obj_set_style_bg_opa(s_net, DG_OPA_SCRIM, 0);
+    lv_obj_set_style_radius(s_net, 8, 0);
+    lv_obj_set_style_pad_all(s_net, 6, 0);
+    lv_obj_align(s_net, LV_ALIGN_TOP_RIGHT, -DG_PAD, DG_PAD);
     lv_obj_clear_flag(s_net, LV_OBJ_FLAG_CLICKABLE);
-
-    s_net_x = lv_label_create(parent);
-    lv_label_set_text(s_net_x, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_text_font(s_net_x, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(s_net_x, DG_COL_ERR(), 0);
-    lv_obj_align_to(s_net_x, s_net, LV_ALIGN_OUT_BOTTOM_RIGHT, -2, -6);
-    lv_obj_clear_flag(s_net_x, LV_OBJ_FLAG_CLICKABLE);
 
     s_status_timer = lv_timer_create(status_timer_cb, 1000, NULL);
     status_timer_cb(NULL);              /* 创建即显示当前值,不等 1s */
@@ -183,7 +189,7 @@ void page_home_destroy(void)
     s_hint = NULL;
     s_clock = NULL;
     s_net = NULL;
-    s_net_x = NULL;
+    s_last_seq = 0;
 }
 
 /* ---- setter(presenter 渲染入口) ---- */

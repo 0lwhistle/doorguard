@@ -48,7 +48,7 @@ dg-serial             # 串口控制台(1500000 8N1,不是 115200)
 - **命名**:模块前缀式 `module_action()` / `module_type_t`;注释解释"为什么",不复述代码
 - **完成的定义**:一个功能模块 = 代码 + 注释 + 测试案例(`door-guard/tests/`,WSL 宿主 gcc 可跑)+ 模块 README + 使用示例,缺一不算完成
 - **UI**:所有 label 一律 `_("原文")` 包裹;翻译文件 `ui/lang/<语言>.json`(键=原文,值=译文);按钮一律图标+label;蓝白主题,色值 token 见 spec-ui.md
-- **配置**:业务参数进 `configs/device.json` 或 DB device_config 表,代码零魔数(v2 决议:device_config 表已冻结,新配置只进 JSON;M2 落地 default/cur 双文件)
+- **配置**:业务参数进 `configs/default.json`(出厂模板)与现用 `cur_config.json`,代码零魔数(v2 决议:DB device_config 表已冻结,新配置只进 JSON)
 - 推板前 dg-build 无警告;测试不过不推板
 
 ## 3. 收尾纪律(每次会话结束前)

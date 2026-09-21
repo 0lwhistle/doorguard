@@ -288,6 +288,12 @@ void page_capture_create(lv_obj_t *parent)
 
     s_hint = lv_label_create(parent);
     lv_obj_set_style_text_font(s_hint, DG_FONT_CN, 0);
+    /* 质量提示同样衬在预览画面上:黑底 chip(颜色按判定切换) */
+    lv_obj_set_style_bg_color(s_hint, DG_COL_SCRIM(), 0);
+    lv_obj_set_style_bg_opa(s_hint, DG_OPA_SCRIM, 0);
+    lv_obj_set_style_radius(s_hint, 8, 0);
+    lv_obj_set_style_pad_hor(s_hint, 14, 0);
+    lv_obj_set_style_pad_ver(s_hint, 6, 0);
     lv_obj_align(s_hint, LV_ALIGN_TOP_MID, 0, 64);
 
     /* 回看照片:白底描边小窗,盖在预览之上(160×160 原尺寸) */

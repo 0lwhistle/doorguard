@@ -8,7 +8,7 @@
 
 ## 1. 项目速览
 
-- **目标**:RK3576 人脸识别门禁(LVGL 界面 + 官方 ROCKIVA 人脸识别 + 动作活体 + 预留指纹/IC 卡)
+- **目标**:RK3576 人脸识别门禁(LVGL 界面 + 自组 rknn 人脸识别 + 动作活体 + 预留指纹/IC 卡)
 - **硬件**:KickPi K7(RK3576,6T NPU)+ 5 寸 MIPI 屏 F050008M01(720×1280,触摸 IC 随屏组装为 FocalTech/GT9xx)+ 官方 IMX415 摄像头
 - **系统**:Buildroot 无桌面 Linux(内核 6.1,vendor 分支),LVGL 直跑 DRM,无 X11/Wayland
 - **技术栈已定**:UI=LVGL;取流/上屏=RKADK/RGA→DRM;远程推流=GStreamer RTSP;**人脸=自组 rknn(RetinaFace 检测 + ArcFace 识别,rknn-toolkit2 转换,2026-09-21 起为主线)**(ROCKIVA 备选,本版 SDK 缺 rk3576 人脸模型);数据库=SQLite;联网=以太网(主)
@@ -56,9 +56,9 @@
 | 启动/串口/登录 | ✅ |
 | 屏幕点亮 + 触摸 | ✅(LVGL demo 自启验证) |
 | IMX415 探测/出流 | ✅(cam2, 3864×2192 RAW10) |
-| ISP 节点定位 / 抓 NV12 帧 | ⏳ 进行中(见 §5) |
-| rknpu 驱动确认 | ⏳ |
-| 以太网 / SSH | ⏳ |
+| ISP 节点定位 / 抓 NV12 帧 | ✅(见 §5;mainpath /dev/video51) |
+| rknpu 驱动确认 | ✅(NPU 实测见 §2/§5) |
+| 以太网 / SSH | ✅(dhcpcd 手动拉起+dropbear;自动配网待固件) |
 
 ---
 
@@ -88,14 +88,14 @@ ls -lh /userdata/doorguard/models/          # 视觉模型(持久分区;A/B 升�
 /root/rknn_det_test <model.rknn> <raw_rgb_320x320x3> 0.5   # 检测链路离线对拍
 /root/rknn_rec_test <rec.rknn> f32 a.raw b.raw c.raw       # 识别链路(余弦自检)
 grep -E "rknn 就绪|检出|1:N 最高分|录入取特征" /var/log/door-guard.log | tail -20
-# 特征口径(换模型必改,否则命中被屏蔽——有意安全阀):
-sqlite3 /var/lib/door-guard/door-guard.db \
-  "SELECT * FROM device_config WHERE key='face_model_tag';"
-#   UPDATE device_config SET value='rknn-arcface-r50-v1' WHERE key='face_model_tag';
+# 特征口径(换模型必改,否则命中被屏蔽——有意安全阀;DB 已冻结,改 JSON):
+#   编辑 /userdata/doorguard/cur_config.json 的 face.model_tag 为新口径
+#   (如 "rknn-arcface-r50-v1"),重启生效
 ```
 
-**板端路径备忘**:应用 DB `/var/lib/door-guard/door-guard.db`(含 `device_config` 遗留键,
-如 `face_model_tag`);现用配置 `/userdata/doorguard/cur_config.json`(DB 已冻结,新配置只进 JSON);
+**板端路径备忘**:应用 DB `/var/lib/door-guard/door-guard.db`;现用配置
+`/userdata/doorguard/cur_config.json`(DB device_config 已冻结,新配置只进
+JSON,`face_model_tag` 遗留键以 cur_config.json 的 face.model_tag 为准);
 视觉模型 `/userdata/doorguard/models/`。
 
 注意:rootfs 裁剪过,缺什么工具优先想"buildroot defconfig 里没开",回 VM 加配置重编,不要板端乱装。
@@ -108,8 +108,8 @@ sqlite3 /var/lib/door-guard/door-guard.db \
 - **已定位(2026-09-18 B6)**:IMX415(cam2 口,实体名 `m02_b_imx415 8-0037`)→ rkcif → **rkisp-vir2 = /dev/media5**,mainpath = **/dev/video51**;实体名查法 `cat /sys/class/video4linux/v4l-subdev*/name`
 - 两条取流路径:
   - **rkcif 直采**:RAW10 裸帧(无 3A),仅用于验证传感器出图
-  - **rkisp + rkaiq 3A**:正式成像路径,**已打通**(door-guard 预览在用):V4L2 单平面 NV12 1280x720 → RGA 旋转90+转 XRGB → LVGL。⚠️ 3 个死坑:uAPI2 参数是传感器实体名(非 media 节点,传错段错误);aiq2.lock 死锁需"取流线程与 prepare 并发会合";librga 成功码有两个——详见 door-guard/hal/camera/README.md
-- door-guard 相机链路开关与环境变量见 `door-guard/hal/camera/README.md`
+  - **rkisp + rkaiq 3A**:正式成像路径,**已打通**(door-guard 预览在用):V4L2 单平面 NV12 1280x720 → RGA 旋转90+转 XRGB → LVGL。⚠️ 3 个死坑:uAPI2 参数是传感器实体名(非 media 节点,传错段错误);aiq2.lock 死锁需"取流线程与 prepare 并发会合";librga 成功码有两个——详见 door-guard/modules/camera/README.md
+- door-guard 相机链路开关与环境变量见 `door-guard/modules/camera/README.md`
 
 ---
 
@@ -204,8 +204,8 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 | SWT6621S WiFi 驱动编译失败(`skw_platform_data.h` 未拷入内核) | 未修 | 厂家脚本加"先拷头文件"步骤,分支补丁;下一版固件恢复 WiFi |
 | recovery 镜像未构建(独立 buildroot 全量,耗时 1h+) | 延后 | 空闲时段补;不阻塞功能 |
 | LVGL demo 自启占用屏幕(/etc/init.d/S00-lv_demo) | **已禁用**(板上运行 door-guard 前提;mv 为 disabled-S00-lv_demo) | B10 固件收编为 door-guard 自启 |
-| ISP 节点定位 / rkaiq 3A 起流 | 进行中(B6) | 完成 §5 映射后抓 NV12 |
-| ROCKIVA 上板验证 | 待 B7 | 库+模型已在 rootfs |
+| ISP 节点定位 / rkaiq 3A 起流 | ✅ 完成(B6,§5) | — |
+| ROCKIVA 上板验证 | 搁置(备选;自组 rknn 已为主线) | 需厂商补 rk3576 人脸模型 |
 | ~~触摸输入:无输入节点~~ **已解决(2026-09-18)**:touch_evdev 接入,当前屏 fts_ts 工作正常;仅剩方向/灵敏度人工校验(偏转配 DG_TOUCH_* env) | 已闭环 | — |
 | 门控 GPIO:继电器引脚未确认(勿在未知引脚写 direction,已致板挂起一次) | 待硬件确认 | 引脚确认后 gpio_hal 对拍 |
 | /dev/fb0(rockchipdrmfb)mmap EBUSY | 已绕行 | 显示走 DRM dumb-buffer(lv_drivers) |

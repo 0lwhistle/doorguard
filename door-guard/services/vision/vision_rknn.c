@@ -1,17 +1,24 @@
 /*
  * vision_rknn.c — 自组 rknn 人脸后端(RetinaFace 检测 + ArcFace 识别)
  *
- * 链路(全部在相机线程内联完成,不新增线程):
+ * 链路(推理在专用 worker 线程;取流/预览/LVGL 主循环零等待):
  *
- *   camera NV12 1280×720
+ *   camera NV12 1280×720(主循环 camera_poll 投递)
+ *     └─ on_frame_push 只做"信箱投递":最新帧编号入箱,旧帧立即归还——
+ *        回调在主循环执行,任何阻塞都会拖垮 UI(2026-09-22 修:推理原内联在
+ *        主循环,检测 6.7ms/帧 + 识别 56ms/300ms,人脸一出现 UI 就卡死)。
+ *     worker 线程取帧:
  *     ├─[每帧] RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)→ 解码 → NMS
- *     │        → 最大脸 → 逆映射+旋转 → EV_VISION_FACE_BOX(黄框,10Hz 节流)
+ *     │        → 最大脸 → 逆映射+旋转 → EV_VISION_FACE_BOX(黄框,15Hz 节流)
  *     └─[每 300ms 且非 IDLE] 从 NV12 原分辨率裁人脸 ROI(RGA)→ 5 点对齐
  *              112×112 → (x-127.5)/127.5 → ArcFace@NPU(56ms)→ 512 维
  *              → L2 归一化 → 录入缓存 / 1:1 比对 / 1:N 检索 → 事件 → FSM
  *
- *   帧内最坏耗时 ≈ 7+56+RGA ≈ 65ms < 4 缓冲 @30fps 的 133ms 预算,不会饿死;
- *   且取完 NPU 输出即归还 V4L2 缓冲(ROI 裁剪在归还前完成——它要读 NV12)。
+ *   worker 处理一帧最坏 ≈ 7+56+RGA ≈ 65ms → 满载约 15fps:信箱永远只留
+ *   最新帧(处理期间新到的帧顶掉旧帧立即归还),识别/画框永远基于新鲜帧,
+ *   V4L2 4 缓冲同时最多占 2(信箱 1 + 处理中 1),不会饿死相机。
+ *   注意:letterbox/crop 与 camera 模块的预览旋转并发使用 RGA——librga
+ *   按调用走独立请求,多线程并发是它的正常用法。
  *
  * 模型(models/README.md ⑤,均在板上 /userdata/doorguard/models):
  *   RetinaFace_rk3576_i8.rknn  320×320 I8,归一化已烤进图,喂原始 U8;
@@ -41,6 +48,7 @@
 #include "rknn_face.h"
 #include "face_quality.h"
 
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,7 +65,7 @@ static const char *TAG = "[VISION]";
 #define RKNN_FEATURE_MIN    16          /* 低于视为无效特征(字节) */
 #define RKNN_NMS_IOU        0.40f
 #define RKNN_MAX_CAND       256         /* 候选框上限 */
-#define RKNN_PUB_MS         100         /* 脸框事件节流(10Hz) */
+#define RKNN_PUB_MS         66          /* 脸框事件节流(15Hz;10Hz 跟手性不足) */
 #define RKNN_BOX_LOG_MS     2000        /* 检出分数日志节流(调阈值用) */
 #define RKNN_SCORE_LOG_MS   2000        /* 1:N 最高分日志节流 */
 #define RKNN_REC_MS         300         /* 识别节流(录入缓存新鲜度 ≤300ms) */
@@ -78,7 +86,8 @@ static rknn_face_t *s_cand;
 static npu_letterbox_t s_lb;
 static int s_lb_src_w, s_lb_src_h;
 static float s_score_thresh = 0.5f;
-static bool s_face_present;
+static bool s_face_present;            /* worker 写;on_mode_changed(总线线程)置
+                                          false 仅单字写,读侧滞后一帧无实义 */
 static int64_t s_last_det_ms;          /* 最近一次检出的时刻:LOST 滞回用 */
 /* 一次在场只放行一次:1:N 是持续上报的,人站在镜头前会每 300ms 命中一次。
  * 不设这道闸,FSM 就会开门→结果→回普通→再开门地循环:继电器反复动作、
@@ -96,9 +105,21 @@ static size_t   s_rec_in_bytes;
 static uint8_t *s_roi;                /* 人脸 ROI(RGB) */
 static uint8_t *s_aligned;            /* 对齐后 112×112(RGB) */
 static uint8_t  s_avatar_warp[RKNN_AVATAR_SZ * RKNN_AVATAR_SZ * 3];
-                                       /* 头像 160×160 对齐结果(相机线程独占) */
+                                       /* 头像 160×160 对齐结果(worker 线程独占) */
 static float   *s_norm_in;            /* ArcFace 输入(归一化 f32) */
 static int64_t  s_last_rec_ms;
+
+/* ---- worker 线程:推理重活全部离开主循环(UI 卡顿的根因,2026-09-22) ----
+ * 信箱容量 1:主循环回调只投"最新帧编号",worker 忙时新帧顶掉旧帧并立即
+ * 归还旧帧(零拷贝契约:V4L2 缓冲要么在处理要么已归还,不积压)。 */
+static pthread_mutex_t s_mb_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  s_mb_cond = PTHREAD_COND_INITIALIZER;
+static struct {
+    const uint8_t *data;                /* NV12 首址(V4L2 缓冲,归还前有效) */
+    uint32_t fid;                       /* V4L2 缓冲 frame_id */
+    int      w, h;
+    bool     has;
+} s_mb;
 
 /* 最新「特征 + 同帧头像大图」成对缓存(analyse 路径同帧写入;录入
  * CAPTURE_REQ 读)。一把锁保护成对性:照片与特征必须出自同一帧,
@@ -372,7 +393,11 @@ static bool recognize(const uint8_t *nv12, int w, int h,
                       const rknn_face_t *src /* 源图坐标 */, float src_score,
                       float *feat_out)
 {
-    /* ROI:关键点外接框外扩,偶对齐并夹进帧内(YUV420 裁剪须偶数) */
+    /* ROI:关键点外接框外扩的**正方形**,整体平移夹进帧内(偶对齐)。
+     * 不能各边独立裁剪缩小:rw≠rh 会让 kps 被各向异性挤压(sx≠sy),
+     * 相似变换拟合在畸变坐标上,对齐结果整体歪斜——头像「歪 45°」、识别
+     * 分数不稳的根因(2026-09-22 修)。正方形装不下时整块平移,仍装不下
+     * (脸比画面还大)才缩边,且缩完仍是正方形 */
     float kmin_x = 1e9f, kmin_y = 1e9f, kmax_x = -1e9f, kmax_y = -1e9f;
     for (int i = 0; i < RKNN_FACE_KPS; i++) {
         if (src->kps[i][0] < kmin_x) kmin_x = src->kps[i][0];
@@ -385,37 +410,37 @@ static bool recognize(const uint8_t *nv12, int w, int h,
     const float span = (kmax_x - kmin_x > kmax_y - kmin_y ? kmax_x - kmin_x
                                                           : kmax_y - kmin_y)
                        * RKNN_ROI_MARGIN;
-    int half = (int)(span * 0.5f);
-    if (half < 32)
-        return false;                       /* 脸太小,识别无意义 */
+    int side = (int)(span);
+    if (side < 64)
+        return false;                       /* 脸太小,识别无意义(与旧 half<32 同口径) */
+    if (side > w) side = w;
+    if (side > h) side = h;
 
-    int rx = (int)(cx - half), ry = (int)(cy - half);
-    int rw = half * 2, rh = half * 2;
+    int rx = (int)cx - side / 2, ry = (int)cy - side / 2;
     if (rx < 0) rx = 0;
     if (ry < 0) ry = 0;
-    if (rx + rw > w) rw = w - rx;
-    if (ry + rh > h) rh = h - ry;
-    rw &= ~1; rh &= ~1; rx &= ~1; ry &= ~1;
-    if (rw < 32 || rh < 32)
+    if (rx + side > w) rx = w - side;
+    if (ry + side > h) ry = h - side;
+    side &= ~1;                             /* YUV420 裁剪须偶数(只会更小,仍居中) */
+    rx &= ~1; ry &= ~1;
+    if (side < 32)
         return false;
 
-    const int dw = rw < RKNN_ROI_MAX ? rw : RKNN_ROI_MAX;
-    const int dh = rh < RKNN_ROI_MAX ? rh : RKNN_ROI_MAX;
-    if (npu_pre_nv12_crop_rgb(nv12, w, w, h, rx, ry, rw, rh, s_roi, dw, dh) != DG_OK)
+    const int dw = side < RKNN_ROI_MAX ? side : RKNN_ROI_MAX;
+    if (npu_pre_nv12_crop_rgb(nv12, w, w, h, rx, ry, side, side, s_roi, dw, dw) != DG_OK)
         return false;
 
-    /* 关键点映射进 ROI 坐标,求相似变换,重采样 112×112 */
+    /* 关键点映射进 ROI 坐标(正方形 ROI ⇒ sx==sy,无畸变),求相似变换 */
     float kps_roi[RKNN_FACE_KPS][2];
-    const float sx = (float)dw / (float)rw;
-    const float sy = (float)dh / (float)rh;
+    const float ks = (float)dw / (float)side;
     for (int i = 0; i < RKNN_FACE_KPS; i++) {
-        kps_roi[i][0] = (src->kps[i][0] - (float)rx) * sx;
-        kps_roi[i][1] = (src->kps[i][1] - (float)ry) * sy;
+        kps_roi[i][0] = (src->kps[i][0] - (float)rx) * ks;
+        kps_roi[i][1] = (src->kps[i][1] - (float)ry) * ks;
     }
     float m[6];
     if (rknn_align_plan(kps_roi, m) != 0)
         return false;
-    rknn_align_warp(s_roi, dw, dh, m, s_aligned, 112, 112);
+    rknn_align_warp(s_roi, dw, dw, m, s_aligned, 112, 112);
 
     /* ---- 质量闸门:测的正是"要喂给识别的那张脸" ----
      * 抖动糊脸喂进去会得到不可信特征——既可能误判,也会污染库(录进糊脸,
@@ -478,8 +503,18 @@ static bool recognize(const uint8_t *nv12, int w, int h,
         const float s = (float)RKNN_AVATAR_SZ / 112.0f;
         for (int i = 0; i < 6; i++)
             mb[i] = m[i] * s;
-        rknn_align_warp(s_roi, dw, dh, mb, s_avatar_warp, RKNN_AVATAR_SZ,
+        rknn_align_warp(s_roi, dw, dw, mb, s_avatar_warp, RKNN_AVATAR_SZ,
                         RKNN_AVATAR_SZ);
+        /* 诊断日志(节流):对齐拟合出的面内旋转角。头像歪斜/识别分数异常时
+         * 第一时间看这里——正常应 ≈ 摄像头安装角(±90°);明显偏离说明关键点
+         * 或模板出了问题 */
+        static int64_t last_ang_log;
+        const int64_t now = now_ms();
+        if (now - last_ang_log >= RKNN_BOX_LOG_MS) {
+            last_ang_log = now;
+            const float deg = atan2f(m[3], m[0]) * (180.0f / 3.14159265f);
+            DG_LOGI(TAG, "对齐旋转角 %.1f°(ROI %dpx,缩放 %.2f)", deg, side, ks);
+        }
     }
 
     /* 归一化 → NPU → L2(板上实测:该模型未烤归一化,必须喂 (x-127.5)/127.5) */
@@ -496,10 +531,56 @@ static bool recognize(const uint8_t *nv12, int w, int h,
 
 /* ---- 帧入口 -------------------------------------------------------------- */
 
+static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id);
+
+/* 主循环回调(camera_poll 调用):只投信箱,任何阻塞都会拖垮 UI/取流。
+ * worker 忙时新帧顶掉旧帧,旧帧立即归还——永远推理最新画面,不积压。 */
 static void on_frame_push(const uint8_t *data, int w, int h, uint32_t frame_id)
 {
-    /* 未就绪/关人脸 → 立即归还(否则 4 缓冲耗尽,相机永久断流) */
-    if (!s_ready || vision_service_get_mode() == DG_VMODE_IDLE || w <= 0 || h <= 0) {
+    if (!s_ready || w <= 0 || h <= 0 || !data) {
+        camera_nv12_release(frame_id);
+        return;
+    }
+
+    uint32_t stale = 0;                 /* 被顶掉的旧帧,锁外归还 */
+    pthread_mutex_lock(&s_mb_mtx);
+    if (s_mb.has)
+        stale = s_mb.fid;
+    s_mb.data = data;
+    s_mb.fid = frame_id;
+    s_mb.w = w;
+    s_mb.h = h;
+    s_mb.has = true;
+    pthread_cond_signal(&s_mb_cond);
+    pthread_mutex_unlock(&s_mb_mtx);
+
+    if (stale)
+        camera_nv12_release(stale);
+}
+
+static void *vision_worker(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        pthread_mutex_lock(&s_mb_mtx);
+        while (!s_mb.has)
+            pthread_cond_wait(&s_mb_cond, &s_mb_mtx);
+        const uint8_t *data = s_mb.data;
+        const uint32_t fid = s_mb.fid;
+        const int w = s_mb.w, h = s_mb.h;
+        s_mb.has = false;
+        pthread_mutex_unlock(&s_mb_mtx);
+
+        process_frame(data, w, h, fid); /* 所有路径内部保证归还缓冲 */
+    }
+    return NULL;                        /* 进程生命周期线程,无退出路径 */
+}
+
+static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
+{
+    /* IDLE/坏帧 → 立即归还(否则 4 缓冲耗尽,相机永久断流)。
+     * (IDLE 可能在帧入箱后才发生——worker 这里再查一次,模式切换即时生效) */
+    if (vision_service_get_mode() == DG_VMODE_IDLE || w <= 0 || h <= 0) {
         camera_nv12_release(frame_id);
         return;
     }
@@ -806,6 +887,16 @@ static int rknn_start(bool enable_mock)
     pthread_mutex_lock(&s_lib.mtx);
     const int loaded = s_lib.n;
     pthread_mutex_unlock(&s_lib.mtx);
+
+    /* worker 线程最后起:s_ready 就位后才有帧可处理(进程生命周期,不 join) */
+    {
+        pthread_t tid;
+        if (pthread_create(&tid, NULL, vision_worker, NULL) != 0) {
+            DG_LOGE(TAG, "推理 worker 线程创建失败");
+            goto fail;
+        }
+        pthread_detach(tid);
+    }
 
     s_ready = true;
     DG_LOGI(TAG, "rknn 就绪:检测 %s %dx%d(锚框 %d,阈值 %.2f)+ 识别 %s(%d 维,"
