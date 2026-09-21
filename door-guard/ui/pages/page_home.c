@@ -12,15 +12,22 @@
 #include "widgets/dg_popup.h"
 
 #include "modules/camera/camera.h"
+#include "modules/net/net_info.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static lv_obj_t *s_canvas = NULL;
 static lv_color_t *s_canvas_buf = NULL;
 static lv_obj_t *s_facebox = NULL;
 static lv_obj_t *s_hint = NULL;
+static lv_obj_t *s_clock = NULL;
+static lv_obj_t *s_net = NULL;         /* WiFi 图标(绿=在线/红=离线) */
+static lv_obj_t *s_net_x = NULL;       /* 离线时的红叉(叠在图标右下) */
 static lv_timer_t *s_pump_timer = NULL;
+static lv_timer_t *s_status_timer = NULL;
 
 /* ---- 相机帧 → 画布(33ms 轮询,30fps) ---- */
 
@@ -42,6 +49,37 @@ static void canvas_timer_cb(lv_timer_t *t)
     if (f->w == w && f->h == h) {
         lv_canvas_copy_buf(s_canvas, (const lv_color_t *)f->pixels, 0, 0, w, h);
         lv_obj_invalidate(s_canvas);
+    }
+}
+
+/* ---- 状态栏(左上时钟 + 右上网络;1s 轮询) ---- */
+
+static void status_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (s_clock) {
+        time_t now = time(NULL);
+        struct tm tmv;
+        localtime_r(&now, &tmv);
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%02d:%02d:%02d", tmv.tm_hour, tmv.tm_min,
+                 tmv.tm_sec);
+        lv_label_set_text(s_clock, buf);
+    }
+    if (s_net) {
+        /* 「有网络」= 主接口已拿到 IPv4(面板在网内,web/mDNS/上位机可达)。
+         * 只读 getifaddrs,无阻塞——外网可达性(ping 会阻塞)不在这条路径上;
+         * 只读直调登记:net_info 是唯一「取哪个 IP」规则的所有者 */
+        char ip[64];
+        const bool online =
+            net_info_primary_ipv4(ip, sizeof(ip)) == DG_OK;
+        lv_obj_set_style_text_color(s_net, online ? DG_COL_OK() : DG_COL_ERR(), 0);
+        if (s_net_x) {
+            if (online)
+                lv_obj_add_flag(s_net_x, LV_OBJ_FLAG_HIDDEN);
+            else
+                lv_obj_clear_flag(s_net_x, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 }
 
@@ -89,6 +127,29 @@ void page_home_create(lv_obj_t *parent)
     lv_obj_align(s_hint, LV_ALIGN_TOP_MID, 0, 24);
     lv_obj_add_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
 
+    /* 状态栏:左上实时时钟,右上网络图标(不可点,别拦主页按钮) */
+    s_clock = lv_label_create(parent);
+    lv_obj_set_style_text_font(s_clock, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(s_clock, DG_COL_TEXT(), 0);
+    lv_obj_align(s_clock, LV_ALIGN_TOP_LEFT, 16, 16);
+    lv_obj_clear_flag(s_clock, LV_OBJ_FLAG_CLICKABLE);
+
+    s_net = lv_label_create(parent);
+    lv_label_set_text(s_net, LV_SYMBOL_WIFI);
+    lv_obj_set_style_text_font(s_net, &lv_font_montserrat_28, 0);
+    lv_obj_align(s_net, LV_ALIGN_TOP_RIGHT, -16, 16);
+    lv_obj_clear_flag(s_net, LV_OBJ_FLAG_CLICKABLE);
+
+    s_net_x = lv_label_create(parent);
+    lv_label_set_text(s_net_x, LV_SYMBOL_CLOSE);
+    lv_obj_set_style_text_font(s_net_x, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_net_x, DG_COL_ERR(), 0);
+    lv_obj_align_to(s_net_x, s_net, LV_ALIGN_OUT_BOTTOM_RIGHT, -2, -6);
+    lv_obj_clear_flag(s_net_x, LV_OBJ_FLAG_CLICKABLE);
+
+    s_status_timer = lv_timer_create(status_timer_cb, 1000, NULL);
+    status_timer_cb(NULL);              /* 创建即显示当前值,不等 1s */
+
     lv_obj_t *menu_btn = dg_btn_create(parent, LV_SYMBOL_SETTINGS, _("菜单"));
     lv_obj_set_size(menu_btn, 200, DG_BTN_H);
     lv_obj_align(menu_btn, LV_ALIGN_BOTTOM_LEFT, DG_PAD, -DG_PAD);
@@ -109,6 +170,10 @@ void page_home_destroy(void)
         lv_timer_del(s_pump_timer);
         s_pump_timer = NULL;
     }
+    if (s_status_timer) {
+        lv_timer_del(s_status_timer);
+        s_status_timer = NULL;
+    }
     if (s_canvas_buf) {
         free(s_canvas_buf);
         s_canvas_buf = NULL;
@@ -116,6 +181,9 @@ void page_home_destroy(void)
     s_canvas = NULL;
     s_facebox = NULL;
     s_hint = NULL;
+    s_clock = NULL;
+    s_net = NULL;
+    s_net_x = NULL;
 }
 
 /* ---- setter(presenter 渲染入口) ---- */

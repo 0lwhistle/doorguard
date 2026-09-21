@@ -46,8 +46,15 @@ static void read_pointer(lv_indev_drv_t *drv, lv_indev_data_t *data)
     uint32_t buttons = SDL_GetMouseState(&mx, &my);
     data->point.x = (lv_coord_t)mx;
     data->point.y = (lv_coord_t)my;
-    data->state = (buttons & SDL_BUTTON_LMASK) ? LV_INDEV_STATE_PRESSED
-                                               : LV_INDEV_STATE_RELEASED;
+    const lv_indev_state_t st = (buttons & SDL_BUTTON_LMASK)
+                                    ? LV_INDEV_STATE_PRESSED
+                                    : LV_INDEV_STATE_RELEASED;
+    /* 按下沿才通知:LVGL 每拍把 data 清零,上一拍状态要自己记 */
+    static bool was_pressed;
+    if (st == LV_INDEV_STATE_PRESSED && !was_pressed)
+        display_touch_activity();
+    was_pressed = (st == LV_INDEV_STATE_PRESSED);
+    data->state = st;
     (void)drv;
 }
 

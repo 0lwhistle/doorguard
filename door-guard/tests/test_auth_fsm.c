@@ -43,8 +43,8 @@ static void rec_on_action(fsm_action_t act, const fsm_action_data_t *d, void *ud
 static void fsm_reset(void)
 {
     rec_reset();
-    auth_fsm_init(&s_fsm, 3000 /*door*/, 30 /*standby*/, 5 /*lock_n*/, 60 /*lock_s*/,
-                  rec_on_action, NULL);
+    auth_fsm_init(&s_fsm, 3000 /*door*/, 30 /*standby*/, 15 /*menu*/, 5 /*lock_n*/,
+                  60 /*lock_s*/, rec_on_action, NULL);
 }
 
 static int count_act(fsm_action_t act)
@@ -453,7 +453,7 @@ static void t10_standby(void)
 {
     printf("[F10] 30s 无脸无操作进待机(短值验证);触摸/人脸唤醒\n");
     fsm_reset();
-    auth_fsm_init(&s_fsm, 3000, 5 /*短值*/, 5, 60, rec_on_action, NULL);
+    auth_fsm_init(&s_fsm, 3000, 5 /*短值*/, 15 /*menu*/, 5, 60, rec_on_action, NULL);
 
     for (int i = 0; i < 4; i++)
         auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
@@ -482,6 +482,48 @@ static void t10_standby(void)
     DG_CHECK(s_fsm.state == ST_STANDBY);
     face_detected();                                /* 检测到人脸唤醒 */
     DG_CHECK(s_fsm.state == ST_NORMAL);
+}
+
+/* ================= 10b 菜单无操作超时回主页;待机倒计时只数主页面 ================= */
+
+static void t10b_menu_timeout(void)
+{
+    printf("[F10b] 菜单 15s 无操作回主页;菜单里不数待机;回主页待机重新倒数\n");
+    fsm_reset();
+
+    /* —— 进菜单:菜单键 → 管理员认证(人脸命中管理员)通过 —— */
+    auth_fsm_handle(&s_fsm, FSM_EV_MENU_BTN, NULL);
+    DG_CHECK(s_fsm.state == ST_ADMIN_AUTH);
+    ev_match_t m = mk_match("10001", "管理员", DG_ROLE_ADMIN, true);
+    handle_match(m);
+    DG_CHECK(s_fsm.state == ST_MENU);
+    DG_CHECK(last_act(FSM_ACT_GOTO_PAGE) &&
+             !strcmp(last_act(FSM_ACT_GOTO_PAGE)->d.page, "menu"));
+
+    /* —— 菜单会话拉到 45s(3 轮「14 拍 + 摸一下」):期间既不超时也不待机。
+     * 待机阈值 30s,若待机倒计时错误地在菜单里累加,回主页当拍就进待机 —— */
+    for (int round = 0; round < 3; round++) {
+        for (int i = 0; i < 14; i++)
+            auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
+        DG_CHECK(s_fsm.state == ST_MENU);           /* 14s:未到菜单超时 */
+        auth_fsm_handle(&s_fsm, FSM_EV_TOUCH, NULL);/* 有操作:两个计数都清零 */
+    }
+
+    /* —— 15s 无操作 → 自动回主页面,1:N 恢复 —— */
+    for (int i = 0; i < 14; i++)
+        auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
+    DG_CHECK(s_fsm.state == ST_MENU);
+    auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);     /* 第 15 拍:超时 */
+    DG_CHECK(s_fsm.state == ST_NORMAL && s_fsm.match_enabled);
+    DG_CHECK(last_act(FSM_ACT_GOTO_PAGE) &&
+             !strcmp(last_act(FSM_ACT_GOTO_PAGE)->d.page, "home"));
+
+    /* —— 回主页后待机倒计时重新开始:菜单里耗掉的 45s 不带入 —— */
+    for (int i = 0; i < 29; i++)
+        auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
+    DG_CHECK(s_fsm.state == ST_NORMAL);             /* 29s:未到 30s */
+    auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
+    DG_CHECK(s_fsm.state == ST_STANDBY);            /* 第 30s:进待机 */
 }
 
 /* ================= 11 补充:成功期间重复 1:N 忽略 / 弹窗期匹配挂起恢复 ================= */
@@ -624,6 +666,7 @@ int main(void)
     t08_pwd_lock();
     t09_result_ignores_requests();
     t10_standby();
+    t10b_menu_timeout();
     t11_misc_invariants();
     t12_menu_entry_and_verify_flow();
 

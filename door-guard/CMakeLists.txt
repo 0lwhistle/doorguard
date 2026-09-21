@@ -145,7 +145,8 @@ add_library(dg_ui STATIC
     ${DG_WIDGET_SRCS}
 )
 target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DIR}/services/access)
-target_link_libraries(dg_ui PUBLIC lvgl dg_config dg_access dg_storage dg_jpeg)
+target_link_libraries(dg_ui PUBLIC lvgl dg_config dg_access dg_storage dg_jpeg
+                                   dg_net_info)
 
 # access:验证状态机 + 认证融合服务(FSM 持有者,日志/开门唯一出口)
 add_library(dg_access STATIC
@@ -258,6 +259,13 @@ target_compile_options(civetweb PRIVATE
     -include ${CMAKE_CURRENT_SOURCE_DIR}/third_party/civetweb/dg_openssl_shim.h)
 
 # net:web 上位机 / OTA / NTP / mDNS(源码分驻 services/{web,ota,ntp,mdns} 与 modules/net)
+# net_info:网络接口只读信息(独立小库:web 上位机与 UI 主页网络图标共用,
+# UI 不能整链 dg_net——那会把 web/ota/mongoose 全拖进来)
+add_library(dg_net_info STATIC modules/net/net_info.c)
+target_include_directories(dg_net_info PUBLIC ${CMAKE_SOURCE_DIR}/modules/net
+                                              ${CMAKE_SOURCE_DIR}/proto)
+target_link_libraries(dg_net_info PUBLIC dg_log)
+
 add_library(dg_net STATIC
     services/web/web_server.c
     services/web/web_pages.c
@@ -267,10 +275,9 @@ add_library(dg_net STATIC
     services/ntp/ntp_service.c
     services/mdns/mdns_responder.c
     services/mdns/mdns_wire.c
-    modules/net/net_info.c
 )
-target_include_directories(dg_net PUBLIC ${CMAKE_SOURCE_DIR}/modules/net
-                                         ${CMAKE_SOURCE_DIR}/services)
+target_include_directories(dg_net PUBLIC ${CMAKE_SOURCE_DIR}/services)
+target_link_libraries(dg_net PUBLIC dg_net_info)
 target_link_libraries(dg_net PUBLIC dg_access dg_storage civetweb crypto)
 
 # 固件版本号:git describe 注入(上位机"设备概览"与 /api/device 显示)。
@@ -295,13 +302,16 @@ endif()
 # ---- 显示/相机模块(按端选择 sim 后端;#ifdef 只出现在后端与 main) ----
 if(DG_SIM)
     find_package(SDL2 REQUIRED)
-    add_library(dg_display STATIC modules/display/display_sim.c)
+    add_library(dg_display STATIC modules/display/display_sim.c
+                                  modules/display/touch_activity.c)
     target_link_libraries(dg_display PUBLIC lvgl SDL2::SDL2)
     add_library(dg_camera STATIC modules/camera/camera_sim.c)
     target_include_directories(dg_camera PRIVATE ${CMAKE_SOURCE_DIR}/third_party/stb)
     target_link_libraries(dg_camera PUBLIC m)   # stb_image 解码用到 pow
 else()
-    add_library(dg_display STATIC modules/display/display_drm.c modules/display/touch_evdev.c
+    add_library(dg_display STATIC modules/display/display_drm.c
+                                  modules/display/touch_evdev.c
+                                  modules/display/touch_activity.c
                                   third_party/lv_drivers/drm.c)
     # 顺序敏感:libdrm 在前——lv_drivers/drm.c 内部 #include <drm.h> 必须解析到
     # libdrm 的 drm.h 而不是本目录同名头(避免 xf86drm 类型未定义)

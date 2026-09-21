@@ -212,12 +212,17 @@ typedef struct {
     int32_t lock_fail_cnt;
     int64_t lock_until_ms;
 
-    /* 待机(空闲秒计数;触摸/人脸清零) */
+    /* 待机(空闲秒计数;仅 ST_NORMAL 累加——倒计时只在主页面跑,回主页清零
+     * 重新倒数;触摸/人脸清零) */
     int32_t idle_s;
+    /* 菜单会话空闲秒计数(仅 ST_MENU 累加;触摸清零):超时自动回主页面,
+     * 覆盖菜单及其下挂的用户/设备等子页(子页期间 FSM 停留 ST_MENU) */
+    int32_t menu_idle_s;
 
     /* 初始化参数 */
     int32_t door_open_ms;
     int32_t standby_timeout_s;
+    int32_t menu_timeout_s;
     int32_t pwd_fail_lock_n;
     int32_t pwd_fail_lock_s;
 
@@ -225,10 +230,11 @@ typedef struct {
     void *ud;
 } auth_fsm_t;
 
-/** 初始化;cfg 参数来自 dg_cfg_t(业务参数不进 FSM 魔数) */
+/** 初始化;cfg 参数来自 dg_cfg_t(业务参数不进 FSM 魔数)。
+ *  两个超时字段可在运行中被调用方改写(设备管理页改配置即生效) */
 void auth_fsm_init(auth_fsm_t *fsm, int32_t door_open_ms, int32_t standby_timeout_s,
-                   int32_t pwd_fail_lock_n, int32_t pwd_fail_lock_s,
-                   fsm_action_fn on_action, void *ud);
+                   int32_t menu_timeout_s, int32_t pwd_fail_lock_n,
+                   int32_t pwd_fail_lock_s, fsm_action_fn on_action, void *ud);
 
 /** 事件入口(线程约定:与 UI 同线程调用) */
 void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *data);

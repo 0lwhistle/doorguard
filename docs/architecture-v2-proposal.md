@@ -78,6 +78,12 @@ drv 做总线级薄封装;holder 管 modules / registry 管 services 的双注�
   判定标准:该调用处于逐帧/逐次验证等热路径、异步事件往返不可接受,且被调方
   纯读内存。初始登记两项——database 的特征快照、config 的配置读取;新增直调
   必须先在本文档登记(路径 + 理由)再落码,评审不收未登记的直调。
+  已登记:
+  - `ui/widgets/dg_avatar`、`enroll_service` → `modules/sqlite` 头像读写
+    (KB 级 BLOB 独立于认证热路径,经专用接口,不入 user_rec_t;2026-09-21);
+  - 视觉/编辑页 → `modules/jpeg` 编解码(拍摄时一次编码 / 显示时解码,几 ms);
+  - `page_home` → `net_info_primary_ipv4`(主页网络图标 1s 轮询,纯 getifaddrs
+    无阻塞;外网探测的阻塞版 is_online 不得在 UI 线程调;2026-09-21)。
 
 ---
 

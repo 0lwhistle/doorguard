@@ -20,8 +20,8 @@ static void on_back(lv_event_t *e)
 
 static void refresh_labels(void);
 
-/* 各项的候选值(choice 语义比自由输入更防呆) */
-static const int standby_opts[] = { 15, 30, 45, 60 };
+/* 各项的候选值(choice 语义比自由输入更防呆)。
+ * 待机超时已迁往设备管理页(2026-09-21,与菜单超时同属设备级设置) */
 static const int door_opts[] = { 1000, 2000, 3000, 5000, 10000 };
 static const int lockn_opts[] = { 3, 5, 8, 10 };
 static const int locks_opts[] = { 30, 60, 120, 300 };
@@ -48,32 +48,27 @@ static const int locks_opts[] = { 30, 60, 120, 300 };
         dg_popup_choice(LABEL, opts, 4, name##_pick, NULL, NULL);        \
     }
 
-MAKE_PICKER(standby, "standby_timeout_s", standby_opts, _("待机超时"))
 MAKE_PICKER(door, "door_open_ms", door_opts, _("开门时长"))
 MAKE_PICKER(lockn, "pwd_fail_lock_n", lockn_opts, _("密码连错锁定"))
 MAKE_PICKER(locks, "pwd_fail_lock_s", locks_opts, _("锁定秒数"))
 
-static lv_obj_t *s_labels[4];
+static lv_obj_t *s_labels[3];
 
 static void refresh_labels(void)
 {
     const dg_cfg_t *c = cfg_get();
     char t[64];
     if (s_labels[0]) {
-        snprintf(t, sizeof(t), "%s: %ds", _("待机超时"), c->standby_timeout_s);
+        snprintf(t, sizeof(t), "%s: %dms", _("开门时长"), c->door_open_ms);
         lv_label_set_text(s_labels[0], t);
     }
     if (s_labels[1]) {
-        snprintf(t, sizeof(t), "%s: %dms", _("开门时长"), c->door_open_ms);
+        snprintf(t, sizeof(t), "%s: %d", _("密码连错锁定"), c->pwd_fail_lock_n);
         lv_label_set_text(s_labels[1], t);
     }
     if (s_labels[2]) {
-        snprintf(t, sizeof(t), "%s: %d", _("密码连错锁定"), c->pwd_fail_lock_n);
-        lv_label_set_text(s_labels[2], t);
-    }
-    if (s_labels[3]) {
         snprintf(t, sizeof(t), "%s: %ds", _("锁定秒数"), c->pwd_fail_lock_s);
-        lv_label_set_text(s_labels[3], t);
+        lv_label_set_text(s_labels[2], t);
     }
 }
 
@@ -94,10 +89,9 @@ void page_access_set_create(lv_obj_t *parent)
         void (*click)(lv_event_t *);
         lv_obj_t **label;
     } rows[] = {
-        { LV_SYMBOL_SETTINGS, standby_click, &s_labels[0] },
-        { LV_SYMBOL_OK,       door_click,    &s_labels[1] },
-        { LV_SYMBOL_CLOSE,    lockn_click,   &s_labels[2] },
-        { LV_SYMBOL_EYE_OPEN, locks_click,   &s_labels[3] },
+        { LV_SYMBOL_OK,       door_click,    &s_labels[0] },
+        { LV_SYMBOL_CLOSE,    lockn_click,   &s_labels[1] },
+        { LV_SYMBOL_EYE_OPEN, locks_click,   &s_labels[2] },
     };
 
     for (int i = 0; i < 4; i++) {
@@ -121,6 +115,6 @@ void page_access_set_create(lv_obj_t *parent)
 
 void page_access_set_destroy(void)
 {
-    s_labels[0] = s_labels[1] = s_labels[2] = s_labels[3] = NULL;
+    s_labels[0] = s_labels[1] = s_labels[2] = NULL;
     DG_LOGI("[ACCESS_SET]", "page destroy");
 }

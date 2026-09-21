@@ -415,6 +415,9 @@ static int on_access_tick(const event_t *e, void *ud)
 {
     (void)e;
     (void)ud;
+    /* 超时阈值每次 tick 从配置快照刷新:设备管理页改完即生效,不必重启 */
+    s_fsm.standby_timeout_s = cfg_get()->standby_timeout_s;
+    s_fsm.menu_timeout_s = cfg_get()->menu_timeout_s;
     fsm_feed(FSM_EV_TICK, NULL);
     return 0;
 }
@@ -448,6 +451,7 @@ int access_service_start(void)
     if (s_running)
         return DG_OK;
     auth_fsm_init(&s_fsm, cfg_get()->door_open_ms, cfg_get()->standby_timeout_s,
+                  cfg_get()->menu_timeout_s,
                   cfg_get()->pwd_fail_lock_n, cfg_get()->pwd_fail_lock_s,
                   on_fsm_action, NULL);
 

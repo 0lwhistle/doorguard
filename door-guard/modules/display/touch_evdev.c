@@ -10,12 +10,14 @@
  *  - abs 范围→屏幕尺寸线性缩放;swap/invert 由 env(DG_TOUCH_*)板级校准
  */
 #include "touch_evdev.h"
+#include "display.h"
 #include "dg_log.h"
 #include "lvgl.h"
 
 #include <ctype.h>
 #include <fcntl.h>
 #include <linux/input.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -232,5 +234,12 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
     }
     data->point.x = (lv_coord_t)s_touch.x;
     data->point.y = (lv_coord_t)s_touch.y;
-    data->state = s_touch.pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    const lv_indev_state_t st =
+        s_touch.pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    /* 按下沿才通知:LVGL 每拍把 data 清零,上一拍状态要自己记 */
+    static bool was_pressed;
+    if (st == LV_INDEV_STATE_PRESSED && !was_pressed)
+        display_touch_activity();
+    was_pressed = (st == LV_INDEV_STATE_PRESSED);
+    data->state = st;
 }

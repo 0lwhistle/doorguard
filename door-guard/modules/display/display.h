@@ -20,6 +20,14 @@ int display_init(void);
 /** 事件泵(SIM:SDL 事件→LVGL 输入;板:空实现)——主循环每帧调用 */
 void display_poll(void);
 
+/** 触摸活动监听:每次「按下沿」(手指落下瞬间)回调一次,UI 用来把
+ *  「有操作」喂给服务层(EV_UI_TOUCH:清待机/菜单无操作计数)。
+ *  注意是按下沿而非每次采样,否则 LVGL 30Hz 轮询会刷爆事件总线 */
+void display_set_touch_listener(void (*fn)(void));
+
+/** 后端内部用:按下沿通知(touch_evdev/display_sim 的 read_cb 调用) */
+void display_touch_activity(void);
+
 #ifdef __cplusplus
 }
 #endif

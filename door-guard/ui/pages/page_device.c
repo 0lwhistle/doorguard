@@ -55,6 +55,70 @@ static void on_net(lv_event_t *e)
     dg_popup_success(_("网络配置"), 800, NULL, NULL);
 }
 
+/* ---- 秒数选择项(待机超时/菜单超时;choice 比自由输入防呆,与门禁设置页同款) ---- */
+
+static lv_obj_t *s_lb_standby, *s_lb_menu;   /* 两行按钮上的「当前值」标签 */
+
+static void refresh_rows(void *ud)
+{
+    (void)ud;
+    const dg_cfg_t *c = cfg_get();
+    char t[64];
+    if (s_lb_standby) {
+        snprintf(t, sizeof(t), "%s: %ds", _("待机超时"), c->standby_timeout_s);
+        lv_label_set_text(s_lb_standby, t);
+    }
+    if (s_lb_menu) {
+        snprintf(t, sizeof(t), "%s: %ds", _("菜单超时"), c->menu_timeout_s);
+        lv_label_set_text(s_lb_menu, t);
+    }
+}
+
+static const int standby_opts[] = { 15, 30, 45, 60 };
+static const int menu_opts[] = { 5, 15, 30, 60, 120 };
+
+static void standby_pick(void *ud, int idx)
+{
+    (void)ud;
+    if (cfg_set_int("standby_timeout_s", standby_opts[idx]) == DG_OK)
+        dg_popup_success(_("已保存"), 600, refresh_rows, NULL);
+    else
+        dg_popup_fail(_("操作失败"), 1000, NULL, NULL);
+}
+
+static void menu_pick(void *ud, int idx)
+{
+    (void)ud;
+    if (cfg_set_int("menu_timeout_s", menu_opts[idx]) == DG_OK)
+        dg_popup_success(_("已保存"), 600, refresh_rows, NULL);
+    else
+        dg_popup_fail(_("操作失败"), 1000, NULL, NULL);
+}
+
+static void on_standby(lv_event_t *e)
+{
+    (void)e;
+    static char buf[4][16];
+    const char *opts[4];
+    for (int i = 0; i < 4; i++) {
+        snprintf(buf[i], sizeof(buf[i]), "%d", standby_opts[i]);
+        opts[i] = buf[i];
+    }
+    dg_popup_choice(_("待机超时"), opts, 4, standby_pick, NULL, NULL);
+}
+
+static void on_menu_timeout(lv_event_t *e)
+{
+    (void)e;
+    static char buf[5][16];
+    const char *opts[5];
+    for (int i = 0; i < 5; i++) {
+        snprintf(buf[i], sizeof(buf[i]), "%d", menu_opts[i]);
+        opts[i] = buf[i];
+    }
+    dg_popup_choice(_("菜单超时"), opts, 5, menu_pick, NULL, NULL);
+}
+
 /* Web 管理:上位机账号/口令 + 局域网访问地址(spec-network §1) */
 static void on_web(lv_event_t *e)
 {
@@ -106,6 +170,28 @@ void page_device_create(lv_obj_t *parent)
     lv_obj_align(web, LV_ALIGN_TOP_MID, 0, 180 + 3 * (DG_BTN_H + DG_PAD));
     lv_obj_add_event_cb(web, on_web, LV_EVENT_CLICKED, NULL);
 
+    /* 设备级超时(2026-09-21 自门禁设置页迁来 + 新增):待机超时/菜单超时 */
+    lv_obj_t *standby = dg_btn_create(parent, LV_SYMBOL_EYE_OPEN, "");
+    lv_obj_set_size(standby, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
+    lv_obj_align(standby, LV_ALIGN_TOP_MID, 0, 180 + 4 * (DG_BTN_H + DG_PAD));
+    lv_obj_add_event_cb(standby, on_standby, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *menuto = dg_btn_create(parent, LV_SYMBOL_SETTINGS, "");
+    lv_obj_set_size(menuto, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
+    lv_obj_align(menuto, LV_ALIGN_TOP_MID, 0, 180 + 5 * (DG_BTN_H + DG_PAD));
+    lv_obj_add_event_cb(menuto, on_menu_timeout, LV_EVENT_CLICKED, NULL);
+
+    /* 按钮内追加「当前值」label(与门禁设置页同款手法:btn>row>label) */
+    lv_obj_t *row1 = lv_obj_get_child(standby, 0);
+    s_lb_standby = lv_label_create(row1);
+    lv_obj_set_style_text_font(s_lb_standby, DG_FONT_CN, 0);
+    lv_obj_set_style_text_color(s_lb_standby, DG_COL_BG(), 0);
+    lv_obj_t *row2 = lv_obj_get_child(menuto, 0);
+    s_lb_menu = lv_label_create(row2);
+    lv_obj_set_style_text_font(s_lb_menu, DG_FONT_CN, 0);
+    lv_obj_set_style_text_color(s_lb_menu, DG_COL_BG(), 0);
+    refresh_rows(NULL);
+
     lv_obj_t *back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));
     lv_obj_set_size(back, 200, DG_BTN_H);
     lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 0, -DG_PAD);
@@ -114,5 +200,6 @@ void page_device_create(lv_obj_t *parent)
 
 void page_device_destroy(void)
 {
+    s_lb_standby = s_lb_menu = NULL;
     DG_LOGI("[DEVICE]", "page destroy");
 }

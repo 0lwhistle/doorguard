@@ -53,6 +53,7 @@ static const cfg_meta_t META[] = {
     { "det_score_min",       "face.det_score_min",        CK_DBL, 0.30,  1.00 },
     { "liveness_enable",      "face.liveness_enable",     CK_INT,    0,     1 },
     { "standby_timeout_s",    "ui.standby_timeout_s",     CK_INT,   15,    60 },
+    { "menu_timeout_s",       "ui.menu_timeout_s",        CK_INT,    5,   120 },
     { "language",             "ui.language",              CK_STR,    0,    15 },
     { "ntp_server",           "network.ntp_server",       CK_STR,    0,    63 },
     { "web_port",             "network.web_port",         CK_INT, 1024, 65535 },
@@ -231,6 +232,7 @@ static void defaults_apply(dg_cfg_t *c)
     snprintf(c->face_model_dir, sizeof(c->face_model_dir), "/usr/lib");
     c->face_model_tag[0] = '\0';
     c->standby_timeout_s = 30;
+    c->menu_timeout_s = 15;
     snprintf(c->language, sizeof(c->language), "zh-CN");
     c->web_port = 8080;
     c->ota_port = 9000;
@@ -253,6 +255,7 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "pwd_fail_lock_s"))      cur = c->pwd_fail_lock_s;
         else if (!strcmp(m->key, "liveness_enable"))      cur = c->liveness_enable;
         else if (!strcmp(m->key, "standby_timeout_s"))    cur = c->standby_timeout_s;
+        else if (!strcmp(m->key, "menu_timeout_s"))       cur = c->menu_timeout_s;
         else if (!strcmp(m->key, "web_port"))             cur = c->web_port;
         else if (!strcmp(m->key, "ota_port"))             cur = c->ota_port;
         else return;
@@ -262,6 +265,7 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "pwd_fail_lock_s"))      c->pwd_fail_lock_s = v;
         else if (!strcmp(m->key, "liveness_enable"))      c->liveness_enable = v;
         else if (!strcmp(m->key, "standby_timeout_s"))    c->standby_timeout_s = v;
+        else if (!strcmp(m->key, "menu_timeout_s"))       c->menu_timeout_s = v;
         else if (!strcmp(m->key, "web_port"))             c->web_port = v;
         else if (!strcmp(m->key, "ota_port"))             c->ota_port = v;
     } else if (m->kind == CK_DBL) {

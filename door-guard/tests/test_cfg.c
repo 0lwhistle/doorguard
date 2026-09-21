@@ -56,6 +56,7 @@ static void test_bad_inputs_fall_back(void)
     DG_CHECK(cfg_load("/tmp/dg_nonexistent_def.json", s_cur) == DG_OK);
     DG_CHECK(cfg_get()->door_open_ms == 3000);
     DG_CHECK(cfg_get()->standby_timeout_s == 30);
+    DG_CHECK(cfg_get()->menu_timeout_s == 15);
     DG_CHECK(cfg_get()->web_port == 8080);
     DG_CHECK(access(s_cur, F_OK) == 0);             /* 首启已生成 cur */
 

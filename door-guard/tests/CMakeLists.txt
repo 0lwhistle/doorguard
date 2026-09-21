@@ -123,7 +123,8 @@ dg_add_demo(demo_holder ${CMAKE_SOURCE_DIR}/components/holder/demo_holder.c dg_h
 
 # 触摸 evdev 解析纯逻辑(板上 fts_ts/goodix 事件协议;宿主无设备直测解析)
 add_executable(test_touch_evdev test_touch_evdev.c
-               ${CMAKE_SOURCE_DIR}/modules/display/touch_evdev.c)
+               ${CMAKE_SOURCE_DIR}/modules/display/touch_evdev.c
+               ${CMAKE_SOURCE_DIR}/modules/display/touch_activity.c)
 target_include_directories(test_touch_evdev PRIVATE
     ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
     ${CMAKE_SOURCE_DIR}/third_party/lvgl)

@@ -133,6 +133,7 @@ static void succeed(auth_fsm_t *fsm, int32_t method, int64_t now_ms)
         cancel_timers(fsm);
         if (fsm->cur_role == DG_ROLE_ADMIN) {
             fsm->state = ST_MENU;
+            fsm->menu_idle_s = 0;       /* 进菜单:无操作计时从这里开始 */
             fsm->popup_active = false;
             hint_clear(fsm);
             set_match_enabled(fsm, false);
@@ -193,6 +194,8 @@ static void back_to_normal(auth_fsm_t *fsm)
     fsm->cur_uid[0] = '\0';             /* 清上下文:陌生人失败不得带上个用户 ID */
     fsm->cur_name[0] = '\0';
     fsm->verify_from_admin = false;
+    fsm->idle_s = 0;                    /* 回主页:待机倒计时重新开始倒数 */
+    fsm->menu_idle_s = 0;
     set_match_enabled(fsm, true);
     hint_clear(fsm);                    /* 提示条只在流程内有效,回普通即收 */
     goto_page(fsm, "home");
@@ -211,6 +214,7 @@ static void enter_standby(auth_fsm_t *fsm)
 static void wake_up(auth_fsm_t *fsm)
 {
     fsm->idle_s = 0;
+    fsm->menu_idle_s = 0;               /* 触摸 = 有操作:两个倒计时都重新数 */
     if (fsm->state == ST_STANDBY) {
         fsm->state = ST_NORMAL;
         set_match_enabled(fsm, true);
@@ -231,6 +235,7 @@ static void on_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now_ms)
         if (m->role == DG_ROLE_ADMIN) {
             cancel_timers(fsm);
             fsm->state = ST_MENU;
+            fsm->menu_idle_s = 0;       /* 进菜单:无操作计时从这里开始 */
             goto_page(fsm, "menu");
             DG_LOGI(TAG, "管理员通过进菜单");
         } else {
@@ -301,10 +306,23 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
         return;
 
     case FSM_EV_TICK:
-        fsm->idle_s++;
-        /* 仅普通态进待机(管理员/验证/结果中途不进,防误伤流程) */
-        if (fsm->state == ST_NORMAL && fsm->idle_s >= fsm->standby_timeout_s)
-            enter_standby(fsm);
+        /* 两个空闲计数都只在各自状态累加(触摸即清零):
+         * - 待机倒计时只在主页面跑:离开主页(菜单/验证)不计时,回到主页
+         *   重新倒数(back_to_normal 清零)——否则菜单里待久了,一回主页
+         *   就立刻进待机(2026-09-21 用户反馈);
+         * - 菜单会话无操作超时:覆盖菜单及其子页(子页期间停留 ST_MENU),
+         *   超时自动回主页面,防离开后屏幕停在配置页。 */
+        if (fsm->state == ST_NORMAL) {
+            fsm->idle_s++;
+            if (fsm->idle_s >= fsm->standby_timeout_s)
+                enter_standby(fsm);
+        } else if (fsm->state == ST_MENU) {
+            fsm->menu_idle_s++;
+            if (fsm->menu_timeout_s > 0 && fsm->menu_idle_s >= fsm->menu_timeout_s) {
+                DG_LOGI(TAG, "菜单 %ds 无操作,自动回主页面", fsm->menu_timeout_s);
+                back_to_normal(fsm);
+            }
+        }
         return;
 
     case FSM_EV_FACE_DETECTED:
@@ -394,6 +412,7 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
              * 并提示先建管理员。admin_count<0(未知)不走这条路,保守要求认证 */
             cancel_timers(fsm);
             fsm->state = ST_MENU;
+            fsm->menu_idle_s = 0;       /* 进菜单:无操作计时从这里开始 */
             fsm->popup_active = false;
             set_match_enabled(fsm, false);
             hint_text(fsm, DG_HINT_NO_ADMIN);
@@ -546,8 +565,8 @@ bool auth_fsm_pwd_locked(const auth_fsm_t *fsm, const char *user_id, int64_t now
 }
 
 void auth_fsm_init(auth_fsm_t *fsm, int32_t door_open_ms, int32_t standby_timeout_s,
-                   int32_t pwd_fail_lock_n, int32_t pwd_fail_lock_s,
-                   fsm_action_fn on_action, void *ud)
+                   int32_t menu_timeout_s, int32_t pwd_fail_lock_n,
+                   int32_t pwd_fail_lock_s, fsm_action_fn on_action, void *ud)
 {
     memset(fsm, 0, sizeof(*fsm));
     fsm->state = ST_NORMAL;
@@ -555,6 +574,7 @@ void auth_fsm_init(auth_fsm_t *fsm, int32_t door_open_ms, int32_t standby_timeou
     fsm->admin_count = -1;              /* 未知:菜单入口保守要求管理员认证 */
     fsm->door_open_ms = door_open_ms;
     fsm->standby_timeout_s = standby_timeout_s;
+    fsm->menu_timeout_s = menu_timeout_s;
     fsm->pwd_fail_lock_n = pwd_fail_lock_n;
     fsm->pwd_fail_lock_s = pwd_fail_lock_s;
     fsm->on_action = on_action;

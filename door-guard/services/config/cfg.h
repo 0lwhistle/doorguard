@@ -45,6 +45,7 @@ typedef struct {
     double  face_det_score_min; /**< 检测分数下限,0.30~1.00,默认 0.70 */
     /* UI(spec-ui) */
     int  standby_timeout_s;    /**< 待机超时,15~60(spec 上限),默认 30 */
+    int  menu_timeout_s;       /**< 菜单页无操作自动回主页,5~120s,默认 15 */
     char language[16];         /**< zh-CN / en-US,默认 zh-CN */
     /* 网络(spec-network) */
     int  web_port;             /**< web 上位机端口,1024~65535,默认 8080 */

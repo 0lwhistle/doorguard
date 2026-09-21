@@ -19,6 +19,7 @@
 #include "port.h"
 #include "theme.h"
 #include "ui_events.h"
+#include "widgets/dg_popup.h"
 
 #include <string.h>
 
@@ -43,10 +44,12 @@ static void ui_evt_pump_cb(lv_timer_t *t)
     (void)t;
     ui_evt_t evt;
     while (ui_evt_pop(&evt)) {
-        if (evt.kind == UI_EVT_GOTO_PAGE)
+        if (evt.kind == UI_EVT_GOTO_PAGE) {
+            dg_popup_close();               /* 弹窗属当前页,切页即收(top layer 不随页销毁) */
             navigator_switch(evt.page.page); /* 栈内回退/平级切换 */
-        else
+        } else {
             navigator_dispatch_evt(&evt);    /* 内容事件给当前页渲染 */
+        }
     }
 }
 
@@ -81,6 +84,9 @@ int ui_init(const dg_ui_args_t *args)
     presenter_web_set_register();
 
     bridge_init();
+    /* 触摸按下沿 → EV_UI_TOUCH:任何页面的触摸都算「有操作」
+     * (清待机/菜单无操作计数;此前只有待机页自己发,菜单里摸屏不算操作) */
+    display_set_touch_listener(bridge_touch);
     navigator_push("home");
     lv_timer_create(ui_evt_pump_cb, 33, NULL); /* 事件泵 30fps 跟手 */
 
