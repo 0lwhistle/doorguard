@@ -5,6 +5,55 @@
 
 ---
 
+## 2026-09-21 自组 rknn 检测链路打通并上板(RetinaFace 重转 6.7ms;解码对拍通过)
+
+**做了什么(第三批:后端装配)**
+- **`services/vision/vision_rknn.c`**:rknn 后端(契约 vision_backend.h)。链路全部
+  在相机线程内联完成(检测 6.7ms + RGA 亚毫秒 ≪ 33ms 帧预算,且用完立刻归还
+  V4L2 缓冲,不新增线程也就不会饿死 4 缓冲):
+  camera NV12 → RGA letterbox 320×320(补 114)→ RetinaFace@NPU(喂 U8)→
+  `rknn_retinaface_decode` → NMS → 最大脸 → 逆 letterbox + 旋到竖屏 →
+  `EV_VISION_FACE_BOX`(10Hz 节流)/ `EV_VISION_FACE_LOST`(边沿)。
+  5 点关键点回灌 `liveness_service_on_face`(B8 几何活体用的正是 5 点)。
+  启动时**自校**:输出数须为 3、锚框数须等于解码器按输入尺寸的期望值,
+  不符即启动失败(比每帧给错框好定位)。
+- `app/main.c` 注册顺序 = 优先级:rknn 在前(缺省选中),ROCKIVA 保留备用。
+- 新工具 `tools/rknn_det_test.c`:喂一张已 letterbox 好的原始 RGB 走完整
+  "推理+解码",用于**无人站镜头前**的对拍。
+- 板上实测启动日志:`rknn 就绪:RetinaFace 320x320,锚框 4200,检出阈值 0.50`
+  → `service vision_backend READY`;letterbox 计划 `1280×720→320×320
+  scale=0.2500 补边 0,70`(与宿主单测预期一致)。
+
+**解码对拍(关键验证)**:拿 zoo 的 `test.jpg`(已知人脸位置)按同法 letterbox 成
+320×320 原始 RGB,喂进板上完整 C 链路:
+
+```
+检出 1 张脸 (152,90)-(240,203) 87x113 分数 0.9990
+关键点 (178,138)(219,140)(198,162)(182,181)(212,183)
+```
+
+独立 Haar 参考脸换算到模型空间是 (144,101)-(248,205),**中心几乎重合**
+(X 中心 196 vs 196.5);关键点解剖学正确(双眼同高、鼻居中、嘴角在下)。
+→ 输入假设、推理、解码、NMS 全链路正确。单张图 7.6ms。
+
+**踩坑 / 现状**
+- rknn 的 x86 模拟器起不来(`smartsocket listener: Address already in use`),
+  所以参考基准改用 onnxruntime/Haar 交叉验证 + 板上对拍,不依赖模拟器。
+- 板上会打一条**预期的** ERROR:`人脸特征口径不一致:库=rockiva-face-v1
+  当前=rknn-arcface-r50-v1`——device_config 里留着上次开机登记的 ROCKIVA tag。
+  这是设计行为(换模型空间必须重录),不是故障;录入人脸后按提示改 tag 即消。
+- **唯一未验证点**:RGA 输出是 RGB 还是 BGR 字节序(对拍用的是 python 备好的
+  RGB,绕过了 RGA)。若上板看不到框,先改 `npu_pre.c` 的 `RK_FORMAT_RGB_888`
+  → `RK_FORMAT_BGR_888` 试(一个常量)。相机 stride 已从日志确认为 1280(= 宽),
+  紧凑排布假设成立。
+
+**下一步**
+- 站镜头前验收检测框(黄框跟随);随后接识别:112×112 对齐 → ArcFace 512 维 →
+  余弦比对 → 1:N(复用 M2 特征内存快照),同时 `DG_FEATURE_MAX` 512→2048B、
+  启用 lib_add/lib_del/compare/on_mode;再接质量闸门与 B8 活体。
+
+---
+
 ## 2026-09-21 自组 rknn 路线开工:NPU 推理库 + RetinaFace 重转成功 + 解码单元(49 项宿主测试绿)
 
 **背景**:ROCKIVA 官方 rk3576 人脸模型包在这版 SDK 快照里缺失(external 与 buildroot

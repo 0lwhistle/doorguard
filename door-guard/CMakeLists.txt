@@ -144,12 +144,14 @@ target_link_libraries(dg_vision PUBLIC dg_proto dg_storage dg_config)
 if(DG_SIM OR DG_BUILD_TESTS)
     target_sources(dg_vision PRIVATE services/vision/vision_sim.c)
 else()
-    target_sources(dg_vision PRIVATE services/vision/vision_rockiva.c)
+    target_sources(dg_vision PRIVATE services/vision/vision_rockiva.c
+                                     services/vision/vision_rknn.c)
     target_include_directories(dg_vision PRIVATE
         ${CMAKE_SYSROOT}/usr/include/rockiva
         ${CMAKE_SOURCE_DIR}/modules/sqlite
         ${CMAKE_SOURCE_DIR}/services/config
-        ${CMAKE_SOURCE_DIR}/services/liveness)
+        ${CMAKE_SOURCE_DIR}/services/liveness
+        ${CMAKE_SOURCE_DIR}/drv/npu)
     # 库链接在 dg_camera 定义之后统一补(见下方"rockiva 链接"块)
 endif()
 
@@ -198,6 +200,11 @@ if(NOT DG_SIM AND NOT DG_BUILD_TESTS)
     # 并零输入试跑。换模型第一件事——解码要按真实张量形状写,不能猜。
     add_executable(npu_probe tools/npu_probe.c)
     target_link_libraries(npu_probe PRIVATE dg_npu)
+
+    # 检测链路离线对拍(板上跑):喂一张已 letterbox 好的原始 RGB 走完整
+    # "推理+解码",拿已知人脸位置的标准图验证链路,不必有人站镜头前。
+    add_executable(rknn_det_test tools/rknn_det_test.c)
+    target_link_libraries(rknn_det_test PRIVATE dg_npu dg_rknn_face)
 endif()
 
 # liveness:动作活体(B7 留口 on_face/pass;B8 状态机)
@@ -293,7 +300,7 @@ target_include_directories(dg_camera PUBLIC ${CMAKE_SOURCE_DIR}/proto)
 # 必须在这些库定义之后,CMake 才能建立正确的静态链接顺序)
 if(NOT DG_SIM)
     target_link_libraries(dg_vision PUBLIC rockiva dg_storage dg_config dg_camera
-                                           dg_liveness)
+                                           dg_liveness dg_npu dg_rknn_face)
 endif()
 
 # ---- 应用(交叉编译产物,dg-deploy 推板) ----

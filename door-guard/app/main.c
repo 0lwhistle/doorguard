@@ -137,7 +137,12 @@ static int mod_vision_backend(void)
     vision_backend_register(&vision_backend_sim);
     return vision_backend_start(enable_mock);
 #else
+    /* 注册顺序 = 优先级(缺省用第一个注册的):自组 rknn(RetinaFace 检测,
+     * 识别接第二阶段)为主;ROCKIVA 保留备用——它缺模型时自行返回失败降级为
+     * ERROR,不影响本条。运行时用 cfg face.backend / env DG_VISION_BACKEND 切换。 */
+    extern const vision_backend_ops_t vision_backend_rknn;
     extern const vision_backend_ops_t vision_backend_rockiva;
+    vision_backend_register(&vision_backend_rknn);
     vision_backend_register(&vision_backend_rockiva);
     return vision_backend_start(false);
 #endif
