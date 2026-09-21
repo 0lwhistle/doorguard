@@ -187,11 +187,12 @@ target_link_libraries(dg_uart PUBLIC dg_log)
 # 宿主没有 rknn 头/驱动,只在交叉编译里编(与 vision_rockiva.c 同一条守卫);
 # 全仓只有 drv/npu/npu_model.c include <rknn_api.h>,上层只认 npu_model.h。
 if(NOT DG_SIM AND NOT DG_BUILD_TESTS)
-    add_library(dg_npu STATIC drv/npu/npu_model.c)
+    add_library(dg_npu STATIC drv/npu/npu_model.c drv/npu/npu_pre.c)
     target_include_directories(dg_npu PUBLIC ${CMAKE_SOURCE_DIR}/drv/npu
                                              ${CMAKE_SOURCE_DIR}/proto)
-    target_link_libraries(dg_npu PUBLIC dg_log rknnrt)
-    target_include_directories(dg_npu PRIVATE ${CMAKE_SYSROOT}/usr/include/rknn)
+    target_link_libraries(dg_npu PUBLIC dg_log rknnrt rga)
+    target_include_directories(dg_npu PRIVATE ${CMAKE_SYSROOT}/usr/include/rknn
+                                              ${CMAKE_SYSROOT}/usr/include/rga)
 
     # NPU 模型探针(板上跑,不进 door-guard 主程序):打印 .rknn 的输入输出规格
     # 并零输入试跑。换模型第一件事——解码要按真实张量形状写,不能猜。
