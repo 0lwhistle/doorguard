@@ -4,6 +4,35 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-22(下午)统一网络层落地:mongoose 单事件循环替换 civetweb(web/OTA/NTP/mDNS 全迁)+ web 单会话
+
+**做了什么**(spec: docs/superpowers/specs/2026-09-22-netcore-mongoose-network-design.md;
+plan: 同目录 plans/;完成后 31/31 + TSAN 零报告 + web_test 66/66 + 交叉零告警,均已推板):
+1. 新模块 `modules/net/netcore`(mongoose 7.23 胶水,零业务):单 loop 线程独占全部
+   网络 I/O;跨线程只经 `netcore_post`(10ms 定时排水);civetweb 整目录退役(22.5k 行)。
+2. web 迁 mongoose:表驱动路由、WS 显式升级(拒连完整 401)、OTA 走 HDRS+READ 按
+   `ota_can_accept()` 限流(64MB 不进内存);前端与 API 零变化。**单会话策略落地**。
+3. mDNS 并入 loop(wire 编解码零改动);NTP 换应用内 SNTP(settimeofday 步进,
+   chrony 依赖解除,rootfs 停用 chrony 随固件 Phase)。删 `ota_port` 死配置;
+   mongoose README 记 GPLv2 决议;spec-network/architecture/模块 README 对齐。
+
+**踩了什么坑**(三条都是板端实测出来的,PC 上不现形):
+1. **mg_close_conn 立即 free 连接**——在 MG_EV 回调/定时器上下文里调用,poll 循环
+   继续用 c 即 UAF,每次开机 SNTP 成功后 ~11s 段错误循环。回调内一律
+   `c->is_closing=1`(延迟关闭);netcore_mgr() 仅限 loop 线程的契约因此必须严格。
+2. mongoose 内置 DNS 默认查 8.8.8.8/3s 超时——内网必挂。netcore 启动读
+   /etc/resolv.conf 取 nameserver(容错 dhcpcd 行尾注释),timeout 提到 10s。
+3. 心跳时钟基准:main 看门狗 now 是 CLOCK_REALTIME,新心跳误用 MONOTONIC,
+   相差整个纪元基数 → 每次启动把 web 误判"心跳超龄"重启到禁用。改回 REALTIME。
+4. **S60 OTA 回滚计数 bug(既有)**:坏包 exec 失败(126/127)直接 continue 跳过
+   fail 计数,"3 次秒退回滚"对坏包永不生效(冒烟假包装入后无限崩溃循环,手动重推
+   才恢复)。已修:先计数回滚、后跳过 aiq 重启。**教训:板上勿用 dg-ota-upload 发
+   冒烟包——上传闭环后 ota_watch 会直接安装并重启,等价真实升级。**
+
+**没做完 / 下一步**:双网口 mDNS 逐包接口绑定未细化(现统一走主网口,单 eth 无差);
+SNTP 步进的时间回拨对 access_logs 展示的影响待观察;rootfs 停用 chrony 随固件 Phase;
+板端长稳(>24h)与真机触发/指纹/IC 卡回归照旧属人工验收。
+
 ## 2026-09-22 视觉离线主循环 + 在场判定闸 + 头像歪斜修复 + UI 层次感(用户六项反馈集中修)
 
 **做了什么**(基线 30/30 绿、零告警;完成后同):
