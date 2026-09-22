@@ -56,6 +56,9 @@ static void create_page(const navigator_page_t *ops)
     lv_obj_set_style_bg_color(page, DG_COL_BG(), 0);
     lv_obj_set_style_bg_opa(page, LV_OPA_COVER, 0);
     ops->create(page);
+    /* 直接模式(2026-09-22)下新建容器自身的全屏失效不可依赖(实测待机页
+     * 黑底不落 fb):建页末尾强制整页重绘一次,杜绝切页残影 */
+    lv_obj_invalidate(page);
     if (ops->on_enter)
         ops->on_enter();
     DG_LOGI("[PAGE]", "open %s (depth=%d)", ops->name, s_depth);

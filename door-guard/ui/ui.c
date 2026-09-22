@@ -67,12 +67,6 @@ int ui_init(const dg_ui_args_t *args)
     if (lang && strcmp(lang, "zh-CN") != 0)
         i18n_set_language(lang);
 
-    /* video-plane underlay(2026-09-22):screen 底透明。各页面容器由
-     * navigator 统一给不透明底,视觉不变;只有主页/拍摄页这类透明根页面,
-     * 未画区域才能透出下层视频 plane。display 层自带白底也要一并关掉 */
-    lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_TRANSP, 0);
-    lv_disp_set_bg_opa(lv_disp_get_default(), LV_OPA_TRANSP);
-
     s_page_root = lv_obj_create(lv_scr_act());
     lv_obj_remove_style_all(s_page_root);
     lv_obj_set_size(s_page_root, DG_SCREEN_W, DG_SCREEN_H);

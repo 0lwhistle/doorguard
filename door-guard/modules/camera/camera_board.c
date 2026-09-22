@@ -68,6 +68,7 @@ static struct {
 } s_vid;
 static int s_vid_w, s_vid_h, s_vid_stride;   /* 旋转后幅面(90° → 720x1280) */
 static camera_dmabuf_t s_dbuf;               /* 最新已旋转帧(seq=0 无帧) */
+static bool s_dbuf_requested;                /* 有直通消费方拉取过才做旋转 */
 static int s_vid_write = -1;                 /* 上次写入槽 */
 static int s_vid_shown = -1;                 /* 正被 plane 扫描的槽 */
 static bool s_rgb_preview = true;            /* XRGB 预览转换开关(plane 模式关) */
@@ -462,7 +463,8 @@ void camera_poll(void)
         s_out_idx = (s_out_idx + 1) % 3;
         s_frame.seq = s_seq;
     }
-    if (s_vid.heap_fd >= 0)
+    /* 只有直通消费方(plane 模式 dg_preview)拉取过才旋转,回退路径零开销 */
+    if (s_dbuf_requested && s_vid.heap_fd >= 0)
         rotate_to_vid(idx, s_seq);
 
     /* NV12 出口:视觉占用期间不归还,等 release 回调再 QBUF */
@@ -523,6 +525,7 @@ const camera_frame_t *camera_latest(void)
 
 const camera_dmabuf_t *camera_latest_dmabuf(void)
 {
+    s_dbuf_requested = true;
     return s_dbuf.seq ? &s_dbuf : NULL;
 }
 
