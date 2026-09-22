@@ -114,6 +114,7 @@ static void *writer_thread(void *arg)
     (void)arg;
     uint8_t buf[16 * 1024];
     int rc = DG_OK;
+    uint32_t last_reported = 0;                  /* 锁外发布用的进度快照 */
 
     /* 续传:先把已暂存字节重放进摘要(与收包同一摘要流) */
     if (s_ctx.received > 0) {
@@ -156,12 +157,17 @@ static void *writer_thread(void *arg)
                 break;
             }
             EVP_DigestUpdate(s_ctx.md, buf, got);
+            /* received/last_permille 与生产者(can_accept/staged_bytes)共享,
+             * TSAN 验收要求:落盘后的簿记更新也必须持锁(fwrite 本身在锁外) */
+            pthread_mutex_lock(&s_ctx.mu);
             s_ctx.received += got;
-
             uint32_t permille =
                 (uint32_t)((uint64_t)s_ctx.received * 1000 / s_ctx.manifest.size);
-            if (permille - s_ctx.last_permille >= 5) {
+            if (permille - s_ctx.last_permille >= 5)
                 s_ctx.last_permille = permille;
+            pthread_mutex_unlock(&s_ctx.mu);
+            if (permille - last_reported >= 5) {
+                last_reported = permille;
                 publish_progress(permille, false, DG_OK);
             }
         }
