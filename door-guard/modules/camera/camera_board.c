@@ -417,6 +417,11 @@ void camera_nv12_release(uint32_t frame_id)
     }
 }
 
+int camera_rotation(void)
+{
+    return s_rot;                           /* camera_init 即从 env 定死 */
+}
+
 const camera_frame_t *camera_latest(void)
 {
     return s_seq ? &s_frame : NULL;

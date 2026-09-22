@@ -28,6 +28,7 @@ cur_config.json(现用配置,稀疏覆盖;板上 /userdata/doorguard/cur_config.
 | min_face_px | face.min_face_px | 40~400 | 80 |
 | blur_min | face.blur_min | 0~50000 | 50 |
 | det_score_min | face.det_score_min | 0.30~1.00 | 0.70 |
+| det_threshold | face.det_threshold | 0.30~0.95 | 0.60(检测出框线;i8 模型空场景有 0.5x 幻检) |
 | liveness_enable | face.liveness_enable | 0/1 | 0(B8 活体算法落地后开) |
 | standby_timeout_s | ui.standby_timeout_s | 15~60 | 30 |
 | menu_timeout_s | ui.menu_timeout_s | 5~120 | 15 |

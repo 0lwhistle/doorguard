@@ -30,7 +30,8 @@ static lv_timer_t *s_status_timer = NULL;
 static uint32_t s_last_seq;            /* 上次画到画布的帧序号(去重:相机比刷屏
                                           慢时不再重复整屏 invalidate) */
 
-/* ---- 相机帧 → 画布(33ms 轮询,30fps) ---- */
+/* ---- 相机帧 → 画布(66ms 轮询,15fps;预览整屏重绘走 CPU,30fps 会把
+ * LVGL 时间预算吃光——触摸/弹窗全卡。15fps 对门禁预览足够顺滑) ---- */
 
 static void canvas_timer_cb(lv_timer_t *t)
 {
@@ -166,7 +167,8 @@ void page_home_create(lv_obj_t *parent)
     lv_obj_align(verify_btn, LV_ALIGN_BOTTOM_RIGHT, -DG_PAD, -DG_PAD);
     lv_obj_add_event_cb(verify_btn, on_verify_btn, LV_EVENT_CLICKED, NULL);
 
-    s_pump_timer = lv_timer_create(canvas_timer_cb, 33, NULL); /* 30fps:与传感器帧率对齐 */
+    s_pump_timer = lv_timer_create(canvas_timer_cb, 66, NULL); /* 15fps:整屏重绘是
+                                                                  CPU 活,30fps 拖垮 UI */
 }
 
 void page_home_destroy(void)

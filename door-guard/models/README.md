@@ -126,3 +126,12 @@ python3 convert.py <zoo>/examples/RetinaFace/model/RetinaFace_mobile320.onnx \
   `rknn_retinaface_decode()`(PriorBox:min_sizes=[[16,32],[64,128],[256,512]]、
   steps=[8,16,32]、中心 +0.5 偏移、variance=[0.1,0.2]);宿主单测见
   `tests/test_rknn_face.c`(锚框数 320→4200 与板上实测互证)。
+
+### ⑥ 板上教训:检测输入必须正立(2026-09-22)
+
+模型对小模型(i8 mobilenet)的**方向极其敏感**:喂 ±90° 横置脸(摄像头横装
+时的原始帧)时,离线对拍的正立图 0.999 会掉到 0.5~0.7,关键点/框回归出现
+「摆正幻觉」(横脸的眼线被回归成水平、框近方形巨大),空场景还冒 0.5x 幻检。
+链路上已用 `npu_pre_nv12_rotate` 先旋到预览同向再送检(见 vision README),
+**任何后续改动都不得把原始帧直接送这个模型**;转换时的 Conv_613 outlier 警告
+(见 ⑤)疑似也与该劣化有关,重转模型时应用横置/正立两组真实人脸分别对拍。

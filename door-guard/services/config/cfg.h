@@ -43,6 +43,10 @@ typedef struct {
     int32_t face_min_px;        /**< 人脸框较小边最小像素,40~400,默认 80 */
     double  face_blur_min;      /**< 清晰度下限(Laplacian 方差),默认 50,须实测标定 */
     double  face_det_score_min; /**< 检测分数下限,0.30~1.00,默认 0.70 */
+    double  face_det_threshold; /**< 检测器出框阈值,0.30~0.95,默认 0.60。
+                                     i8 量化模型空场景有 0.5x 幻检(会唤醒待机/
+                                     弹验证失败),0.5 顶不住;正脸实测 0.85+,
+                                     余量充足。板上按 2s 检出日志标定 */
     /* UI(spec-ui) */
     int  standby_timeout_s;    /**< 待机超时,15~60(spec 上限),默认 30 */
     int  menu_timeout_s;       /**< 菜单页无操作自动回主页,5~120s,默认 15 */

@@ -108,6 +108,11 @@ void camera_sim_set_interval(uint32_t ms)
     s_interval_ms = ms;
 }
 
+int camera_rotation(void)
+{
+    return 0;                               /* sim 帧即正立图,无旋转 */
+}
+
 /* latest 双缓冲:投帧线程写 back,渲染端读 front(poll 与渲染同线程,直写即可) */
 static sim_image_t *s_latest = NULL;
 static uint32_t s_latest_seq = 0;

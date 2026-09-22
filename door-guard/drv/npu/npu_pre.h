@@ -75,6 +75,18 @@ static inline void npu_letterbox_unmap(const npu_letterbox_t *lb,
 }
 
 /**
+ * RGA:NV12 整帧旋转(90/180/270;0=原样复制)。视觉链路用:检测模型要
+ * **正立人脸**,而横置摄像头出的原始帧里人是躺着的——预览经 RGA 旋转后才
+ * 正立,检测却喂了原始帧,模型在域外工作(板上实测:分数 0.999→0.5~0.7、
+ * 关键点/框回归严重劣化、空场景 0.5x 幻检)。现在把帧先旋到与预览同一
+ * 方向再送模型,框/关键点坐标也与预览(=屏幕)同域。
+ * @param dst  旋转后 NV12(90/270 时宽高互换,容量按 h×w 算)
+ * @return DG_OK / DG_ERR_PARAM / DG_ERR_IO(RGA 失败)
+ */
+int npu_pre_nv12_rotate(const uint8_t *nv12, int stride, int w, int h,
+                        uint8_t *dst, int rot_deg);
+
+/**
  * RGA:NV12 → letterbox 后的 RGB888(dst_w×dst_h×3 字节)。
  * 先整画布补 NPU_PRE_PAD_VALUE,再把等比缩放后的图像画进居中区域(一次 improcess)。
  * @param nv12   NV12 数据首地址(Y 平面起;UV 紧随其后)

@@ -42,6 +42,11 @@ const camera_frame_t *camera_latest(void);
 /** sim 后端帧率(ms/帧) */
 void camera_sim_set_interval(uint32_t ms);
 
+/** 预览旋转角(0/90/180/270,DG_CAM_ROT;视觉链路须把检测输入旋到同一
+ * 方向,框/关键点才与预览同域——见 npu_pre_nv12_rotate)。未就绪时也给
+ * 配置值:它来自环境变量,camera_init 时即定 */
+int camera_rotation(void);
+
 /* ---- NV12 出口(板端视觉专用;sim 无实现) ----
  * on_frame 在 camera_poll 调用线程执行(板上=主循环:UI/渲染/触摸同线程)。
  * 硬契约:回调必须快、绝不阻塞——重活(推理/编码/写库)自行转线程,回调里

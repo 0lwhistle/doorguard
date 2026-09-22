@@ -9,7 +9,8 @@
     "face_dup_threshold": 0.9,
     "min_face_px": 80,
     "blur_min": 50,
-    "det_score_min": 0.7
+    "det_score_min": 0.7,
+    "det_threshold": 0.6
   },
   "access": {
     "relay_gpio_chip": "/dev/gpiochip0",

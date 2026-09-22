@@ -4,15 +4,16 @@
  * 链路(推理在专用 worker 线程;取流/预览/LVGL 主循环零等待):
  *
  *   camera NV12 1280×720(主循环 camera_poll 投递)
- *     └─ on_frame_push 只做"信箱投递":最新帧编号入箱,旧帧立即归还——
- *        回调在主循环执行,任何阻塞都会拖垮 UI(2026-09-22 修:推理原内联在
- *        主循环,检测 6.7ms/帧 + 识别 56ms/300ms,人脸一出现 UI 就卡死)。
+ *     └─ on_frame_push 只做"信箱投递"(最新帧;worker 忙时顶掉旧帧立即归还)——
+ *        回调在主循环执行,绝不允许阻塞。
  *     worker 线程取帧:
- *     ├─[每帧] RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)→ 解码 → NMS
- *     │        → 最大脸 → 逆映射+旋转 → EV_VISION_FACE_BOX(黄框,15Hz 节流)
- *     └─[每 300ms 且非 IDLE] 从 NV12 原分辨率裁人脸 ROI(RGA)→ 5 点对齐
- *              112×112 → (x-127.5)/127.5 → ArcFace@NPU(56ms)→ 512 维
- *              → L2 归一化 → 录入缓存 / 1:1 比对 / 1:N 检索 → 事件 → FSM
+ *     ├─[每帧] **RGA 旋到预览同向**(横置摄像头原始帧里人是躺着的,模型只认
+ *     │        正立脸;旋转后框/关键点与预览=屏幕同域,映射恒等)→
+ *     │        RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)→ 解码 → NMS
+ *     │        → 最大脸 → 逆映射(屏幕域)→ EV_VISION_FACE_BOX(黄框,15Hz 节流)
+ *     └─[每 300ms 且非 IDLE] 从旋转帧裁人脸 ROI(RGA,正方形)→ 5 点对齐
+ *              112×112 → (x-127.5)/127.5 → ArcFace@NPU(56ms)→ 512 维 → L2
+ *              → 录入缓存 / 1:1 比对 / 1:N 检索(内存特征库暴力余弦)
  *
  *   worker 处理一帧最坏 ≈ 7+56+RGA ≈ 65ms → 满载约 15fps:信箱永远只留
  *   最新帧(处理期间新到的帧顶掉旧帧立即归还),识别/画框永远基于新鲜帧,
@@ -70,7 +71,10 @@ static const char *TAG = "[VISION]";
 #define RKNN_SCORE_LOG_MS   2000        /* 1:N 最高分日志节流 */
 #define RKNN_REC_MS         300         /* 识别节流(录入缓存新鲜度 ≤300ms) */
 #define RKNN_ROI_MAX        256         /* ROI 裁剪输出上限(边长) */
-#define RKNN_ROI_MARGIN     1.5f        /* ROI 相对关键点外扩(留对齐余量) */
+/* ROI 相对关键点外扩系数。112/160 对齐画布映射回源图约要关键点外接框的
+ * 2.5~3 倍,1.5 会让 warp 采样越出 ROI(头像四角发黑、下巴/额头被裁);
+ * 2.2 已能盖住脸本体+大半画布,再大只剩黑边没增益 */
+#define RKNN_ROI_MARGIN     2.2f
 #define RKNN_AVATAR_SZ      160         /* 头像边长(列表 40px/预览 160px 都够) */
 #define RKNN_Q_PUB_MS       1000        /* 质量事件兜底刷新(拍摄页 UI 状态) */
 
@@ -81,11 +85,13 @@ static bool s_ready;
 static int         s_in_w, s_in_h, s_nanchor;
 static size_t      s_in_bytes;
 static uint8_t    *s_rgb;
+static uint8_t    *s_rot;              /* 旋到预览同向的 NV12 帧(worker 独占,
+                                          首帧按相机实际幅面按需分配) */
+static size_t      s_rot_cap;          /* s_rot 容量(字节) */
 static float      *s_loc, *s_conf, *s_landm;
 static rknn_face_t *s_cand;
 static npu_letterbox_t s_lb;
 static int s_lb_src_w, s_lb_src_h;
-static float s_score_thresh = 0.5f;
 static bool s_face_present;            /* worker 写;on_mode_changed(总线线程)置
                                           false 仅单字写,读侧滞后一帧无实义 */
 static int64_t s_last_det_ms;          /* 最近一次检出的时刻:LOST 滞回用 */
@@ -173,16 +179,10 @@ static void pub_face_lost(void)
     EVENT_BUS_PUBLISH_EMPTY(EV_VISION_FACE_LOST);
 }
 
-/* 源图坐标(1280×720 横向)→ 竖屏(720×1280)。与 ROCKIVA 后端同一套映射;
- * 若上板实测框镜像/转 180°,换成 ROT_270 公式(ox = y1)即可。 */
-static void rect_to_screen(int32_t x1, int32_t y1, int32_t x2, int32_t y2, int src_h,
-                           int32_t *ox, int32_t *oy, int32_t *ow, int32_t *oh)
-{
-    *ox = src_h - y2;
-    *oy = x1;
-    *ow = y2 - y1;
-    *oh = x2 - x1;
-}
+/* 源图坐标已在**预览/屏幕域**(worker 先把帧旋到与预览同向再检测,
+ * 见 process_frame):模型空间逆映射出来的框就是屏幕像素,直接发布。
+ * 此前"逆映射到横向原始帧再 rect_to_screen 转 90°"的两段式映射已删——
+ * 域一多就出对不齐的 bug,让检测域=显示域,错误无法表示。 */
 
 /* 5 关键点回灌活体(万分比坐标;B8 的 yaw/pitch 几何估计按 5 点设计) */
 static void feed_liveness(const rknn_face_t *f, int src_w, int src_h)
@@ -390,7 +390,7 @@ static void search_1n(const float *feat)
 /* ---- 识别路径:ROI 裁剪 → 对齐 → 归一化 → ArcFace ------------------------ */
 
 static bool recognize(const uint8_t *nv12, int w, int h,
-                      const rknn_face_t *src /* 源图坐标 */, float src_score,
+                      const rknn_face_t *src /* 预览/屏幕域坐标 */, float src_score,
                       float *feat_out)
 {
     /* ROI:关键点外接框外扩的**正方形**,整体平移夹进帧内(偶对齐)。
@@ -506,8 +506,8 @@ static bool recognize(const uint8_t *nv12, int w, int h,
         rknn_align_warp(s_roi, dw, dw, mb, s_avatar_warp, RKNN_AVATAR_SZ,
                         RKNN_AVATAR_SZ);
         /* 诊断日志(节流):对齐拟合出的面内旋转角。头像歪斜/识别分数异常时
-         * 第一时间看这里——正常应 ≈ 摄像头安装角(±90°);明显偏离说明关键点
-         * 或模板出了问题 */
+         * 第一时间看这里——检测输入已旋到正立域,正常应 ≈0°(即被摄者头部
+         * 的自然倾角,±10° 内);明显偏离=关键点或模板出了问题 */
         static int64_t last_ang_log;
         const int64_t now = now_ms();
         if (now - last_ang_log >= RKNN_BOX_LOG_MS) {
@@ -585,15 +585,39 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
         return;
     }
 
-    if (w != s_lb_src_w || h != s_lb_src_h) {
-        npu_letterbox_plan(w, h, s_in_w, s_in_h, &s_lb);
-        s_lb_src_w = w;
-        s_lb_src_h = h;
-        DG_LOGI(TAG, "letterbox 计划 %dx%d → %dx%d(scale=%.4f,补边 %d,%d)",
-                w, h, s_in_w, s_in_h, s_lb.scale, s_lb.pad_x, s_lb.pad_y);
+    /* 旋到预览同向:横置摄像头的原始帧里人是躺着的,检测模型只在正立脸的
+     * 域内可靠(板上实测:喂原始帧时分数 0.999→0.5~0.7、关键点/框回归
+     * 严重劣化、空场景 0.5x 幻检唤醒待机)。旋转后所有坐标与预览=屏幕同域 */
+    const int rot = camera_rotation();
+    const int rw = (rot == 90 || rot == 270) ? h : w;
+    const int rh = (rot == 90 || rot == 270) ? w : h;
+    const size_t need = (size_t)w * h * 3 / 2;   /* NV12;旋转前后字节数相同 */
+    if (s_rot_cap < need) {
+        uint8_t *nb = realloc(s_rot, need);
+        if (!nb) {
+            camera_nv12_release(frame_id);
+            return;
+        }
+        s_rot = nb;
+        s_rot_cap = need;
+    }
+    if (npu_pre_nv12_rotate(data, w, w, h, s_rot, rot) != DG_OK) {
+        camera_nv12_release(frame_id);
+        static int n_rot_err;
+        if (n_rot_err++ < 3)
+            DG_LOGE(TAG, "帧旋转失败,本帧跳过(共 %d)", n_rot_err);
+        return;
     }
 
-    if (npu_pre_nv12_letterbox_rgb(data, w, &s_lb, s_rgb) != DG_OK ||
+    if (rw != s_lb_src_w || rh != s_lb_src_h) {
+        npu_letterbox_plan(rw, rh, s_in_w, s_in_h, &s_lb);
+        s_lb_src_w = rw;
+        s_lb_src_h = rh;
+        DG_LOGI(TAG, "letterbox 计划 %dx%d(预览域)→ %dx%d(scale=%.4f,补边 %d,%d)",
+                rw, rh, s_in_w, s_in_h, s_lb.scale, s_lb.pad_x, s_lb.pad_y);
+    }
+
+    if (npu_pre_nv12_letterbox_rgb(s_rot, rw, &s_lb, s_rgb) != DG_OK ||
         npu_model_run(s_face, s_rgb, s_in_bytes, DG_NPU_TYPE_U8) != DG_OK) {
         camera_nv12_release(frame_id);
         return;
@@ -609,8 +633,11 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
         return;
     }
 
+    /* 检出阈值走配置(face.det_threshold):i8 量化后空场景会出现 0.5x 的
+     * 幻检,0.5 的出厂线顶不住;板上用 2s 节流日志实测后调 */
+    const float score_thresh = cfg_get()->face_det_threshold;
     int n = rknn_retinaface_decode(s_loc, s_conf, s_landm, s_nanchor, s_in_w,
-                                   s_score_thresh, s_cand, RKNN_MAX_CAND);
+                                   score_thresh, s_cand, RKNN_MAX_CAND);
     if (n < 0) {
         camera_nv12_release(frame_id);
         DG_LOGE(TAG, "解码失败(%d)", n);
@@ -630,7 +657,7 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
     }
     s_last_det_ms = now_ms();
 
-    /* 最大脸(检测模型空间)→ 源图坐标 */
+    /* 最大脸(检测模型空间)→ 预览/屏幕域坐标(框与关键点一并逆映射) */
     int best = 0;
     float best_area = 0.0f;
     for (int i = 0; i < n; i++) {
@@ -644,22 +671,21 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
     for (int i = 0; i < RKNN_FACE_KPS; i++)
         npu_letterbox_unmap(&s_lb, s_cand[best].kps[i][0], s_cand[best].kps[i][1],
                             &src.kps[i][0], &src.kps[i][1]);
-    float sx1, sy1, sx2, sy2;
-    npu_letterbox_unmap(&s_lb, s_cand[best].x1, s_cand[best].y1, &sx1, &sy1);
-    npu_letterbox_unmap(&s_lb, s_cand[best].x2, s_cand[best].y2, &sx2, &sy2);
-    if (sx1 < 0) sx1 = 0;
-    if (sy1 < 0) sy1 = 0;
-    if (sx2 > (float)w) sx2 = (float)w;
-    if (sy2 > (float)h) sy2 = (float)h;
+    npu_letterbox_unmap(&s_lb, s_cand[best].x1, s_cand[best].y1, &src.x1, &src.y1);
+    npu_letterbox_unmap(&s_lb, s_cand[best].x2, s_cand[best].y2, &src.x2, &src.y2);
+    if (src.x1 < 0) src.x1 = 0;
+    if (src.y1 < 0) src.y1 = 0;
+    if (src.x2 > (float)rw) src.x2 = (float)rw;
+    if (src.y2 > (float)rh) src.y2 = (float)rh;
 
-    /* ---- 识别(节流;要读 NV12,须在归还缓冲前) ---- */
+    /* ---- 识别(节流;要读旋转帧,须在归还缓冲前) ---- */
     const dg_vision_mode_t mode = vision_service_get_mode();
     const int64_t t = now_ms();
     if (s_rec_dim == RKNN_REC_DIM && mode != DG_VMODE_IDLE &&
         t - s_last_rec_ms >= RKNN_REC_MS) {
         s_last_rec_ms = t;
         float feat[RKNN_REC_DIM];
-        if (recognize(data, w, h, &src, s_cand[best].score, feat)) {
+        if (recognize(s_rot, rw, rh, &src, s_cand[best].score, feat)) {
             /* 录入缓存:特征 + 同帧头像大图一把锁成对写(DETECT_ONLY 下
              * 也照常:录入页/拍摄页在该模式) */
             pthread_mutex_lock(&s_cap_mtx);
@@ -680,9 +706,9 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
     /* 检测与识别都用完了,归还缓冲 */
     camera_nv12_release(frame_id);
 
-    feed_liveness(&src, w, h);
+    feed_liveness(&src, rw, rh);
 
-    /* 检出分数节流日志(调 s_score_thresh 用) */
+    /* 检出分数节流日志(调 face.det_threshold 用) */
     {
         static int64_t last_log;
         static float last_score = -1.0f;
@@ -690,11 +716,12 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
             last_log = t;
             last_score = s_cand[best].score;
             DG_LOGI(TAG, "检出 %d 张脸,最大脸分数 %.3f(阈值 %.2f,%.0fx%.0f)",
-                    n, s_cand[best].score, s_score_thresh, sx2 - sx1, sy2 - sy1);
+                    n, s_cand[best].score, score_thresh,
+                    src.x2 - src.x1, src.y2 - src.y1);
         }
     }
 
-    /* 脸框事件节流(10Hz) */
+    /* 脸框事件节流(15Hz)。坐标已是屏幕像素,恒等发布 */
     {
         static int64_t last_pub;
         if (t - last_pub < RKNN_PUB_MS)
@@ -704,8 +731,10 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
     ev_face_box_t box;
     memset(&box, 0, sizeof(box));
     box.state = DG_BOX_DETECTED;
-    rect_to_screen((int32_t)sx1, (int32_t)sy1, (int32_t)sx2, (int32_t)sy2, h,
-                   &box.x, &box.y, &box.w, &box.h);
+    box.x = (int32_t)src.x1;
+    box.y = (int32_t)src.y1;
+    box.w = (int32_t)(src.x2 - src.x1);
+    box.h = (int32_t)(src.y2 - src.y1);
     s_face_present = true;
     EVENT_BUS_PUBLISH(EV_VISION_FACE_BOX, &box);
 }
@@ -901,7 +930,8 @@ static int rknn_start(bool enable_mock)
     s_ready = true;
     DG_LOGI(TAG, "rknn 就绪:检测 %s %dx%d(锚框 %d,阈值 %.2f)+ 识别 %s(%d 维,"
                  "特征 %d B),库 %d 人",
-            RKNN_FACE_MODEL, s_in_w, s_in_h, s_nanchor, s_score_thresh,
+            RKNN_FACE_MODEL, s_in_w, s_in_h, s_nanchor,
+            cfg_get()->face_det_threshold,
             RKNN_REC_MODEL, s_rec_dim, RKNN_FEATURE_BYTES, loaded);
     return DG_OK;
 
@@ -909,6 +939,7 @@ fail:
     if (s_face) { npu_model_release(s_face); s_face = NULL; }
     if (s_rec)  { npu_model_release(s_rec);  s_rec = NULL; }
     free(s_rgb);     s_rgb = NULL;
+    free(s_rot);     s_rot = NULL; s_rot_cap = 0;
     free(s_loc);     s_loc = NULL;
     free(s_conf);    s_conf = NULL;
     free(s_landm);   s_landm = NULL;

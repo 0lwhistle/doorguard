@@ -43,6 +43,8 @@ static lv_obj_t *s_photo = NULL;          /* 回看照片(白底描边容器内)
 static lv_obj_t *s_btn_shot, *s_btn_cancel, *s_btn_retake, *s_btn_done;
 static lv_timer_t *s_pump_timer = NULL;
 static lv_timer_t *s_wait_timer = NULL;
+static uint32_t s_last_seq;            /* 已画帧序号(与主页同款去重:相机帧率
+                                          高于刷屏节奏时不再重复整屏 invalidate) */
 
 /* 页内状态:LIVE(取景)→ WAIT(已拍等回执)→ REVIEW(回看)/ 退回 LIVE */
 static bool s_review;
@@ -50,7 +52,7 @@ static bool s_shot_enabled;               /* 质量合格才可拍 */
 
 static void set_state_live(void);
 
-/* ---- 预览(与 page_home 同一套:camera_latest → canvas,33ms) ---- */
+/* ---- 预览(与 page_home 同一套:camera_latest → canvas,66ms/15fps + 去重) ---- */
 
 static void canvas_timer_cb(lv_timer_t *t)
 {
@@ -66,8 +68,10 @@ static void canvas_timer_cb(lv_timer_t *t)
             return;
         lv_canvas_set_buffer(s_canvas, s_canvas_buf, w, h, LV_IMG_CF_TRUE_COLOR);
         lv_obj_center(s_canvas);
+        s_last_seq = 0;
     }
-    if (f->w == w && f->h == h) {
+    if (f->w == w && f->h == h && f->seq != s_last_seq) {
+        s_last_seq = f->seq;
         lv_canvas_copy_buf(s_canvas, (const lv_color_t *)f->pixels, 0, 0, w, h);
         lv_obj_invalidate(s_canvas);
     }
@@ -324,7 +328,7 @@ void page_capture_create(lv_obj_t *parent)
     lv_obj_align(s_btn_done, LV_ALIGN_BOTTOM_RIGHT, -DG_PAD, -DG_PAD);
     lv_obj_add_event_cb(s_btn_done, on_done, LV_EVENT_CLICKED, NULL);
 
-    s_pump_timer = lv_timer_create(canvas_timer_cb, 33, NULL);
+    s_pump_timer = lv_timer_create(canvas_timer_cb, 66, NULL); /* 15fps,同主页 */
     set_state_live();
 }
 
@@ -340,6 +344,7 @@ void page_capture_destroy(void)
         free(s_canvas_buf);
         s_canvas_buf = NULL;
     }
+    s_last_seq = 0;
     s_canvas = NULL;
     s_facebox = NULL;
     s_hint = NULL;

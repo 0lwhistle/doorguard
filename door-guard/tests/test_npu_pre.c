@@ -33,6 +33,27 @@ static void test_plan_square(void)
     DG_CHECK(lb.fit_w == 320 && lb.fit_h == 320);
 }
 
+/* 旋转后的预览域帧(竖屏 720×1280)→ 320:高先顶满,左右补边。
+ * 视觉链路 2026-09-22 起在**旋转后**的帧上检测(域=预览=屏幕),
+ * 这个幅面是板上实际走的计划 */
+static void test_plan_720x1280(void)
+{
+    npu_letterbox_t lb;
+    npu_letterbox_plan(720, 1280, 320, 320, &lb);
+
+    DG_CHECK(lb.scale > 0.2499f && lb.scale < 0.2501f);   /* min(0.444, 0.25) */
+    DG_CHECK(lb.fit_w == 180);                            /* 高先顶满 */
+    DG_CHECK(lb.fit_h == 320);
+    DG_CHECK(lb.pad_x == 70);                             /* (320-180)/2 */
+    DG_CHECK(lb.pad_y == 0);
+
+    /* 中心映中心自检 */
+    float x = 0, y = 0;
+    npu_letterbox_unmap(&lb, 160.0f, 160.0f, &x, &y);
+    DG_CHECK(fabsf(x - 360.0f) < 0.5f);
+    DG_CHECK(fabsf(y - 640.0f) < 0.5f);
+}
+
 static void test_plan_invalid(void)
 {
     npu_letterbox_t lb;
@@ -86,6 +107,7 @@ static void test_unmap_degenerate(void)
 int main(void)
 {
     test_plan_1280x720();
+    test_plan_720x1280();
     test_plan_square();
     test_plan_invalid();
     test_unmap_center();

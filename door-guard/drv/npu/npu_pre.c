@@ -72,6 +72,40 @@ int npu_pre_nv12_letterbox_rgb(const uint8_t *nv12, int stride,
     return DG_OK;
 }
 
+int npu_pre_nv12_rotate(const uint8_t *nv12, int stride, int w, int h,
+                        uint8_t *dst, int rot_deg)
+{
+    if (!nv12 || !dst)
+        return DG_ERR_PARAM;
+    if (w <= 0 || h <= 0)
+        return DG_ERR_PARAM;
+    if (rot_deg != 0 && rot_deg != 90 && rot_deg != 180 && rot_deg != 270)
+        return DG_ERR_PARAM;
+    if (stride < w)
+        stride = w;
+    if (rot_deg == 0) {                     /* 同向:复制一份,调用方域逻辑不变 */
+        memcpy(dst, nv12, (size_t)stride * h * 3 / 2);
+        return DG_OK;
+    }
+
+    rga_buffer_t src = wrapbuffer_virtualaddr_t((void *)nv12, w, h, stride, h,
+                                                RK_FORMAT_YCbCr_420_SP);
+    const int dw = (rot_deg == 90 || rot_deg == 270) ? h : w;
+    const int dh = (rot_deg == 90 || rot_deg == 270) ? w : h;
+    rga_buffer_t dout = wrapbuffer_virtualaddr_t(dst, dw, dh, dw, dh,
+                                                 RK_FORMAT_YCbCr_420_SP);
+    const IM_STATUS st = imrotate_t(src, dout,
+                                    rot_deg == 90  ? IM_HAL_TRANSFORM_ROT_90
+                                    : rot_deg == 180 ? IM_HAL_TRANSFORM_ROT_180
+                                                     : IM_HAL_TRANSFORM_ROT_270,
+                                    IM_SYNC);
+    if (!rga_ok(st)) {
+        DG_LOGE(TAG, "RGA NV12 旋转失败(%s)", imStrError_t(st));
+        return DG_ERR_IO;
+    }
+    return DG_OK;
+}
+
 int npu_pre_nv12_crop_rgb(const uint8_t *nv12, int stride,
                           int src_w, int src_h,
                           int rx, int ry, int rw, int rh,

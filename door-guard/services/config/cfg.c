@@ -51,6 +51,7 @@ static const cfg_meta_t META[] = {
     { "min_face_px",         "face.min_face_px",          CK_INT,   40,   400 },
     { "blur_min",            "face.blur_min",             CK_DBL,  0.0, 50000 },
     { "det_score_min",       "face.det_score_min",        CK_DBL, 0.30,  1.00 },
+    { "det_threshold",       "face.det_threshold",        CK_DBL, 0.30,  0.95 },
     { "liveness_enable",      "face.liveness_enable",     CK_INT,    0,     1 },
     { "standby_timeout_s",    "ui.standby_timeout_s",     CK_INT,   15,    60 },
     { "menu_timeout_s",       "ui.menu_timeout_s",        CK_INT,    5,   120 },
@@ -224,6 +225,7 @@ static void defaults_apply(dg_cfg_t *c)
     c->face_min_px = 80;                /* 人脸框较小边 ≥80px 才做识别 */
     c->face_blur_min = 50.0;            /* 清晰度下限(板上标定,见日志"清晰度") */
     c->face_det_score_min = 0.70;       /* 检测分数下限 */
+    c->face_det_threshold = 0.60;       /* 检测器出框阈值(空场景幻检 0.5x) */
     c->liveness_enable = 0;              /* 活体算法 B8 落地前默认关 */
     /* 后端名/口径留空 = 用"第一个注册的后端"+该后端自带口径:同一份模板在
      * PC(sim)与板上(rockiva)都成立,不用两套配置 */
@@ -276,6 +278,8 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
             c->face_blur_min = clamp_dbl(v, m->lo, m->hi, c->face_blur_min, m->key);
         else if (!strcmp(m->key, "det_score_min"))
             c->face_det_score_min = clamp_dbl(v, m->lo, m->hi, c->face_det_score_min, m->key);
+        else if (!strcmp(m->key, "det_threshold"))
+            c->face_det_threshold = clamp_dbl(v, m->lo, m->hi, c->face_det_threshold, m->key);
         else if (!strcmp(m->key, "face_match_threshold"))
             c->face_match_threshold = clamp_dbl(v, m->lo, m->hi, c->face_match_threshold, m->key);
     } else { /* CK_STR */
