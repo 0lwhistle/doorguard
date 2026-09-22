@@ -21,7 +21,6 @@
   "network": {
     "ntp_server": "ntp.aliyun.com",
     "web_port": 8080,
-    "ota_port": 9000,
     "ota_url": ""
   },
   "ui": {

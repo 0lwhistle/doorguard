@@ -57,7 +57,6 @@ static const cfg_meta_t META[] = {
     { "language",             "ui.language",              CK_STR,    0,    15 },
     { "ntp_server",           "network.ntp_server",       CK_STR,    0,    63 },
     { "web_port",             "network.web_port",         CK_INT, 1024, 65535 },
-    { "ota_port",             "network.ota_port",         CK_INT, 1024, 65535 },
     { "ota_url",              "network.ota_url",          CK_STR,    0,   127 },
 };
 
@@ -235,7 +234,6 @@ static void defaults_apply(dg_cfg_t *c)
     c->menu_timeout_s = 15;
     snprintf(c->language, sizeof(c->language), "zh-CN");
     c->web_port = 8080;
-    c->ota_port = 9000;
     snprintf(c->ntp_server, sizeof(c->ntp_server), "ntp.aliyun.com");
     c->ota_url[0] = '\0';
     c->relay_gpio_line = 0;
@@ -257,7 +255,6 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "standby_timeout_s"))    cur = c->standby_timeout_s;
         else if (!strcmp(m->key, "menu_timeout_s"))       cur = c->menu_timeout_s;
         else if (!strcmp(m->key, "web_port"))             cur = c->web_port;
-        else if (!strcmp(m->key, "ota_port"))             cur = c->ota_port;
         else return;
         v = clamp_int(v, m->lo, m->hi, cur, m->key);
         if (!strcmp(m->key, "door_open_ms"))              c->door_open_ms = v;
@@ -267,7 +264,6 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "standby_timeout_s"))    c->standby_timeout_s = v;
         else if (!strcmp(m->key, "menu_timeout_s"))       c->menu_timeout_s = v;
         else if (!strcmp(m->key, "web_port"))             c->web_port = v;
-        else if (!strcmp(m->key, "ota_port"))             c->ota_port = v;
     } else if (m->kind == CK_DBL) {
         if (!cJSON_IsNumber(item))
             return;
@@ -554,10 +550,10 @@ int cfg_load(const char *default_path, const char *cur_path)
 
     const dg_cfg_t *c = cfg_get();
     DG_LOGI(TAG, "配置就绪: door=%dms standby=%ds face_dup=%.2f face_match=%.2f "
-                 "liveness=%d web=%d ota=%d lang=%s",
+                 "liveness=%d web=%d lang=%s",
             c->door_open_ms, c->standby_timeout_s, c->face_dup_threshold,
             c->face_match_threshold, c->liveness_enable,
-            c->web_port, c->ota_port, c->language);
+            c->web_port, c->language);
     return load_rc;
 }
 

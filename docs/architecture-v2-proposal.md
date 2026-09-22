@@ -176,9 +176,9 @@ eventfd/epoll)。先改状态再 signal;对外成对提供 `<svc>_sleep()` / `<s
 | vision 人脸管线 | services/vision | 常驻,按页面条件运行(主页普通模式才跑 1:N) | 帧可用信号;弹窗期 1:N 挂起标志位 |
 | database 写者 | services/database | 常驻 | 请求队列 condvar |
 | ui / lvgl | services/ui | 常驻 | lv_timer_handler 30~50ms 节拍 + indev |
-| web | services/web | 常驻(net 不可用不启动) | mg_mgr_poll |
-| ota | services/ota | **按需**,完成即退出 | 下载流 |
-| mdns / ntp / config | services/mdns / ntp / config | **无独立线程**,tasker 周期/防抖任务 | — |
+| web | services/web | 常驻(netcore loop 共用) | netcore 心跳(透传看门狗) |
+| ota | services/ota | **按需**写线程(OTA 会话期);收包在 netcore loop | 写完即退 |
+| mdns / ntp / config | services/mdns / ntp / config | **无独立线程**:mdns/ntp 挂 netcore 事件循环(2026-09-22 起),config 落盘防抖 tasker | — |
 
 ### 3.4 看门狗与降级矩阵
 

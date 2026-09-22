@@ -94,7 +94,7 @@ static void test_layering(void)
     DG_CHECK(write_file(s_def,
         "{ \"access\": { \"door_open_ms\": 5000 },"
         "  \"ui\": { \"language\": \"en-US\", \"standby_timeout_s\": 45 },"
-        "  \"network\": { \"web_port\": 8081, \"ota_port\": 9001,"
+        "  \"network\": { \"web_port\": 8081,"
         "                \"ntp_server\": \"pool.ntp.org\" },"
         "  \"face\": { \"face_dup_threshold\": 0.85 } }") == 0);
     DG_CHECK(write_file(s_cur,
@@ -104,7 +104,6 @@ static void test_layering(void)
     DG_CHECK(strcmp(cfg_get()->language, "en-US") == 0);
     DG_CHECK(cfg_get()->standby_timeout_s == 45);
     DG_CHECK(cfg_get()->web_port == 8081);
-    DG_CHECK(cfg_get()->ota_port == 9001);
     DG_CHECK(strcmp(cfg_get()->ntp_server, "pool.ntp.org") == 0);
     DG_CHECK(cfg_get()->face_dup_threshold > 0.849
              && cfg_get()->face_dup_threshold < 0.851);

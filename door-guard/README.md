@@ -39,14 +39,14 @@ tests/web/web_test.sh        # web 上位机功能验收
 | `services/capture/` | 取流状态服务(EV_CAPTURE_STATE) | — |
 | `services/liveness/` | 活体占位(接口预留;认证管线强制阶段) | — |
 | `services/verify/` | auth_provider 统一认证抽象 + face/fingerprint/ic provider(B10b) | services/verify/auth_provider.h |
-| `services/web/` | web 上位机(civetweb+Vue 前端 `frontend/`,产物内嵌) | services/web/README.md |
+| `services/web/` | web 上位机(mongoose 统一事件循环 + Vue 前端 `frontend/`,产物内嵌) | services/web/README.md |
 | `services/ota/` | OTA(流式+sha256,方案 docs/tech/OTA_PLAN.md) | — |
 | `services/ntp/` `services/mdns/` | 时间同步 / mDNS 服务通告 | — |
-| `modules/net/` | 网络模块(net_info:网口信息;网络服务族的地基) | — |
+| `modules/net/` | 网络模块(net_info 网口信息 + **netcore** 统一事件循环:web/OTA/NTP/mDNS 的唯一传输层) | modules/net/README.md |
 | `ui/` | LVGL 十页面+widgets+theme+多语言+生成字体 | ui/README.md |
 | `configs/default.json` | 设备配置出厂模板(现用值落 /userdata 的 cur_config.json 稀疏覆盖;DB 已冻结) | services/config/README.md |
 | `tests/` | ctest 用例(宿主 gcc;test_i18n 键覆盖/裸中文=0/字形覆盖) | — |
-| `third_party/` | lvgl 8.3 / cjson / civetweb 1.16 / stb_image / lv_drivers(drm) / 字体生成工具说明 | 各 LICENSE |
+| `third_party/` | lvgl 8.3 / cjson / mongoose 7.23(GPLv2)/ stb_image / lv_drivers(drm) / 字体生成工具说明 | 各 LICENSE |
 
 ## 验证状态机快速入口
 

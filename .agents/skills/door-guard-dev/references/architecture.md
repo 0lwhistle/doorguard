@@ -18,7 +18,9 @@ UI 层        ui/ 页面与弹窗(LVGL;PC 模拟器 + 板上双构建)
              config    配置服务;web/ota/mdns/ntp 网络服务族(基于 modules/net)
 ──────────────────────────────────────────────────
 模块层       modules/(注册进 holder)
-             camera / display / sqlite / net(net_info)
+             camera / display / sqlite / net(net_info + netcore 统一
+             网络事件循环:web/OTA/NTP/mDNS 唯一传输层,单 loop 线程;
+             线程契约:MG_EV 回调内才可碰连接,跨线程一律 netcore_post)
              touch / as608(UART)/ mfrc522(SPI)随硬件接入
 ──────────────────────────────────────────────────
 驱动层       drv/ 总线级薄封装、可替换;PC 模拟器 = 同接口的 sim 后端
@@ -34,6 +36,10 @@ UI 层        ui/ 页面与弹窗(LVGL;PC 模拟器 + 板上双构建)
   (例外:只读直调登记制,proposal §1 —— 现登记 database 特征快照、config 读取)
 - 事件命名:`EV_<域>_<动作>`(如 `EV_AUTH_RESULT`、`EV_ENROLL_DONE`、`EV_NET_OTA_PROGRESS`)
 - 新建模块步骤:本文档登记职责 → proto/ 定义接口与事件 → 实现 → 测试 → README + 使用示例
+- **netcore 登记(2026-09-22)**:modules/net/netcore,mongoose 7.23 胶水层,零业务;
+  单 loop 线程独占全部网络 I/O(web 上位机/OTA 收包/mDNS/SNTP);对外仅
+  `start/stop/running/heartbeat/post/mgr` 六个函数;mongoose 按 GPLv2 开源路线使用
+  (用户决议,闭源商用前须重议许可)
 - **前端子工程**:web 上位机前端是独立 Vue 工程(`services/web/frontend/`),
   产物入库(`pages/`、`web_pages.c`)。跨层边界是同仓库内最干净的示范:
   视图不取数、组件纯展示、HTTP 出口唯一 —— 后端 C 侧同理(服务层不碰 UI、UI 不碰 SQL)
@@ -79,7 +85,7 @@ FreeRTOS 依赖被隔离在 port 层,移植 = 实现对应 pthread port,不动�
 ## 4. 目录索引(door-guard/,2026-09-20 v2 迁移后)
 
 `app/` 装配启动 · `ui/` 界面 · `services/{capture,vision,liveness,verify,access,enroll,config,web,ota,mdns,ntp}` ·
-`modules/{camera,display,sqlite,jpeg,net}` · `drv/{uart,gpio,npu}` ·
+`modules/{camera,display,sqlite,jpeg,net(net_info+netcore)}` · `drv/{uart,gpio,npu}` ·
 `components/{tasker,event_bus,holder,logger}` · `proto/` 消息与事件契约 ·
 `configs/default.json` · `tests/` · `tools/` · `third_party/`
 (职责细表见 door-guard/README.md;目标形态与迁移映射见 docs/architecture-v2-proposal.md)

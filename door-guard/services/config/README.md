@@ -32,8 +32,7 @@ cur_config.json(现用配置,稀疏覆盖;板上 /userdata/doorguard/cur_config.
 | standby_timeout_s | ui.standby_timeout_s | 15~60 | 30 |
 | menu_timeout_s | ui.menu_timeout_s | 5~120 | 15 |
 | language | ui.language | zh-CN/en-US | zh-CN |
-| web_port | network.web_port | 1024~65535 | 8080 |
-| ota_port | network.ota_port | 1024~65535 | 9000 |
+| web_port | network.web_port | 1024~65535 | 8080(含 OTA 上传端点) |
 | ntp_server | network.ntp_server | 字符串 | ntp.aliyun.com |
 | ota_url | network.ota_url | 字符串 | 空 |
 

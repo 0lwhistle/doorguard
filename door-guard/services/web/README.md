@@ -1,6 +1,7 @@
 # web 上位机模块(HTTP + WebSocket + Vue 前端)
 
-板上内嵌 civetweb(spec-network §1),提供:登录、实时事件推送、门禁记录查询、
+板上内嵌 mongoose web 服务(跑在 `modules/net/netcore` 统一事件循环,
+spec-network §1),提供:登录、实时事件推送、门禁记录查询、
 设备信息、NTP 触发、账号/口令管理、OTA 包接收。前端是 **Vue 3 单页应用**,
 构建产物内嵌进固件——设备上电即用,不需要外网、不需要额外服务。
 
@@ -8,7 +9,7 @@
 
 ```
 services/web/
-├── web_server.c/h     路由、鉴权包装、响应工具、WebSocket 连接表与推送线程
+├── web_server.c/h     路由(表驱动)、鉴权包装、响应工具、WS 连接表(loop 私有)
 ├── web_auth.c/h       上位机凭据(device_config + PBKDF2)与登录风控
 ├── web_session.c/h    token 表:签发/校验(滑动续期)/注销/容量驱逐
 ├── frontend/          前端工程(Vue 3 + Vite;只在这里才需要 node/npm)
@@ -84,19 +85,22 @@ components/      纯展示:只吃 props、只发 emits(不 import store / api / 
 - 未授权 WS 连接**必须显式回 401 再拒**,否则客户端只看到连接被关,分不清"口令错"与"断网";
 - 前端用 **hash 路由**:设备端只提供固定资源表,不需要为前端路由配服务端回退。
 
-## WebSocket 推送模型(为什么不是"客户端 ping 排水")
+## WebSocket 推送模型(2026-09-22 起)
 
-原实现靠客户端每 2s 发 `ping` 触发连接线程排水,本质是用轮询掩盖跨线程写的不安全。
-现实现:`ws_pusher_thread` 常驻出队后广播。安全性靠两条同时成立:
-1. civetweb 的 `mg_websocket_write` 内部会 `mg_lock_connection`,写不会交错;
-2. 推送线程**持有连接表锁**做完整轮次写入,而连接销毁路径必须先进 `ws_close` 回调
-   摘除表项,因此写期间连接不可能被释放。
+总线回调只把消息入队,随后 `netcore_post` 让 **loop 线程**排空队列并逐连接
+`mg_ws_send`。安全性从结构上成立:连接表是 loop 线程私有结构(无锁),
+CLOSE 事件同线程摘除死连接,发送时连接必然存活;跨线程碰连接在
+netcore 契约下不存在。(历史上 civetweb 时代靠"推送线程 + 连接表锁 +
+连接锁"三条脆弱约定,已随库退役删除。)
 
 前端对应 `src/api/ws.js`:退避重连;第二次失败顺手探一次接口——会话失效时 HTTP 层回
 401,路由守卫把人送回登录页,而不是让用户对着一个不再更新的页面干等。
 
 ## 鉴权与风控
 
+- **单会话策略(2026-09-22)**:同一时刻只允许一个管理员在线——登录成功即
+  吊销其余全部会话;被踢方下一个请求/WS 重连得 401 回登录页(新登录必胜,
+  崩溃浏览器不占坑)
 - 凭据存 `device_config`:账号明文(展示用)+ PBKDF2-SHA256 盐/哈希(10000 迭代)。
   **不存明文、不落日志**;首启生成 `admin/admin` 并置 `pwd_default`,UI/上位机据此提示改密。
 - 账号/口令合法性走 `proto/valid.h`(与设备端用户同一份规则):设备菜单与上位机两个入口
@@ -128,7 +132,7 @@ door-guard/tests/web/web_test.sh                 # 63 项
 - **web_test.sh**:静态资源(含"服务端字节与仓库逐字节一致")、鉴权与方法约束、日志
   过滤/分页边界、NTP 异步 + WS 主动推送、账号口令修改、OTA 闭环、mDNS 报文、登录风控。
 
-## 踩过的坑(改这个模块前先看)
+## 踩过的坑(改这个模块前先看;1~3 为 civetweb 时代历史坑,迁移 mongoose 后不再适用,留作教训)
 
 1. **civetweb 在 OpenSSL 3 下 WebSocket 握手必崩**:`NO_SSL=1` 时它不包含 OpenSSL 头,
    却仍调 `EVP_Digest`/`EVP_get_digestbyname`,缺原型 → 返回指针被截成 int → 段错误。
@@ -150,6 +154,8 @@ door-guard/tests/web/web_test.sh                 # 63 项
 
 ## 已知边界 / 未完成
 
+- OTA 收包在统一事件循环内按 `ota_can_accept()` 限流喂入;极端慢盘顶到
+  mongoose 3MB 收包上限会显式断连,客户端以 X-OTA-Offset 续传(有界失败)
 - 页面文案只有中文(设备端 `ui/lang/*.json` 那套 i18n 未接入前端);要接的话在
   `frontend/src/` 加文案表即可。
 - 监控画面仍是占位:RTSP/MJPEG 要与 `capture_service` 对接(统一走 capture,不另开链路)。

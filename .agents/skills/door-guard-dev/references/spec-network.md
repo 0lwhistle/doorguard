@@ -4,8 +4,9 @@
 
 ## 1. web 上位机(HTTP + WebSocket)
 
-- 板上起内嵌 HTTP 服务(civetweb,单库 vendored;端口默认 **8080**,进 device_config
-  `web_port`)。前端是 **Vue 3 单页应用**(`services/web/frontend/`,Vite 构建),
+- 板上起内嵌 HTTP 服务(mongoose 7.23,跑在 `modules/net/netcore` 统一事件循环,
+  2026-09-22 起 civetweb 退役;端口默认 **8080**,进 device_config `web_port`,
+  OTA 上传端点同端口)。前端是 **Vue 3 单页应用**(`services/web/frontend/`,Vite 构建),
   产物同步到 `pages/` 再经 `gen_pages.sh` 生成资源表 `web_pages.c`,**两者都入库**:
   固件构建机不需要 node,只有改前端时才要 `./build_frontend.sh`
 - 前端分层纪律(由 `tests/web/frontend_check.py` 自动检查):
@@ -28,8 +29,11 @@
   | GET | `/api/ws` | `?token=` | WebSocket 推送 |
 
 - **实时门禁状态**:WebSocket 推送每次验证事件(时间/ID/姓名/方式/结果,与 access_logs 字段一致)
-  与 NTP 结果。推送由服务端独立线程主动发出——**不依赖客户端轮询**(原"客户端每 2s 发 ping
-  才排水"的方案已废弃,安全性靠连接表锁 + civetweb 连接锁保证,见 web 模块 README)
+  与 NTP 结果。总线回调入队 + netcore_post,由 loop 线程排空并逐连接
+  `mg_ws_send`——**不依赖客户端轮询**,且连接只在 loop 线程被碰(连接表无锁)
+- **单会话策略(2026-09-22)**:web 管理页同一时刻只允许一个管理员在线——
+  登录成功即吊销其余全部会话(新登录必胜,崩溃浏览器不占坑);被踢方下一个
+  请求 / WS 重连得 401,由前端路由守卫送回登录页
 - **账号管理**:
   - 设备菜单 → 设备管理 → **Web 管理**:显示服务状态与局域网访问地址、当前账号,
     可改账号 / 改口令(口令掩码输入 + 二次确认;账号与口令一起保存)
@@ -63,8 +67,9 @@
 
 ```
 主机脚本 dg-ota-upload <板IP> <升级包>
-  → POST /api/ota/upload 流式上传(应用内线程接收,落盘暂存文件
-    /tmp/ota_staging.bin,不占内存;支持 X-OTA-Offset 断点续传)
+  → POST /api/ota/upload 流式上传(与 web 上位机同一 mongoose 监听、同一
+    端口 8080;MG_EV_HTTP_HDRS + MG_EV_READ 增量喂入,按 ota_can_accept()
+    限流,64MB 包不进内存;落盘暂存 /tmp/ota_staging.bin,支持断点续传)
   → manifest 字段走 HTTP 请求头:X-OTA-Version / X-OTA-Size / X-OTA-SHA256
     (大小预检超 MAX 拒收;sha256 流式校验;不符即弃并报错)
   → 提交:校验闭环到暂存文件为止,**不写真实分区**(分区写入与 uboot env
@@ -72,7 +77,11 @@
 升级包:单文件流(镜像/固件包本体),manifest 信息由请求头携带
 ```
 
-- 板上监听是 door-guard 应用内线程(不是独立守护),端口默认 **9000**(device_config)
+- 监听在 door-guard 应用内(不是独立守护)。`ota_port` 独立端口方案已废弃
+  (2026-09-22:配置字段删除,OTA 复用 web_port 8080)——实现里从未起过 9000
+  监听,属文档先行、实现收窄
+- 极端慢盘时收包缓冲顶到 mongoose `MG_MAX_RECV_SIZE`(3MB)会显式断连,
+  客户端以 X-OTA-Offset 续传重试(有界失败 + 可恢复,不阻塞事件循环)
 - 主机脚本放仓库 `env/bin/dg-ota-upload`(bash+curl,`--progress-bar` 流式)
 - 升级前后动作:版本号写 access/设备信息接口,web 上位机可见当前版本与 A/B 槽位
 
@@ -92,11 +101,13 @@
 2. 菜单页 → 设备管理 → **NTP 时间矫正** 按钮手动触发
 3. web 上位机 → 设备管理 → **NTP 时间矫正** 按钮手动触发
 
-实现:rootfs 已带 chrony(后台常驻);"执行一次"= `chronyc burst 4/4 && chronyc waitsync 10`
-(或 equivalent),UI/上位机回显成功失败与当前时间;服务器地址 `ntp_server` 进 device_config。
-未联网时按钮置灰并提示"设备未联网"。
+实现(2026-09-22 起为**应用内 SNTP 客户端**,mongoose `mg_sntp_connect`,跑在
+netcore 统一事件循环):成功 `settimeofday` 步进写系统时间;服务器地址 `ntp_server`
+进 device_config。未联网(`net_info_is_online`)时触发直接失败返回,按钮置灰提示。
+**rootfs 侧需停用 chrony 常驻**(随固件 Phase 落地):两个东西同时调系统时间会打架;
+chrony 是持续 slew,SNTP 是一次步进,门禁场景接受步进(时间回拨对 access_logs
+展示顺序的影响以落库 ts 为准,界面查询按时间段过滤,不受影响)。
 
-装配要求(**踩过的坑**):`ntp_service_start()` 必须在 main 的 holder 表里注册。
+装配要求(**踩过的坑**,仍然有效):`ntp_service_start()` 必须在 main 的 holder 表里注册。
 只 include 头不初始化时 `s_running=false`,触发请求会被静默丢弃——表现是"按钮点了没反应",
-既不报错也没有结果事件。上位机侧的触发是异步的(POST 立即回 202,结果走 WebSocket),
-因为 `chronyc waitsync` 可阻塞十余秒,不能占住 HTTP 工作线程。
+既不报错也没有结果事件。上位机侧的触发是异步的(POST 立即回 202,结果走 WebSocket)。
