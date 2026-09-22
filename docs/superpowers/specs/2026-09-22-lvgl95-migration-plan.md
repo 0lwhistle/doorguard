@@ -88,11 +88,10 @@
 - 推板前交叉编译零告警;**部署后 md5 核对运行进程**(dg-deploy 写活动槽 + S60 回滚坑);
 - 板端卡死时 `pkill -x door-guard`(勿用 -f,会杀掉自己的 ssh)。
 
-## 8. 三对话执行分工(闲时任务)
+## 8. 执行形态(用户定版:单对话)
 
-- 协作协议/文件所有权/API 契约:**docs/superpowers/specs/lvgl9-migration-contract.md**(唯一权威)
-- 共享日志:**docs/lvgl9-migration-LOG.md**(开工读、收工写)
-- 分工与依赖:C1 基础与显示层(third_party/CMake/modules/display)→ C2 UI 层迁移(ui/**)
-  → C3 测试迁移+板端验收+性能回归(tests/、板端、DEVLOG)。串行依赖,前置 `[DONE]` 才开工;
-  对应本方案阶段 0-1 / 1-2 / 2-3。
-- 回退基线 tag:`lvgl9-baseline`。
+- 单对话顺序执行三阶段:C1 基础与显示层(阶段 0+2 后端)→ C2 UI 层迁移(阶段 1)→
+  C3 测试迁移+板端验收+性能回归(阶段 2-3);每阶段过契约 §6 门禁才进下一阶段。
+- 协作契约/文件边界/门禁:**docs/superpowers/specs/lvgl9-migration-contract.md**(唯一权威)
+- 阶段交接与回溯记录:**docs/lvgl9-migration-LOG.md**
+- 回退基线 tag:`lvgl9-baseline`;运行期回退通道:`DG_USE_LVGL9=OFF`。
