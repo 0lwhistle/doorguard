@@ -84,6 +84,17 @@ target_link_libraries(test_web_auth PRIVATE dg_storage dg_proto crypto pthread)
 add_test(NAME test_web_auth COMMAND test_web_auth)
 set_tests_properties(test_web_auth PROPERTIES TIMEOUT 60)
 
+# netcore:统一网络事件循环(启停/心跳/post 闭包投递;不建真实连接)
+# 直接编 netcore.c:整链 dg_net 会把过渡期的 civetweb 拖进来(mg_* 符号与 mongoose 冲突)
+add_executable(test_netcore test_netcore.c
+    ${CMAKE_SOURCE_DIR}/modules/net/netcore.c)
+target_include_directories(test_netcore PRIVATE
+    ${CMAKE_SOURCE_DIR}/modules/net ${CMAKE_SOURCE_DIR}/third_party/mongoose
+    ${CMAKE_SOURCE_DIR}/proto ${CMAKE_SOURCE_DIR}/components/logger)
+target_link_libraries(test_netcore PRIVATE mongoose dg_log pthread)
+add_test(NAME test_netcore COMMAND test_netcore)
+set_tests_properties(test_netcore PROPERTIES TIMEOUT 30)
+
 # OTA 按需写线程流水线(环形缓冲/校验闭环/断点续传/进度事件;DG_OTA_DIR=临时目录)
 add_executable(test_ota test_ota.c)
 target_include_directories(test_ota PRIVATE

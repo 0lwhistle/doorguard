@@ -240,6 +240,12 @@ add_library(dg_liveness STATIC services/liveness/liveness_service.c)
 target_include_directories(dg_liveness PUBLIC ${CMAKE_SOURCE_DIR}/services/liveness)
 target_link_libraries(dg_liveness PUBLIC dg_proto dg_config)
 
+# mongoose:第三方网络库(GPLv2/商业双许可,单文件 vendored;本项目按 GPLv2 开源路线使用)
+# 统一网络层的唯一传输引擎(web/OTA/NTP/mDNS 全走 modules/net 的 netcore 事件循环)
+add_library(mongoose STATIC third_party/mongoose/mongoose.c)
+target_include_directories(mongoose PUBLIC third_party/mongoose)
+target_compile_definitions(mongoose PRIVATE MG_ARCH=MG_ARCH_UNIX MG_ENABLE_TCPIP=0)
+
 # civetweb:第三方 HTTP/WebSocket 单库(MIT,vendored)
 add_library(civetweb STATIC third_party/civetweb/civetweb.c)
 target_include_directories(civetweb PUBLIC third_party/civetweb)
@@ -276,7 +282,8 @@ add_library(dg_net STATIC
     services/mdns/mdns_responder.c
     services/mdns/mdns_wire.c
 )
-target_include_directories(dg_net PUBLIC ${CMAKE_SOURCE_DIR}/services)
+target_include_directories(dg_net PUBLIC ${CMAKE_SOURCE_DIR}/services
+                                         ${CMAKE_SOURCE_DIR}/modules)
 target_link_libraries(dg_net PUBLIC dg_net_info)
 target_link_libraries(dg_net PUBLIC dg_access dg_storage civetweb crypto)
 
