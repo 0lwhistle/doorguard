@@ -29,6 +29,30 @@ static uint32_t smoke_tick_ms(void)
     return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
 }
 
+/* ---- LV_FONT_DEFAULT 占位 ----
+ * lv_conf9 的 LV_FONT_DEFAULT 指向 dg_font_cn_16(真身在 dg_ui,不链进
+ * smoke)。此占位同名声明的字形回调恒返回「无字形」,画面里所有文本都
+ * 显式指定 montserrat,占位永不参与渲染;仅满足链接符号引用 */
+static bool stub_get_glyph_dsc(const lv_font_t *font, lv_font_glyph_dsc_t *dsc,
+                               uint32_t letter, uint32_t letter_next)
+{
+    (void)font; (void)dsc; (void)letter; (void)letter_next;
+    return false;
+}
+
+static const void *stub_get_glyph_bitmap(lv_font_glyph_dsc_t *dsc, lv_draw_buf_t *buf)
+{
+    (void)dsc; (void)buf;
+    return NULL;
+}
+
+const lv_font_t dg_font_cn_16 = {
+    .get_glyph_dsc = stub_get_glyph_dsc,
+    .get_glyph_bitmap = stub_get_glyph_bitmap,
+    .line_height = 14,
+    .base_line = 2,
+};
+
 static void build_test_screen(void)
 {
     lv_obj_t *scr = lv_screen_active();
@@ -45,6 +69,7 @@ static void build_test_screen(void)
     lv_obj_t *sub = lv_label_create(scr);
     lv_label_set_text(sub, "door-guard display backend test");
     lv_obj_set_style_text_color(sub, lv_color_hex(0x9fb3c8), 0);
+    lv_obj_set_style_text_font(sub, &lv_font_montserrat_14, 0);
     lv_obj_align(sub, LV_ALIGN_TOP_MID, 0, 130);
 
     /* 圆角卡片 + 20 号文本 */
