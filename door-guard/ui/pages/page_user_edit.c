@@ -185,10 +185,10 @@ static void refresh(void)
     val_set(s_val_ic, _("无"));
     /* 头像预览:有人脸才有头像(同一生命周期);人脸行加高到 128,预览 96×96 */
     if (s_img_face) {
-        const lv_img_dsc_t *av = dg_avatar_get(s_uid, DG_AVATAR_FULL);
+        const lv_image_dsc_t *av = dg_avatar_get(s_uid, DG_AVATAR_FULL);
         if (av && rec.face_vec_len > 0) {
-            lv_img_set_src(s_img_face, av);
-            lv_img_set_zoom(s_img_face, (uint16_t)(256 * 96 / 160));
+            lv_image_set_src(s_img_face, av);
+            lv_image_set_scale(s_img_face, (uint16_t)(256 * 96 / 160));
             lv_obj_update_layout(s_img_face);
             lv_obj_clear_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
         } else {
@@ -465,7 +465,7 @@ void page_user_edit_create(lv_obj_t *parent)
      * 会滑进右侧「修改」按钮底下(布局重叠),加高 + 右移让开按钮 */
     lv_obj_t *face_row = row_create_h(col, _("人脸"), &s_val_face, &s_btn_face, 128);
     lv_obj_add_event_cb(s_btn_face, on_face, LV_EVENT_CLICKED, NULL);
-    s_img_face = lv_img_create(face_row);
+    s_img_face = lv_image_create(face_row);
     /* 不加边框:zoom 只缩小绘制,部件包围盒仍是 160×160,边框会画到行外 */
     lv_obj_align(s_img_face, LV_ALIGN_RIGHT_MID, -218, 0);
     lv_obj_add_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);

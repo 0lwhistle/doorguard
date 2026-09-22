@@ -44,7 +44,7 @@ static void on_logs(lv_event_t *e)
 static lv_obj_t *cell_create(lv_obj_t *parent, const char *icon, const char *label,
                              lv_event_cb_t open)
 {
-    lv_obj_t *cell = lv_btn_create(parent);
+    lv_obj_t *cell = lv_button_create(parent);
     lv_obj_set_size(cell, (DG_SCREEN_W - 3 * DG_PAD) / 2, 380);
     lv_obj_set_style_radius(cell, DG_RADIUS * 2, 0);
     lv_obj_set_style_bg_color(cell, DG_COL_BG_LIGHT(), 0);

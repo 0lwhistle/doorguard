@@ -1,5 +1,5 @@
 /*
- * port.h — UI 平台端口(时基供 lv_conf LV_TICK_CUSTOM 引用)
+ * port.h — UI 平台端口(时基经 lv_tick_set_cb 注入 LVGL)
  */
 #ifndef DG_UI_PORT_H
 #define DG_UI_PORT_H
@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-/** LVGL 毫秒时基(CLOCK_MONOTONIC;lv_conf.h LV_TICK_CUSTOM 引用) */
+/** LVGL 毫秒时基(CLOCK_MONOTONIC;v9 由 ui_init 经 lv_tick_set_cb 注入) */
 uint32_t dg_ui_tick_ms(void);
 
 #ifdef __cplusplus

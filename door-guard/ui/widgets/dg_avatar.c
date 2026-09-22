@@ -2,7 +2,7 @@
  * dg_avatar.c — 头像显示控件实现
  *
  * 链路:db_user_get_avatar(自动解密)→ dg_jpeg_decode_rgb(缩放解码)→
- * RGB888 转 lv_color_t(XRGB8888,与 LV_COLOR_DEPTH=32 一致)→ lv_img_dsc_t。
+ * RGB888 转 lv_color_t(XRGB8888,与 LV_COLOR_DEPTH=32 一致)→ lv_image_dsc_t。
  *
  * 缓存策略:按 size 分池(FULL 2 槽 / THUMB 8 槽),uid 命中即返,
  * 不命中轮转覆盖——列表页 6 行 + 编辑页 1 张,池容量就是按这个页面结构定的,
@@ -25,7 +25,7 @@
 
 typedef struct {
     char uid[DG_UID_LEN];
-    lv_img_dsc_t dsc;
+    lv_image_dsc_t dsc;
     uint8_t *px;                        /* malloc 的像素缓冲,dsc.data 指向它 */
     bool used;
 } slot_t;
@@ -58,7 +58,7 @@ static void rgb_to_lv(const uint8_t *rgb, int n, lv_color_t *out)
     }
 }
 
-static const lv_img_dsc_t *load_into(slot_t *s, const char *uid)
+static const lv_image_dsc_t *load_into(slot_t *s, const char *uid)
 {
     size_t jlen = 0;
     const int denom = (s->dsc.header.w == THUMB_MAX) ? 4 : 1;
@@ -90,18 +90,19 @@ static const lv_img_dsc_t *load_into(slot_t *s, const char *uid)
     rgb_to_lv(s_rgb, w * h, (lv_color_t *)s->px);
 
     memset(&s->dsc, 0, sizeof(s->dsc));
-    s->dsc.header.always_zero = 0;
+    s->dsc.header.magic = LV_IMAGE_HEADER_MAGIC;  /* v9:set_src 靠 magic 识别内存位图 */
     s->dsc.header.w = (uint32_t)w;
     s->dsc.header.h = (uint32_t)h;
+    s->dsc.header.stride = (uint32_t)w * sizeof(lv_color_t);
     s->dsc.data_size = (uint32_t)((size_t)w * h * sizeof(lv_color_t));
-    s->dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
+    s->dsc.header.cf = LV_COLOR_FORMAT_XRGB8888;
     s->dsc.data = s->px;
     snprintf(s->uid, sizeof(s->uid), "%s", uid);
     s->used = true;
     return &s->dsc;
 }
 
-const lv_img_dsc_t *dg_avatar_get(const char *uid, dg_avatar_size_t size)
+const lv_image_dsc_t *dg_avatar_get(const char *uid, dg_avatar_size_t size)
 {
     if (!uid || !uid[0])
         return NULL;

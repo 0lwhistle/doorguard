@@ -10,6 +10,59 @@
 - 阻塞:…
 - 交接:C2 注意 …
 ---
+## 2026-09-23 01:35 C2-UI层迁移 [DONE]
+
+- **做了**:
+  1. ui/ 全量 API 迁移(机械改名,契约 §3 映射表逐条头文件实测):lv_img_*→lv_image_*
+     (create/set_src/antialias/pivot/zoom→scale,256 基准不变)、lv_scr_act→
+     lv_screen_active、lv_obj_del→lv_obj_delete、lv_timer_del→lv_timer_delete、
+     lv_btn_create→lv_button_create、lv_list_add_btn→lv_list_add_button、
+     lv_img_dsc_t→lv_image_dsc_t;涉及 ui.c/navigator/bridge 外全部 pages+widgets。
+  2. **v9 image 描述符新语义**(dg_avatar/dg_preview):header.always_zero 取消,
+     改设 `header.magic = LV_IMAGE_HEADER_MAGIC`(v9 set_src 靠 magic 识别内存位图,
+     不设则识别成文件路径);新增 header.stride(=w*4);cf 用
+     LV_COLOR_FORMAT_XRGB8888。20ms 泵/seq 去重/整帧 invalidate 的擦除语义保持原样。
+  3. 时基:ui_init 在 display_init **之后** lv_tick_set_cb(dg_ui_tick_ms)
+     (v9 DRM 驱动 create 时先装自己的时基,顺序天然正确);port.h 注释同步。
+  4. 字体:gen.sh 用 npx 最新 lv_font_conv 重生成 dg_font_cn_16(4359 行);
+     产物对 v8/v9 头均语法通过(实测 lv_font_fmt_txt 结构两代兼容);
+     lv_conf9 切 LV_FONT_DEFAULT=&dg_font_cn_16 + LV_FONT_CUSTOM_DECLARE。
+  5. CMake:解除 C1 的 dg_ui/door-guard 守卫;sim 后端加 DG_SIM_DUMP_AFTER
+     (第 N 刷新周期导图,九页走查取证用)。
+  6. 九页+弹窗走查(sim,WSLg 实跑):主页/待机/菜单/用户管理/用户编辑/拍摄/
+     设备/门禁设置/日志/web 设置 10 图 + 结果弹窗/ID 输入键盘 2 图,存
+     `deliverables/lvgl9-c2-walkthrough/`(12 PNG)。走查方法:管理员闸 mock 不可过
+     (role 硬编码 NORMAL),沿用上轮「宿主直接渲染同页」验收思路,临时工具
+     (/tmp/ui9_walk.c,未入库)+ CMake 临时目标(已撤销)逐页 navigator_switch 导图。
+  7. **语义差异清单(v8.3→v9.5,本仓实际遇到)**:
+     - image header 结构重排(magic/stride 新增,always_zero 删除);
+     - lv_timer_del→lv_timer_delete、lv_obj_del→lv_obj_delete(-ete 后缀);
+     - lv_img_set_zoom→lv_image_set_scale(基准同样 256=1x,类型 uint16→uint32);
+     - 时基 LV_TICK_CUSTOM(编译期宏)→ lv_tick_set_cb(运行期,有时序要求);
+     - theme 默认初始化两代都由 display 创建自动完成,本仓 ui 未显式调用,
+       观感一致性靠每控件显式 style(smoke 入口显式调用已用 v9 参数序);
+     - image 内存位图必须 magic+stride,否则 set_src 误判;
+     - 字体位图格式 lv_font_fmt_txt 两代源码兼容,gen.sh 无需 --lv-version 类参数;
+     - 内置 NEON 为 C 内联(arm_neon.h),单 conf 双端必须平台条件编译。
+  8. **附带修复(既有 bug,非迁移回归)**:page_logs 分页按钮 prev/next 坐标
+     (0/+80)本就重叠,改 -85/+85。
+- **门禁**:①v9 下整个 app sim+交叉 clean 编译**零告警**;②12 图走查留档(上表);
+  ③字体 v9 工具重生成完成;④dg-test 非 LVGL 用例 **29/29**(widgets/i18n 仍按 C1
+  守卫排除,C3 解除);⑤语义差异清单见上;⑥本条目。
+- **阻塞**:无。
+- **交接(C3 必读)**:
+  - **回退通道变化**:ui/ 已 v9-only(方案 D5 不做双栈),`DG_USE_LVGL9=OFF` 从此
+    编不过 dg_ui——运行期回退 = `git checkout lvgl9-baseline`(终极回退,契约 §5)。
+    OFF 模式下非 UI 库仍可编(C1 已验证),但整 app 不再可用。
+  - test_widgets/test_i18n 仍是 v8 API(C3 迁移);解除 tests/CMakeLists.txt 守卫时
+    注意 test_touch_evdev 的 v9 分支已链 dg_ui(字体符号)。
+  - dg-test 的 build-tests 目录若残留 OFF 缓存会拿 v8 头编 v9 ui 而报错——
+    `dg-test -c` 清缓存即可。
+  - sim 走查截图里「张三」等**用户数据**字符显示 □□ 为既有行为(字体只收
+    lang/*.json 的 UI 字符集),非迁移回归。
+  - 板端待验证(C3):v9 DRM atomic 翻转在 RK3576 的实测表现、NEON 实际生效、
+    触摸按下沿、性能基线对比(fps/CPU/NEON A/B)。
+---
 ## 2026-09-23 01:05 C1-基础与显示层 [DONE]
 
 - **做了**:

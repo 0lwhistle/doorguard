@@ -59,6 +59,9 @@ int ui_init(const dg_ui_args_t *args)
     int rc = display_init();
     if (rc != DG_OK)
         return rc;
+    /* v9 时基:lv_tick_set_cb 注入(8.3 经 LV_TICK_CUSTOM)。必须在
+     * display_init 之后:v9 DRM 驱动 create 时会先装自己的时基 */
+    lv_tick_set_cb(dg_ui_tick_ms);
 
     const char *lang = cfg_get()->language;
     i18n_init(args ? args->lang_dir : "lang");
@@ -67,7 +70,7 @@ int ui_init(const dg_ui_args_t *args)
     if (lang && strcmp(lang, "zh-CN") != 0)
         i18n_set_language(lang);
 
-    s_page_root = lv_obj_create(lv_scr_act());
+    s_page_root = lv_obj_create(lv_screen_active());
     lv_obj_remove_style_all(s_page_root);
     lv_obj_set_size(s_page_root, DG_SCREEN_W, DG_SCREEN_H);
     navigator_init(s_page_root);

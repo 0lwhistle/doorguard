@@ -22,8 +22,8 @@ static void close_internal(void)
     if (s_popup) {
         lv_timer_t *t = lv_obj_get_user_data(s_popup);
         if (t)
-            lv_timer_del(t);            /* 悬挂定时器先清(一次性定时器触发中不受影响) */
-        lv_obj_del(s_popup);
+            lv_timer_delete(t);            /* 悬挂定时器先清(一次性定时器触发中不受影响) */
+        lv_obj_delete(s_popup);
         s_popup = NULL;
     }
 }
@@ -106,7 +106,7 @@ static void result_timer_cb(lv_timer_t *t)
     void (*cb)(void *) = s_result.on_close;
     void *ud = s_result.ud;
     if (s_popup) {
-        lv_obj_del(s_popup);    /* 一次性定时器回调后由 LVGL 自删,勿在 del 路径再删 */
+        lv_obj_delete(s_popup);    /* 一次性定时器回调后由 LVGL 自删,勿在 del 路径再删 */
         s_popup = NULL;
     }
     if (cb)

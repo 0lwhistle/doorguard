@@ -39,7 +39,7 @@ static void destroy_current(void)
         cur->on_exit();
     lv_obj_t *obj = lv_obj_get_child(s_root, 0);
     if (obj)
-        lv_obj_del(obj);
+        lv_obj_delete(obj);
     if (cur->destroy)
         cur->destroy();
 }
@@ -141,7 +141,7 @@ nav_err_t navigator_reload(void)
         cur->on_exit();
     lv_obj_t *obj = lv_obj_get_child(s_root, 0);
     if (obj)
-        lv_obj_del(obj);
+        lv_obj_delete(obj);
     if (cur->destroy)
         cur->destroy();
     create_page(cur);

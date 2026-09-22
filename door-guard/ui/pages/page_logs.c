@@ -171,12 +171,12 @@ void page_logs_create(lv_obj_t *parent)
 
     lv_obj_t *prev = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("上一页"));
     lv_obj_set_size(prev, 150, DG_BTN_H);
-    lv_obj_align(prev, LV_ALIGN_BOTTOM_MID, 0, -DG_PAD);
+    lv_obj_align(prev, LV_ALIGN_BOTTOM_MID, -85, -DG_PAD); /* 修与下一页重叠(既有坐标 bug,非迁移回归) */
     lv_obj_add_event_cb(prev, on_prev, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *next = dg_btn_create_light(parent, LV_SYMBOL_RIGHT, _("下一页"));
     lv_obj_set_size(next, 150, DG_BTN_H);
-    lv_obj_align(next, LV_ALIGN_BOTTOM_MID, 80, -DG_PAD);
+    lv_obj_align(next, LV_ALIGN_BOTTOM_MID, 85, -DG_PAD);
     lv_obj_add_event_cb(next, on_next, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));

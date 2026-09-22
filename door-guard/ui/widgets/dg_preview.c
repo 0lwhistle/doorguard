@@ -21,7 +21,7 @@ typedef struct {
     bool plane;                /* true=硬件 plane 直通;false=软渲染回退 */
     /* 软渲染路径状态 */
     lv_obj_t *img;             /* 回退路径的 lv_img 控件 */
-    lv_img_dsc_t dsc;
+    lv_image_dsc_t dsc;
     uint32_t *buf;
     int32_t bw, bh;
     int32_t fw, fh;
@@ -81,20 +81,22 @@ static void fallback_setup(st_t *st, const camera_frame_t *f)
     st->fh = f->h;
 
     memset(&st->dsc, 0, sizeof(st->dsc));
-    st->dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
+    st->dsc.header.magic = LV_IMAGE_HEADER_MAGIC;  /* v9:set_src 靠 magic 识别内存位图 */
+    st->dsc.header.cf = LV_COLOR_FORMAT_XRGB8888;
     st->dsc.header.w = (uint32_t)st->bw;
     st->dsc.header.h = (uint32_t)st->bh;
+    st->dsc.header.stride = (uint32_t)st->bw * 4;
     st->dsc.data = (const uint8_t *)st->buf;
     st->dsc.data_size = (size_t)st->bw * st->bh * 4;
 
     if (!st->img)
         return;
-    lv_img_set_src(st->img, &st->dsc);
-    lv_img_set_antialias(st->img, false);
-    lv_img_set_pivot(st->img, st->bw / 2, st->bh / 2);
+    lv_image_set_src(st->img, &st->dsc);
+    lv_image_set_antialias(st->img, false);
+    lv_image_set_pivot(st->img, st->bw / 2, st->bh / 2);
     int32_t zx = ((int32_t)256 * DG_SCREEN_W + st->bw / 2) / st->bw;
     int32_t zy = ((int32_t)256 * DG_SCREEN_H + st->bh / 2) / st->bh;
-    lv_img_set_zoom(st->img, (uint16_t)(zx > zy ? zx : zy));
+    lv_image_set_scale(st->img, (uint16_t)(zx > zy ? zx : zy));
     lv_obj_center(st->img);
 }
 
@@ -152,8 +154,8 @@ lv_obj_t *dg_preview_create(lv_obj_t *parent, const char *log_tag)
         camera_rgb_preview_set(false);       /* XRGB 转换不再需要,省一次 RGA */
         DG_LOGI(st->tag, "preview=video-plane 直通");
     } else {
-        p = lv_img_create(parent);
-        lv_img_set_antialias(p, false);
+        p = lv_image_create(parent);
+        lv_image_set_antialias(p, false);
         st->img = p;
         camera_rgb_preview_set(true);
         DG_LOGI(st->tag, "preview=软渲染回退");

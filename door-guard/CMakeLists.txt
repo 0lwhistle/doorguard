@@ -136,8 +136,7 @@ else()
 endif()
 
 # ---- UI 子系统(theme/i18n/widgets/page_mgr/字体) ----
-# v9 模式暂不编 ui/(C1 时点 ui/ 仍是 v8 API;C2 迁移完成后解除本守卫)
-if(NOT DG_USE_LVGL9)
+# (C2 起随 LVGL9 编译;上方守卫已于 ui/ 迁移完成时解除)
 file(GLOB DG_WIDGET_SRCS ui/widgets/*.c)
 add_library(dg_ui STATIC
     ui/ui.c
@@ -173,7 +172,6 @@ add_library(dg_ui STATIC
 target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DIR}/services/access)
 target_link_libraries(dg_ui PUBLIC lvgl dg_config dg_access dg_storage dg_jpeg
                                    dg_net_info)
-endif()
 
 # access:验证状态机 + 认证融合服务(FSM 持有者,日志/开门唯一出口)
 add_library(dg_access STATIC
@@ -388,8 +386,6 @@ endif()
 # 可执行文件里烧进 RPATH=/external/iva/...(板上实测 ENOENT 但无害);已移除。
 include_directories(${CMAKE_SOURCE_DIR})
 
-# v9 模式暂不出应用产物(ui/ 迁移完成后解除,与上方 dg_ui 守卫同步)
-if(NOT DG_USE_LVGL9)
 add_executable(door-guard app/main.c)
 # 组件链入应用:装配顺序在 app/main.c(architecture.md §1,main.c 头注同步维护)。
 # --group:lv_conf 时基(LV_TICK_CUSTOM)回引 ui/port.c 而部分 lvgl 成员又被 ui
@@ -402,7 +398,6 @@ target_link_libraries(door-guard PRIVATE
 
 if(DG_SIM)
     target_compile_definitions(door-guard PRIVATE DG_SIM=1)
-endif()
 endif()
 # rockiva     # 官方人脸库(B7 阶段启用)
 # sqlite3     # 存储(启用 storage HAL 时)

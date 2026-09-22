@@ -16,7 +16,7 @@ lv_obj_t *dg_list_create(lv_obj_t *parent)
 lv_obj_t *dg_list_add_row(lv_obj_t *list, const void *icon, const char *text,
                           void (*on_click)(lv_event_t *e))
 {
-    lv_obj_t *row = lv_list_add_btn(list, icon, text);
+    lv_obj_t *row = lv_list_add_button(list, icon, text);
     lv_obj_set_style_text_font(row, DG_FONT_CN, 0);
     lv_obj_set_style_bg_color(row, DG_COL_BG_LIGHT(), 0);
     lv_obj_set_style_radius(row, DG_RADIUS, 0);

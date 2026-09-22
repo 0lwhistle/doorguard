@@ -71,9 +71,9 @@
 #define LV_FONT_MONTSERRAT_28 1
 #define LV_FONT_MONTSERRAT_48 1
 
-/* C2 字体重生成后改为:LV_FONT_CUSTOM_DECLARE extern const lv_font_t dg_font_cn_16;
- * LV_FONT_DEFAULT &dg_font_cn_16(与 8.3 相同) */
-#define LV_FONT_DEFAULT &lv_font_montserrat_14
+/* C2 字体重生成完成(v9 工具重跑 gen.sh),默认字体与 8.3 相同 */
+#define LV_FONT_CUSTOM_DECLARE extern const lv_font_t dg_font_cn_16;
+#define LV_FONT_DEFAULT &dg_font_cn_16
 
 /*==================
    WIDGETS / THEMES / LAYOUTS

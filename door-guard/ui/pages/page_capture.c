@@ -99,7 +99,7 @@ static void wait_timeout_cb(lv_timer_t *t)
 static void wait_start(void)
 {
     if (s_wait_timer)
-        lv_timer_del(s_wait_timer);
+        lv_timer_delete(s_wait_timer);
     s_wait_timer = lv_timer_create(wait_timeout_cb, 5000, NULL);
     lv_timer_set_repeat_count(s_wait_timer, 1);
 }
@@ -107,7 +107,7 @@ static void wait_start(void)
 static void wait_cancel(void)
 {
     if (s_wait_timer) {
-        lv_timer_del(s_wait_timer);
+        lv_timer_delete(s_wait_timer);
         s_wait_timer = NULL;
     }
 }
@@ -152,9 +152,9 @@ static void set_state_review(void)
     hint_set(_("已拍摄"), DG_COL_OK());
 
     /* 刚入库的照片从 DB 读回(dg_avatar 缓存已失效,必定是新图) */
-    const lv_img_dsc_t *dsc = dg_avatar_get(s_uid, DG_AVATAR_FULL);
+    const lv_image_dsc_t *dsc = dg_avatar_get(s_uid, DG_AVATAR_FULL);
     if (dsc && s_photo) {
-        lv_img_set_src(s_photo, dsc);
+        lv_image_set_src(s_photo, dsc);
         lv_obj_clear_flag(s_photo, LV_OBJ_FLAG_HIDDEN);
     } else if (s_photo) {
         lv_obj_add_flag(s_photo, LV_OBJ_FLAG_HIDDEN);
@@ -286,7 +286,7 @@ void page_capture_create(lv_obj_t *parent)
     lv_obj_align(s_hint, LV_ALIGN_TOP_MID, 0, 64);
 
     /* 回看照片:白底描边小窗,盖在预览之上(160×160 原尺寸) */
-    s_photo = lv_img_create(parent);
+    s_photo = lv_image_create(parent);
     lv_obj_set_style_border_width(s_photo, 4, 0);
     lv_obj_set_style_border_color(s_photo, DG_COL_OK(), 0);
     lv_obj_set_style_radius(s_photo, 8, 0);
@@ -321,7 +321,7 @@ void page_capture_destroy(void)
 {
     DG_LOGI("[CAPTURE]", "page destroy");
     if (s_pump_timer) {
-        lv_timer_del(s_pump_timer);
+        lv_timer_delete(s_pump_timer);
         s_pump_timer = NULL;
     }
     wait_cancel();

@@ -20,7 +20,7 @@ static void style_init(lv_obj_t *btn, lv_color_t bg, lv_color_t bg_pressed)
 
 lv_obj_t *dg_btn_create(lv_obj_t *parent, const char *icon, const char *label)
 {
-    lv_obj_t *btn = lv_btn_create(parent);
+    lv_obj_t *btn = lv_button_create(parent);
     style_init(btn, DG_COLOR_PRIM(), DG_COLOR_DARKC());
 
     lv_obj_t *row = lv_obj_create(btn);
@@ -45,7 +45,7 @@ lv_obj_t *dg_btn_create(lv_obj_t *parent, const char *icon, const char *label)
 
 lv_obj_t *dg_btn_create_light(lv_obj_t *parent, const char *icon, const char *label)
 {
-    lv_obj_t *btn = lv_btn_create(parent);
+    lv_obj_t *btn = lv_button_create(parent);
     style_init(btn, DG_COL_BG_LIGHT(), DG_COLOR_PRIM());
 
     lv_obj_t *row = lv_obj_create(btn);

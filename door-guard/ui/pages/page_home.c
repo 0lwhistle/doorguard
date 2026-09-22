@@ -163,11 +163,11 @@ void page_home_destroy(void)
 {
     DG_LOGI("[HOME]", "page destroy");
     if (s_pump_timer) {
-        lv_timer_del(s_pump_timer);
+        lv_timer_delete(s_pump_timer);
         s_pump_timer = NULL;
     }
     if (s_status_timer) {
-        lv_timer_del(s_status_timer);
+        lv_timer_delete(s_status_timer);
         s_status_timer = NULL;
     }
     dg_preview_destroy(s_preview);

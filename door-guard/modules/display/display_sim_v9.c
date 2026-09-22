@@ -44,24 +44,35 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
     dump_once_if_requested();
 }
 
-/* DG_SIM_DUMP_BMP=路径:首个刷新周期(最后一块脏区)后导图一次 */
+/* DG_SIM_DUMP_BMP=路径:导图目标。首个刷新周期(最后一块脏区)后导图一次。
+ * DG_SIM_DUMP_AFTER=<n>:改在第 n 个刷新周期导(九页走查工具逐页指定);
+ * 转储完成即自清 DG_SIM_DUMP_BMP,保证「一次一图」 */
 static void dump_once_if_requested(void)
 {
-    static bool done = false;
-    const char *path = getenv("DG_SIM_DUMP_BMP");
-    if (done || path == NULL || path[0] == '\0' ||
-        !lv_display_flush_is_last(s_disp))
+    if (!lv_display_flush_is_last(s_disp))
         return;
-    done = true;                            /* 只试一次,失败不重试不阻塞 */
+    const char *path = getenv("DG_SIM_DUMP_BMP");
+    if (path == NULL || path[0] == '\0')
+        return;
+    static uint32_t cycle_cnt;
+    const char *after = getenv("DG_SIM_DUMP_AFTER");
+    if (after != NULL && after[0] != '\0') {
+        long n = atol(after);
+        if (n > 0 && ++cycle_cnt < (uint32_t)n)
+            return;
+        cycle_cnt = 0;
+    }
 
     int w = 0, h = 0;
     if (SDL_QueryTexture(s_tex, NULL, NULL, &w, &h) != 0) {
         DG_LOGW(TAG, "导图跳过: %s", SDL_GetError());
+        setenv("DG_SIM_DUMP_BMP", "", 1);
         return;
     }
     void *pixels = malloc((size_t)w * h * 4);
     if (!pixels) {
         DG_LOGW(TAG, "导图跳过: 内存不足");
+        setenv("DG_SIM_DUMP_BMP", "", 1);
         return;
     }
     const int pitch = w * 4;
@@ -69,6 +80,7 @@ static void dump_once_if_requested(void)
                              pixels, pitch) != 0) {
         DG_LOGW(TAG, "导图跳过(读回失败): %s", SDL_GetError());
         free(pixels);
+        setenv("DG_SIM_DUMP_BMP", "", 1);
         return;
     }
     SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormatFrom(
@@ -78,9 +90,10 @@ static void dump_once_if_requested(void)
         SDL_FreeSurface(surf);
     free(pixels);
     if (save == 0)
-        DG_LOGI(TAG, "首帧已导出 %s", path);
+        DG_LOGI(TAG, "画面已导出 %s", path);
     else
         DG_LOGW(TAG, "导图失败: %s", SDL_GetError());
+    setenv("DG_SIM_DUMP_BMP", "", 1);      /* 一次性:转储后自清 */
 }
 
 /* SDL 鼠标 → LVGL 指针(模拟触摸) */

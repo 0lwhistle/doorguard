@@ -146,7 +146,8 @@ if(DG_USE_LVGL9)
     target_include_directories(test_touch_evdev PRIVATE
         ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
         ${CMAKE_SOURCE_DIR}/third_party/lvgl9)
-    target_link_libraries(test_touch_evdev PRIVATE lvgl dg_log)
+    # dg_ui:lv_conf9 的 LV_FONT_DEFAULT=dg_font_cn_16,lvgl 核心引用该符号
+    target_link_libraries(test_touch_evdev PRIVATE lvgl dg_ui dg_log)
 else()
     target_include_directories(test_touch_evdev PRIVATE
         ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto

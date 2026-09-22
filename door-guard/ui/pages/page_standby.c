@@ -61,7 +61,7 @@ void page_standby_create(lv_obj_t *parent)
 void page_standby_destroy(void)
 {
     if (s_timer) {
-        lv_timer_del(s_timer);
+        lv_timer_delete(s_timer);
         s_timer = NULL;
     }
     s_clock = NULL;
