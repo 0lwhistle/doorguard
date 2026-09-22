@@ -19,6 +19,8 @@
 
 - CMake 开关:**`DG_USE_LVGL9`**(ON/OFF)。C1 完成时置 ON 并默认 ON;OFF = 完整回退 8.3。
 - v9 源码位置:`third_party/lvgl9`(include 根,`#include "lvgl.h"` 路径不变,ui 层源码零 include 改动)。
+  **LVGL 9.5 源码由用户手动放入 third_party**;若实际目录名/结构与契约不同,C1 以实际为准适配
+  include 根并在日志确认;缺失或残缺 → 记 [BLOCKED] 找用户,不得自行下载替代。
 - lv_conf:9.5 conf 放 `third_party/lvgl9/lv_conf.h`;关键项:LV_COLOR_DEPTH 32、
   `LV_DRAW_SW_ASM_NEON` 开(aarch64)、字体 montserrat 14/20/28/48 + 沿用 8.3 conf 的字号集合、
   内存策略与 8.3 等价、LV_USE_OS = NONE(单线程主循环)。
@@ -66,3 +68,14 @@
 - 任一对话把仓库带入不可用状态:`git checkout lvgl9-baseline -- <你拥有路径>` 回滚自己的范围。
 - 板端部署纪律:`dg-deploy` 后 **md5 核对运行进程**;卡死 `pkill -x door-guard`(勿 -f);
   七页走查重点:切页残影(上轮 video plane 的教训)、弹窗、中文渲染。
+
+## 6. 门禁(准入/准出,不满足即 [BLOCKED] 或不许标 DONE)
+
+**git 纪律(三个对话通用)**:一切 git 操作在 WSL 仓库 `/home/olwhistle/doorguard` 下执行;
+开工先 `git pull`;收工 commit+push。**只有 C3 允许上板操作(dg-deploy)**,C1/C2 不碰板子。
+
+| 对话 | 准入(不满足 → 只做准备/记 BLOCKED 结束) | 准出(全部满足才可标 [DONE]) |
+|---|---|---|
+| C1 基础与显示层 | ①LVGL9.5 文件已在 third_party(路径/完整性核对)②master 干净 ③tag lvgl9-baseline 存在 | ①DG_USE_LVGL9=ON:sim+交叉编译零告警,最小渲染入口验证通过 ②=OFF:旧栈全量照常编译 ③dg-test 不倒退(v9 模式下 ui 相关可排除,日志写明)④display.h 零改动(git diff 验证)⑤日志 [DONE]+push |
+| C2 UI 层迁移 | ①日志 C1 [DONE] ②DG_USE_LVGL9=ON 最小入口可编译 | ①=ON 下整个 app(sim,不含 test_widgets/test_i18n)编译零告警 ②九页 sim 走查截图留档 ③dg_font_cn_16 用 v9 工具重生成 ④非 LVGL 的 dg-test 用例不倒退 ⑤语义差异清单入日志 ⑥[DONE]+push。**不上板** |
+| C3 测试与板端验收 | ①日志 C2 [DONE] ②=ON 下全 app sim 编译零告警 | ①WSL 交叉编译零告警 ②test_widgets/test_i18n 迁 v9,dg-test 全量 31/31 绿 ③板端部署(md5 核对)+七页真机走查+无残影专项+触摸 ④性能报告(fps≥27 目标≥30、CPU≤基线、NEON A/B)⑤DEVLOG/PROJECT_PLAN 更新 ⑥[DONE]+push。回退通道:不可修 → DG_USE_LVGL9=OFF 或 checkout lvgl9-baseline,如实记录 |
