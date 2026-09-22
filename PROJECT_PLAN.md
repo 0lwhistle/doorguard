@@ -22,7 +22,10 @@ Overlay plane(zpos=0 underlay),预览 30fps 零 CPU(整机 CPU 降至单核 20%)
 LVGL 改 direct+原位补丁;dg_preview 控件双模(plane/软渲染自动降级);透明根页面
 (主页/拍摄页)+ navigator 页容器默认不透明底;lv_color_mix alpha 真实混合补丁。
 硬件结论:Esmart/Cluster 均无 90° 硬件旋转(RGA 预旋转),VOP2 plane/Mali/dma_heap
-详见 DEV_HANDBOOK §2;排查坑与验收数据见 DEVLOG 2026-09-22(深夜)。 |
+详见 DEV_HANDBOOK §2;排查坑与验收数据见 DEVLOG 2026-09-22(深夜)。⑤f 后记:同日深夜发现 LVGL8.3 透明层"擦除语义缺失"(人脸框残影堆积、待机不透明
+黑底不落 fb),修复三轮未果,已按授权回退显示架构至 full_refresh(27fps 无残影基线
+恢复);video plane 全套实现保留 git f519b1e,**LVGL9.5 迁移方案已立**
+(docs/superpowers/specs/2026-09-22-lvgl95-migration-plan.md),迁移后重启。 |
 
 ---
 

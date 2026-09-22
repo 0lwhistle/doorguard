@@ -110,7 +110,7 @@ JSON,`face_model_tag` 遗留键以 cur_config.json 的 face.model_tag 为准);
 - **已定位(2026-09-18 B6)**:IMX415(cam2 口,实体名 `m02_b_imx415 8-0037`)→ rkcif → **rkisp-vir2 = /dev/media5**,mainpath = **/dev/video51**;实体名查法 `cat /sys/class/video4linux/v4l-subdev*/name`
 - 两条取流路径:
   - **rkcif 直采**:RAW10 裸帧(无 3A),仅用于验证传感器出图
-  - **rkisp + rkaiq 3A**:正式成像路径,**已打通**(door-guard 在用):V4L2 单平面 NV12 1280x720 → 双消费:①**video plane 直通(2026-09-22 起主线)**:RGA 旋转90→NV12 写 dma-heap(CMA,4 槽)→ `camera_latest_dmabuf` → VOP2 Overlay plane 硬件合成(预览零 CPU,30fps);②软渲染回退:RGA 转 XRGB → LVGL(plane 不可用时自动降级)。视觉(NPU)走 NV12 CPU 指针路径,与直通并存互不影响。⚠️ 3 个死坑:uAPI2 参数是传感器实体名(非 media 节点,传错段错误);aiq2.lock 死锁需"取流线程与 prepare 并发会合";librga 成功码有两个——详见 door-guard/modules/camera/README.md
+  - **rkisp + rkaiq 3A**:正式成像路径,**已打通**(door-guard 在用):V4L2 单平面 NV12 1280x720 → RGA 旋转90+转 XRGB → LVGL(软渲染 27fps,当前主线)。②**video plane 直通已实现并实测 30fps 零 CPU,因 LVGL8.3 透明擦除语义缺失(残影)回退**,实现见 git f519b1e,待 LVGL9.5 迁移后重启( dma-heap 直通池代码已在,按需激活零开销)。视觉(NPU)走 NV12 CPU 指针路径不变。⚠️ 3 个死坑:uAPI2 参数是传感器实体名(非 media 节点,传错段错误);aiq2.lock 死锁需"取流线程与 prepare 并发会合";librga 成功码有两个——详见 door-guard/modules/camera/README.md
 - door-guard 相机链路开关与环境变量见 `door-guard/modules/camera/README.md`
 
 ---
