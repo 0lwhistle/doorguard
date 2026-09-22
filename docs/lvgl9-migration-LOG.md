@@ -10,6 +10,52 @@
 - 阻塞:…
 - 交接:C2 注意 …
 ---
+## 2026-09-23 03:30 C3-测试与板端验收 [WIP](测试迁移+部署+登录流已过;子页走查与性能报告未完)
+
+- **做了**:
+  1. 测试迁移:`test_widgets` 迁 v9(RAM 显示驱动换 lv_display_create/set_buffers
+     PARTIAL、lv_tick_set_cb 注入真实时基、lv_event_send→**lv_obj_send_event**
+     (v9 公开 API 变了,内部 lv_event_send 签名不兼容));`test_i18n` 仅头路径按代际
+     切换(lv_font_get_glyph_dsc 两代同签名)。tests 守卫解除,dg-test **31/31 全绿
+     零告警**(契约门禁② ✓),交叉编译零告警(① ✓)。
+  2. 板端部署(唯一上板者,md5 三方核对):首部即崩 **free(): invalid pointer**
+     ——display_drm_v9 用 libc free 释放驱动 lv_zalloc(tlsf 池)分配的设备路径
+     → 改 lv_free(宿主 sim 不编此文件故 C1 未暴露;**责任阶段 C1**,C3 发现并修复)。
+     崩溃循环曾把 dropbear 拖挂(板上 D 状态进程,pidof 都阻塞)→ `reboot -f` 恢复;
+     **S60 三次秒退自动回滚到 v8 槽实战生效**(回退通道验证 ✓)。修复版入非活动槽 B
+     (v8 保留在 A 作回退位),符号链接切 B:DRM atomic 后端就绪、fts_ts 触摸注册、
+     预览 fps=27~30(cost 1~2ms)。
+  3. 触摸走查方法:LD_PRELOAD 注入库(/tmp/dg_touch_inject.c,钩 read 合成 Type-B
+     MT 事件流,**走真实 evdev 解析/校准/按下沿链路**,非 lv_event 直灌)。验证:
+     **按下沿唤醒 ✓**(待机→主页)、**完整管理员登录流 ✓**(验证→ID 10001→密码
+     123456→成功弹窗「验证成功 张三」,板上 DB 种子账号)。
+  4. **发现并修复 v9 迁移真语义差异(重要)**:dg_btn 的内容行容器在 v9 命中测试中
+     胜出吞掉 CLICKED(行内 label v9 默认不可点击,但行容器 lv_obj 默认 CLICKABLE
+     且是搜索终点)。v8 时代 label 同样吞点击但行仅 71×29、真人/注入难命中;注入恒打
+     按钮中心必现。修复=两处行容器 `lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE)`
+     (dg_btn.c)。诊断链:LV_USE_LOG(已关)+ vendored lv_indev 临时 printf(已
+     git 还原)拿铁证 `pressed at x:604 y:1216` → `hit obj=(568,1201 71x29)`。
+  5. 无残影专项(部分):多轮 home↔standby 切换后导图干净,无上一页残留;
+     板端取证 14 张存 `deliverables/lvgl9-c3-board-walkthrough/`(主页/唤醒/UID
+     弹窗/方式选择/成功弹窗/待机/回主页等)。
+  6. display_drm_v9 补走查取证:DG_WALK_DUMP_DIR 设置时,触摸 /tmp/dg_shot 即把
+     活动缓冲导 RAW(v8 时代 DG_DUMP_FIRST_FRAME 的对等物;C1 裁掉了,本阶段补,
+     **责任阶段 C1**;env 门控,生产路径一次 getenv 零开销)。
+- **未完(C3 门禁③④⑤未过,不许标 DONE)**:
+  ① **七页真机走查只走了主页/待机/弹窗流**;菜单子页的触摸进入未走通(网格坐标
+  未命中 + 菜单 15s 无操作自动回主页)——dg_btn 修复后网格按钮理论可点,但本轮
+  预算用尽;子页渲染正确性目前仅有 sim 证据(C2 十二图)。
+  ② **性能报告未做**:fps 侧有日志证据(v9 27~30 vs v8 基线 27,已达标);整机
+  CPU /proc 采样、切页响应、**NEON 开/关 A/B**(lv_conf9 `LV_USE_DRAW_SW_ASM`,
+  关=改 NONE 重编)未测。
+  ③ 文档:DEVLOG/PROJECT_PLAN 已随本条更新;走查补完与性能报告后 C3 才可 [DONE]。
+- **板端现况(交接必读)**:B 槽=v9 最终修复版(md5 ec207149396da610fd6fb0642cd848c6,
+  含 dg_btn 修复+取证导图;诊断补丁与 LV_USE_LOG 已全部还原),A 槽=v8 回退位;
+  **原生产 DB 已还原**(走查种子库的备份在板上 /root/dg_db_backup_v8/),S60 生产
+  方式运行,fps=29;走查辅助物(/tmp/dg_touch_inject.so、/tmp/walk*.sh)留板 /tmp
+  便于续做;种子账号(10001/张三/管理员/密码 123456)在种子库里,现用原库无此号,
+  再走查需重播种(sim/data/door-guard.db 已 checkpoint 含 10001)。
+---
 ## 2026-09-23 01:35 C2-UI层迁移 [DONE]
 
 - **做了**:

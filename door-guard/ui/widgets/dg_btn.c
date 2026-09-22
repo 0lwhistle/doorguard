@@ -25,6 +25,10 @@ lv_obj_t *dg_btn_create(lv_obj_t *parent, const char *icon, const char *label)
 
     lv_obj_t *row = lv_obj_create(btn);
     lv_obj_remove_style_all(row);
+    /* v9 行为差异(2026-09-23 板端实测):lv_obj 默认 CLICKABLE,内容行会
+     * 命中测试胜出并吞掉 CLICKED(行内 label 已被 v9 置为不可点击,但行
+     * 本身不是),点在按钮正中时按钮回调收不到事件——行必须不可点击 */
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_center(row);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
@@ -50,6 +54,10 @@ lv_obj_t *dg_btn_create_light(lv_obj_t *parent, const char *icon, const char *la
 
     lv_obj_t *row = lv_obj_create(btn);
     lv_obj_remove_style_all(row);
+    /* v9 行为差异(2026-09-23 板端实测):lv_obj 默认 CLICKABLE,内容行会
+     * 命中测试胜出并吞掉 CLICKED(行内 label 已被 v9 置为不可点击,但行
+     * 本身不是),点在按钮正中时按钮回调收不到事件——行必须不可点击 */
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_center(row);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);

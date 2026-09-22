@@ -1,6 +1,6 @@
 # RK3576 K7 人脸识别门禁系统 — 项目方案与执行手册
 
-> 更新:2026-09-20(架构 v2 评审通过 + M1 目录迁移)。本文档是项目的唯一事实来源(Single Source of Truth)。
+> 更新:2026-09-23(LVGL9.5 迁移 C1/C2 完成,C3 过半)。本文档是项目的唯一事实来源(Single Source of Truth)。
 > 每次会话开工前先读本文档恢复上下文;完成阶段后更新"进度快照"。
 
 ---
@@ -25,7 +25,15 @@ LVGL 改 direct+原位补丁;dg_preview 控件双模(plane/软渲染自动降级
 详见 DEV_HANDBOOK §2;排查坑与验收数据见 DEVLOG 2026-09-22(深夜)。⑤f 后记:同日深夜发现 LVGL8.3 透明层"擦除语义缺失"(人脸框残影堆积、待机不透明
 黑底不落 fb),修复三轮未果,已按授权回退显示架构至 full_refresh(27fps 无残影基线
 恢复);video plane 全套实现保留 git f519b1e,**LVGL9.5 迁移方案已立**
-(docs/superpowers/specs/2026-09-22-lvgl95-migration-plan.md),迁移后重启。 |
+(docs/superpowers/specs/2026-09-22-lvgl95-migration-plan.md),迁移后重启。⑤g **2026-09-23 LVGL9.5 迁移:C1/C2 [DONE]、C3 过半 [WIP]**(全程
+见 docs/lvgl9-migration-LOG.md):9.5 vendored 为 door-guard/third_party/lvgl9,
+开关(默认 ON,OFF=回退 8.3);板上=v9 内置 DRM atomic 后端(fps 27~30 vs 基线 27),
+sim=自写 SDL;ui/ 全量迁移+v9 image 描述符(magic+stride)+字体 v9 工具重生成;
+test_widgets/test_i18n 迁 v9,**31/31 全绿零告警**;板上部署修两真 bug:libc free
+释放 tlsf 内存→lv_free、**dg_btn 内容行容器吞 CLICKED**(v9 lv_obj 默认 CLICKABLE);
+注入触摸走真实 evdev 链:按下沿唤醒✓、完整管理员登录流✓、切页无残影✓;S60 秒退
+回滚实战生效。**剩余**:菜单子页板端走查、CPU/NEON A/B 性能报告;板端 B 槽=v9、
+A 槽=v8 回退位;板端截图见 deliverables/lvgl9-c{2,3}-board*。 |
 
 ---
 

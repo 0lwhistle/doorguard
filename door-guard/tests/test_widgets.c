@@ -13,6 +13,7 @@
 #include "widgets/dg_list.h"
 #include "widgets/dg_popup.h"
 
+#include <time.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -23,25 +24,30 @@
 static lv_color_t lvbuf[H * 100];
 static int s_flush_cnt = 0;
 
-static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_p)
+static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
     s_flush_cnt++;
-    lv_disp_flush_ready(drv);
+    lv_display_flush_ready(disp);
     (void)area;
-    (void)color_p;
+    (void)px_map;
 }
 
+/* v9:RAM 显示驱动(lv_display_create + PARTIAL 单缓冲,不计帧) */
 static void display_init_headless(void)
 {
-    static lv_disp_draw_buf_t buf;
-    static lv_disp_drv_t drv;
-    lv_disp_draw_buf_init(&buf, lvbuf, NULL, W * 100);
-    lv_disp_drv_init(&drv);
-    drv.hor_res = W;
-    drv.ver_res = H;
-    drv.draw_buf = &buf;
-    drv.flush_cb = flush_cb;
-    lv_disp_drv_register(&drv);
+    static lv_display_t *disp;
+    disp = lv_display_create(W, H);
+    lv_display_set_flush_cb(disp, flush_cb);
+    lv_display_set_buffers(disp, lvbuf, NULL, sizeof(lvbuf),
+                           LV_DISPLAY_RENDER_MODE_PARTIAL);
+}
+
+/* 弹窗自动关闭按 tick 走;v9 无 LV_TICK_CUSTOM,注入真实时基 */
+static uint32_t test_tick_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
 }
 
 static void pump(int ms)
@@ -129,17 +135,18 @@ static void click_deep(lv_obj_t *obj)
     uint32_t n = lv_obj_get_child_cnt(obj);
     for (uint32_t i = 0; i < n; i++)
         click_deep(lv_obj_get_child(obj, i));
-    lv_event_send(obj, LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(obj, LV_EVENT_CLICKED, NULL);
 }
 
 int main(void)
 {
     lv_init();
+    lv_tick_set_cb(test_tick_ms);
     display_init_headless();
     i18n_init(DG_SOURCE_DIR "/ui/lang");
 
     /* ---- 按钮:创建 + 点击 ---- */
-    lv_obj_t *scr = lv_scr_act();
+    lv_obj_t *scr = lv_screen_active();
     lv_obj_t *btn = dg_btn_create(scr, LV_SYMBOL_OK, _("验证成功"));
     DG_CHECK(btn != NULL);
     DG_CHECK(lv_obj_get_child_cnt(btn) >= 1);   /* 图标+文本行存在 */
@@ -183,8 +190,8 @@ int main(void)
     /* ⇧ 后点第一个字母应上报大写(键值是 q) */
     s_last_key[0] = '\0';
     lv_obj_t *shift = lv_obj_get_child(lv_obj_get_child(alpha_page, 2), 0);
-    lv_event_send(shift, LV_EVENT_CLICKED, NULL);
-    lv_event_send(lv_obj_get_child(row1, 0), LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(shift, LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(lv_obj_get_child(row1, 0), LV_EVENT_CLICKED, NULL);
     DG_CHECK(s_last_key[0] == 'Q');
     printf("[W] dg_kbd: 数字页 12 键 + 字母页 QWERTY + ⇧ 大小写 OK\n");
 
@@ -221,7 +228,7 @@ int main(void)
     /* 键序:1 2 3 4 5 6 7 8 9 ⌫ 0 OK → 点 1,2,3 + OK(按钮自带回调) */
     static const uint32_t seq[] = { 0, 1, 2, 11 };
     for (size_t i = 0; i < sizeof(seq) / sizeof(seq[0]); i++)
-        lv_event_send(lv_obj_get_child(np, seq[i]), LV_EVENT_CLICKED, NULL);
+        lv_obj_send_event(lv_obj_get_child(np, seq[i]), LV_EVENT_CLICKED, NULL);
     DG_CHECK(s_confirmed == 1);
     DG_CHECK(strcmp(s_conf_text, "123") == 0);
     DG_CHECK(!dg_popup_active());
@@ -241,10 +248,10 @@ int main(void)
     lv_obj_t *np3 = find_by_child_cnt(card3, 12);
     DG_CHECK(np3 != NULL);
     for (size_t i = 0; i < sizeof(seq) / sizeof(seq[0]); i++)
-        lv_event_send(lv_obj_get_child(np3, seq[i]), LV_EVENT_CLICKED, NULL);
+        lv_obj_send_event(lv_obj_get_child(np3, seq[i]), LV_EVENT_CLICKED, NULL);
     DG_CHECK(s_confirmed == 0);                 /* 被拦下,没提交 */
     DG_CHECK(dg_popup_active());                /* 弹窗还在,用户可继续改 */
-    lv_event_send(lv_obj_get_child(card3, lv_obj_get_child_cnt(card3) - 1),
+    lv_obj_send_event(lv_obj_get_child(card3, lv_obj_get_child_cnt(card3) - 1),
                   LV_EVENT_CLICKED, NULL);      /* 取消(最后一个子对象) */
     DG_CHECK(!dg_popup_active());
     printf("[W] dg_popup input: 校验失败不提交 + 弹窗保留 OK\n");
@@ -255,7 +262,7 @@ int main(void)
     lv_obj_t *mask2 = lv_obj_get_child(lv_layer_top(), 0);
     lv_obj_t *card2 = lv_obj_get_child(mask2, 0);
     DG_CHECK(lv_obj_get_child_cnt(card2) >= 3);  /* 标题 + 2 选项 */
-    lv_event_send(lv_obj_get_child(card2, 2), LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(lv_obj_get_child(card2, 2), LV_EVENT_CLICKED, NULL);
     DG_CHECK(s_picked == 1);
     printf("[W] dg_popup choice: pick idx OK\n");
 

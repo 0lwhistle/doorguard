@@ -20,7 +20,10 @@
 #include "touch_evdev.h"
 #include "ui/theme.h"
 
-#include <stdlib.h>     /* free(lv_linux_drm_find_device_path 返回值) */
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/stat.h>   /* 走查取证:触发文件检查 */
+#include <unistd.h>     /* unlink */
 
 int display_init(void)
 {
@@ -32,7 +35,10 @@ int display_init(void)
 
     char *path = lv_linux_drm_find_device_path();
     lv_result_t res = lv_linux_drm_set_file(disp, path ? path : "/dev/dri/card0", -1);
-    free(path);
+    /* 路径由驱动 lv_zalloc(tlsf 池)分配:必须用 lv_free——libc free 会
+     * abort("free(): invalid pointer",板上实测 C3)。宿主 sim 不编本文件,
+     * 故 C1 未暴露 */
+    lv_free(path);
     if (res != LV_RESULT_OK) {
         DG_LOGE("[DISPLAY]", "DRM 设备打开/配置失败");
         return DG_ERR_IO;
@@ -55,6 +61,29 @@ int display_init(void)
 
 void display_poll(void)
 {
+    /* ---- 走查取证(C3,诊断专用;v8 时代 DG_DUMP_FIRST_FRAME 的对等物) ----
+     * 仅当 DG_WALK_DUMP_DIR 设置时生效:每帧检查触发文件 /tmp/dg_shot,
+     * 存在则把「当前屏幕」(DIRECT 双缓冲经 sync_areas 收敛后两缓冲同像,
+     * 取活动缓冲即整帧 XRGB8888,行距=dumb pitch)落 RAW 后删触发文件。
+     * 生产路径(DG_WALK_DUMP_DIR 未设)只有一次 getenv,零开销 */
+    static int walk_mode = -1;
+    if (walk_mode < 0)
+        walk_mode = getenv("DG_WALK_DUMP_DIR") != NULL;
+    if (!walk_mode || stat("/tmp/dg_shot", &(struct stat){0}) != 0)
+        return;
+    unlink("/tmp/dg_shot");
+    lv_draw_buf_t *buf = lv_display_get_buf_active(lv_display_get_default());
+    const char *dir = getenv("DG_WALK_DUMP_DIR");
+    char path[128];
+    snprintf(path, sizeof(path), "%s/dg_screen.raw", dir ? dir : "/tmp");
+    FILE *f = fopen(path, "wb");
+    if (f && buf) {
+        fwrite(buf->data, 1, (size_t)buf->header.stride * buf->header.h, f);
+        fclose(f);
+        DG_LOGI("[DISPLAY]", "屏幕已导出 %s", path);
+    } else if (f) {
+        fclose(f);
+    }
 }
 
 /* ---- video plane 直通(2026-09-22 实验,已回退) ----

@@ -4,6 +4,41 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-23(凌晨)LVGL9.5 迁移 C1/C2 完成、C3 过半:板上 v9 跑通,登录流✓,剩子页走查与性能报告
+
+**做了什么**(全程记 `docs/lvgl9-migration-LOG.md`;sim 九页+弹窗 12 图
+`deliverables/lvgl9-c2-walkthrough/`,板端 14 图 `deliverables/lvgl9-c3-board-walkthrough/`):
+1. **C1**:lvgl-9.5.0 入库为 `third_party/lvgl9`(include 根不变);lv_conf9(32bpp/
+   256KB 池/NEON 按 `__aarch64__` 条件开/montserrat 14/20/28/48/OS=NONE);CMake
+   `DG_USE_LVGL9` 开关(默认 ON,OFF=回退 8.3 旧栈);显示后端 v9 化:板上=v9 内置
+   Linux DRM(dumb×2+DIRECT 双缓冲+atomic 翻转),sim=自写 SDL(PARTIAL);
+   `dg_lvgl9_smoke` 最小渲染入口;display.h 零改动。
+2. **C2**:ui/ 全量 API 迁移 + v9 image 描述符(magic+stride,不设 magic set_src
+   会当文件路径);时基 lv_tick_set_cb(须在 display_init 后);dg_font_cn_16 用
+   v9 工具重生成(产物双栈语法兼容);九页+弹窗 sim 走查全过;顺手修 page_logs
+   分页按钮既有重叠。
+3. **C3(进行中)**:test_widgets/test_i18n 迁 v9(lv_event_send→lv_obj_send_event),
+   **dg-test 31/31 全绿零告警**;板上部署(唯一上板,md5 核对)修了两个真 bug:
+   ①libc free 释放驱动 lv_zalloc 内存→**lv_free**(首部即崩的根因,宿主不编该
+   文件没暴露);②**dg_btn 内容行容器吞 CLICKED**(v9 lv_obj 默认 CLICKABLE,
+   命中测试行容器胜出;注入恒打按钮中心必现,v8 时代因行面积小未暴露)→ 行容器
+   clear_flag(CLICKABLE)。板上:DRM atomic 后端稳跑 fps=27~30(v8 基线 27),
+   **注入触摸(钩 read 合成 MT 事件,走真实解析链)按下沿唤醒✓、完整管理员登录
+   流(10001→密码→成功弹窗)✓**、多轮切页无残影✓;S60 三次秒退自动回滚 v8 槽
+   实战生效(回退通道验证)。
+
+**踩了什么坑**:①板上崩溃循环能把 dropbear 拖到半死(pidof 都阻塞)——先
+`reboot -f`,部署改"板上自跑脚本+分步导图"的分离式;②FSM 验证步 5s 硬超时
+不随触摸重置,连串注入要压在 5s 内;③DB 从宿主拷板要 `wal_checkpoint(TRUNCATE)`
+后再拷,否则用户只在 WAL 里;④板端 ssh 会话堆积会自我拥塞,pkill 本地 ssh 重试。
+
+**没做完/下一步(C3 收尾)**:①菜单子页(用户管理/设备/门禁设置/日志/web)的
+板端触摸走查(dg_btn 修复后应可点;菜单 15s 超时要算进节奏);②整机 CPU 采样、
+切页响应、NEON 开/关 A/B 性能报告(fps 已达标);③完成后 C3 标 DONE。
+**回退位**:板上 A 槽=v8;`git checkout lvgl9-baseline`(注意 ui/ 已 v9-only,
+DG_USE_LVGL9=OFF 编不过 ui 层——见 LOG C2 条)。
+
+---
 ## 2026-09-22(深夜·续)video plane 回退:direct+透明 underlay 在 LVGL8.3 上存在擦除语义缺失
 
 **结论**:按用户授权回退显示架构到 216284f(full_refresh + 不透明预览,27fps 无残影,
