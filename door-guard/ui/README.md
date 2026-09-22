@@ -5,7 +5,7 @@
 ## 分层与事件流向
 
 ```
-入:后端 event_bus → bridge/(入 ui_events 队列)→ ui.c 全局泵(LVGL 线程,33ms)
+入:后端 event_bus → bridge/(入 ui_events 队列)→ ui.c 全局泵(LVGL 线程,主循环 5ms 节拍;预览泵 20ms)
       ├─ UI_EVT_GOTO_PAGE → navigator_switch(切页)
       └─ 其余 → navigator_dispatch_evt → 当前页 presenter.on_evt → pages setter 渲染
 出:pages 点击 → bridge_btn/bridge_touch → event_bus → 服务层(FSM 决策后回流切页)
