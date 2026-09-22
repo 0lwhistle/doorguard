@@ -27,11 +27,18 @@ typedef struct {
     char    sha256[65];                   /**< 声明的 sha256 hex(64 字符) */
 } ota_manifest_t;
 
+#define OTA_PIPE_CAP (256u * 1024u)     /**< 生产→写线程环形缓冲容量(对 web 限流可见) */
+
 /** 开始接收(校验声明,打开暂存文件;offset>0 续传) */
 int ota_begin(const ota_manifest_t *m, uint32_t offset, bool *resumed);
 
-/** 流式写入一块(内部累计) */
+/** 流式写入一块(内部累计;环形满时阻塞等写线程腾位——**事件循环线程禁调**,
+ *  先用 ota_can_accept() 限流) */
 int ota_write_chunk(const uint8_t *data, size_t len, size_t *received);
+
+/** 非阻塞余量(环形缓冲当前可接纳字节数;非会话期返回 0)。
+ *  web 事件循环据此限流喂入,绝不让 ota_write_chunk 阻塞 loop */
+size_t ota_can_accept(void);
 
 /** 结束:校验已收大小与 sha256;通过则暂存文件改名为 staged */
 int ota_finish(char *stage_path, size_t path_cap);

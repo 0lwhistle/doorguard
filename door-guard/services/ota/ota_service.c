@@ -32,7 +32,6 @@ static const char *TAG = "[OTA]";
  * board/rootfs-overlay/etc/init.d/S60doorguard */
 #define OTA_DEFAULT_DIR "/var/lib/door-guard"
 #define OTA_MAX_SIZE    (64u * 1024u * 1024u)   /* 包上限 64MB(方案 A 分区预留) */
-#define PIPE_CAP        (256u * 1024u)          /* 生产→写线程环形缓冲容量 */
 
 static char s_dir[128] = OTA_DEFAULT_DIR;
 static char s_staging[192], s_staged[192], s_staged_sha[200], s_staged_ver[200];
@@ -50,7 +49,7 @@ typedef struct {
     bool done;                                /* 写线程已退出(结果就绪) */
     int  result;                              /* 写线程终态(dg_err_t) */
     uint32_t last_permille;
-    uint8_t pipe[PIPE_CAP];
+    uint8_t pipe[OTA_PIPE_CAP];
     size_t head, tail, count;
     pthread_mutex_t mu;
     pthread_cond_t cv_space;                  /* 生产者等空位 */
@@ -97,13 +96,13 @@ static bool pipe_pop(uint8_t *out, size_t cap, size_t *got)
     size_t n = s_ctx.count < cap ? s_ctx.count : cap;
     if (n == 0)
         return false;
-    size_t first = PIPE_CAP - s_ctx.tail;
+    size_t first = OTA_PIPE_CAP - s_ctx.tail;
     if (first > n)
         first = n;
     memcpy(out, s_ctx.pipe + s_ctx.tail, first);
     if (n > first)
         memcpy(out + first, s_ctx.pipe, n - first);
-    s_ctx.tail = (s_ctx.tail + n) % PIPE_CAP;
+    s_ctx.tail = (s_ctx.tail + n) % OTA_PIPE_CAP;
     s_ctx.count -= n;
     *got = n;
     return true;
@@ -302,7 +301,7 @@ int ota_write_chunk(const uint8_t *data, size_t len, size_t *received)
 
     /* 会话预检的容量上限(逐字节裁决在写线程按 manifest.size 收口) */
     pthread_mutex_lock(&s_ctx.mu);
-    while (s_ctx.count == PIPE_CAP && !s_ctx.abort && !s_ctx.done) {
+    while (s_ctx.count == OTA_PIPE_CAP && !s_ctx.abort && !s_ctx.done) {
         /* 慢盘背压:等写线程腾空间(超时兜底防永久挂死) */
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
@@ -318,13 +317,13 @@ int ota_write_chunk(const uint8_t *data, size_t len, size_t *received)
         pthread_mutex_unlock(&s_ctx.mu);
         return DG_ERR_PARAM;                /* 超声明大小,写途中拒绝 */
     }
-    size_t first = PIPE_CAP - s_ctx.head;
+    size_t first = OTA_PIPE_CAP - s_ctx.head;
     if (first > len)
         first = len;
     memcpy(s_ctx.pipe + s_ctx.head, data, first);
     if (len > first)
         memcpy(s_ctx.pipe, data + first, len - first);
-    s_ctx.head = (s_ctx.head + len) % PIPE_CAP;
+    s_ctx.head = (s_ctx.head + len) % OTA_PIPE_CAP;
     s_ctx.count += len;
     size_t progress = s_ctx.received + s_ctx.count;
     pthread_mutex_unlock(&s_ctx.mu);
@@ -333,6 +332,14 @@ int ota_write_chunk(const uint8_t *data, size_t len, size_t *received)
     if (received)
         *received = progress;
     return DG_OK;
+}
+
+size_t ota_can_accept(void)
+{
+    pthread_mutex_lock(&s_ctx.mu);
+    size_t cap = s_ctx.active ? OTA_PIPE_CAP - s_ctx.count : 0;
+    pthread_mutex_unlock(&s_ctx.mu);
+    return cap;
 }
 
 /* 等写线程终态(带超时;期间生产者已把 eof/abort 置位) */

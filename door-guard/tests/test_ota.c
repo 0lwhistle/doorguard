@@ -139,6 +139,20 @@ int main(void)
     DG_CHECK(ota_begin(&m, 0, &resumed) == DG_OK);           /* 会话已结束 */
     ota_abort();
 
+    /* ---- O2b ota_can_accept:非阻塞余量(web 事件循环喂入限流的依据) ---- */
+    printf("[O2b] can_accept: non-blocking headroom query\n");
+    DG_CHECK(ota_can_accept() == 0);                    /* 非会话期:0 */
+    manifest_make(&m, CONTENT_SZ, s_sha_hex);
+    DG_CHECK(ota_begin(&m, 0, &resumed) == DG_OK);
+    DG_CHECK(ota_can_accept() == OTA_PIPE_CAP);         /* 空环:满余量 */
+    DG_CHECK(push_all(s_content, 0, 1000) == DG_OK);
+    for (int i = 0; i < 100 && ota_can_accept() < OTA_PIPE_CAP; i++)
+        usleep(10 * 1000);                          /* 等写线程把环形排干 */
+    DG_CHECK(ota_can_accept() == OTA_PIPE_CAP);         /* 排干后恢复满余量 */
+    DG_CHECK(ota_staged_bytes() == 1000);               /* 且已全部落盘 */
+    ota_abort();
+    DG_CHECK(ota_can_accept() == 0);                    /* 会话终止即归零 */
+
     /* ---- O3 sha256 不符:拒收,无落位,终态错误事件 ---- */
     printf("[O3] sha mismatch rejected\n");
     manifest_make(&m, CONTENT_SZ,
