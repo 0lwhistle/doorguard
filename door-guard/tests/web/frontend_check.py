@@ -20,7 +20,7 @@ import sys
 
 ROOT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "..")
-WEB = os.path.join(ROOT, "modules", "net", "web")
+WEB = os.path.join(ROOT, "services", "web")
 FRONT = os.path.join(WEB, "frontend")
 PAGES = os.path.join(WEB, "pages")
 
