@@ -28,6 +28,7 @@ static pthread_mutex_t s_ev_mu = PTHREAD_MUTEX_INITIALIZER;
 static int s_ev_count;
 static bool s_ev_terminal;
 static int s_ev_term_err;
+static int s_ev_term_seq;   /* 终态事件序号:等待"新"终态用(旧标志永不复位会串场) */
 
 static int on_ota_progress(const event_t *e, void *ud)
 {
@@ -38,16 +39,18 @@ static int on_ota_progress(const event_t *e, void *ud)
     if (ev->done) {
         s_ev_terminal = true;
         s_ev_term_err = ev->err;
+        s_ev_term_seq++;
     }
     pthread_mutex_unlock(&s_ev_mu);
     return 0;
 }
 
-static bool wait_terminal(int timeout_ms)
+/* 等到第 expect_seq 个终态事件(调用前先记下当前 s_ev_term_seq 作基线) */
+static bool wait_terminal(int expect_seq, int timeout_ms)
 {
     for (int i = 0; i < timeout_ms / 10; i++) {
         pthread_mutex_lock(&s_ev_mu);
-        bool t = s_ev_terminal;
+        bool t = s_ev_term_seq >= expect_seq;
         pthread_mutex_unlock(&s_ev_mu);
         if (t)
             return true;
@@ -119,10 +122,11 @@ int main(void)
     DG_CHECK(push_all(s_content, 40000, 80000) == DG_OK);
     DG_CHECK(push_all(s_content, 80000, CONTENT_SZ) == DG_OK);
     char path[192];
+    int base1 = s_ev_term_seq;
     DG_CHECK(ota_finish(path, sizeof(path)) == DG_OK);
     DG_CHECK(strcmp(path, staged) == 0);
     DG_CHECK(access(staged, F_OK) == 0);
-    DG_CHECK(wait_terminal(5000));
+    DG_CHECK(wait_terminal(base1 + 1, 5000));
     pthread_mutex_lock(&s_ev_mu);
     DG_CHECK(s_ev_count >= 2);              /* 至少:进度一拍 + 终态 */
     DG_CHECK(s_ev_term_err == DG_OK);
@@ -160,9 +164,10 @@ int main(void)
     remove(staged);                         /* 清掉 O1 的落位文件,拒收后应保持不存在 */
     DG_CHECK(ota_begin(&m, 0, &resumed) == DG_OK);
     DG_CHECK(push_all(s_content, 0, CONTENT_SZ) == DG_OK);
+    int base3 = s_ev_term_seq;
     DG_CHECK(ota_finish(path, sizeof(path)) == DG_ERR_IO);
     DG_CHECK(access(staged, F_OK) != 0);
-    DG_CHECK(wait_terminal(5000));
+    DG_CHECK(wait_terminal(base3 + 1, 5000));
     pthread_mutex_lock(&s_ev_mu);
     DG_CHECK(s_ev_term_err == DG_ERR_IO);
     pthread_mutex_unlock(&s_ev_mu);

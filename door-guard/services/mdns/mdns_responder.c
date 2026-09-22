@@ -1,7 +1,11 @@
 /*
  * mdns_responder.c — mDNS 应答器实现(RFC 6762 必要子集)
  *
- * 状态机(单线程,recvmsg 带超时轮询驱动):
+ * 传输层(2026-09-22 起)挂在 modules/net/netcore 的统一事件循环上,
+ * 不再自持线程与 socket:收包 = UDP 监听连接的 MG_EV_READ(每数据报一次,
+ * 发送方地址在 c->rem);定时节拍 = mg_timer_add;启停 = netcore_post 闭包。
+ *
+ * 状态机(逻辑与原独立线程版一致):
  *   PROBING    探测:发 3 次 type=ANY 查询,确认名字没被占用;
  *              期间收到"同名但不同 IP"的 A 应答 → 改名 doorguard-2 再探
  *   ANNOUNCING 通告:发 2 次推送式应答,让局域网填好缓存
@@ -14,12 +18,14 @@
  *   - SRV 的 target A 记录放 additional 段:客户端一次拿全,少一轮往返
  *   - SRV/TXT 同时公告 → 手机与 avahi-browse 能直接"发现"设备,不只是解析
  *
- * 接口绑定:入组时逐接口加 membership;应答用 IP_PKTINFO 取"包从哪个接口来",
- * 再从该接口发回——双网口(eth0+eth1)时不会答错网卡。
+ * 接口绑定(相对旧版的已知差异):旧版用 IP_PKTINFO 识别"包从哪个网口来"
+ * 并从原网口应答;mongoose 收包不透出入接口,现统一从 net_info 主网口发出。
+ * 单 eth 场景行为一致;双网口同时收查询时会话答走主口(留待有真需求再细化)。
  */
 #include "mdns_responder.h"
 #include "mdns_wire.h"
 #include "net_info.h"
+#include "netcore.h"
 #include "cfg.h"
 #include "storage.h"
 #include "dg_log.h"
@@ -50,7 +56,7 @@ static const char *TAG = "[MDNS]";
 #define ANNOUNCE_COUNT   2
 #define ANNOUNCE_GAP_MS  1000
 #define IP_CHECK_MS      5000
-#define RECV_TIMEOUT_MS  200
+#define TICK_MS          200      /* 状态机基准节拍(原 recvmsg 超时轮) */
 
 typedef enum { ST_IDLE = 0, ST_PROBING, ST_ANNOUNCING, ST_READY } mdns_state_t;
 
@@ -62,10 +68,8 @@ typedef struct {
     bool txt;
 } mdns_hits_t;
 
-static pthread_t s_tid;
 static pthread_mutex_t s_mtx = PTHREAD_MUTEX_INITIALIZER;
 static bool s_running = false;
-static int s_sock = -1;
 
 static char s_base[40] = DEFAULT_HOST;         /* 配置的基名(重名时加后缀) */
 static char s_host[64] = DEFAULT_HOST;         /* 实际通告名,不含 .local */
@@ -73,6 +77,11 @@ static uint16_t s_port = 8080;
 static mdns_state_t s_state = ST_IDLE;
 static int s_step = 0;                         /* 探测/通告已发次数 */
 static uint8_t s_ip[4];                        /* 当前通告地址 */
+
+/* 以下为 loop 线程私有(netcore 契约):不与业务线程共享,无需加锁 */
+static struct mg_connection *s_udp = NULL;     /* UDP 5353 监听连接 */
+static int64_t s_next_action = 0;              /* 状态机下一拍 */
+static bool s_timer_added = false;             /* 节拍定时器只注册一次 */
 
 /* ---- 工具 ---- */
 
@@ -107,6 +116,12 @@ static void multicast_dst(struct sockaddr_in *dst)
     inet_pton(AF_INET, MDNS_MULTICAST, &dst->sin_addr);
 }
 
+static int udp_fd(void)
+{
+    return s_udp ? (int)(intptr_t)s_udp->fd : -1;
+}
+
+/* 组播出口绑定到主网口(见文件头"接口绑定"说明) */
 static void bind_iface(int sock, int ifindex)
 {
     if (ifindex <= 0)
@@ -117,9 +132,16 @@ static void bind_iface(int sock, int ifindex)
     setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF, &mreq, sizeof(mreq));
 }
 
+static int out_ifindex(void)
+{
+    char ifname[32] = "";
+    net_info_primary_ifname(ifname, sizeof(ifname));
+    return ifname[0] ? (int)if_nametoindex(ifname) : 0;
+}
+
 /* ---- 应答构造 ---- */
 
-static void send_response(int sock, const struct sockaddr_in *from, int ifindex,
+static void send_response(int fd, const struct sockaddr_in *from, int ifindex,
                           uint16_t id, bool legacy, const mdns_hits_t *hits,
                           const mdns_question_t *qs, int nq)
 {
@@ -167,9 +189,9 @@ static void send_response(int sock, const struct sockaddr_in *from, int ifindex,
         dst = *from;                           /* 单播回给提问者 */
     } else {
         multicast_dst(&dst);                   /* 组播:全局通告 */
-        bind_iface(sock, ifindex);             /* 从包来的那个网口发出去 */
+        bind_iface(fd, ifindex);               /* 从主网口发出去 */
     }
-    if (sendto(sock, buf, m.len, 0, (struct sockaddr *)&dst, sizeof(dst)) < 0)
+    if (sendto(fd, buf, m.len, 0, (struct sockaddr *)&dst, sizeof(dst)) < 0)
         DG_LOGW(TAG, "应答发送失败: %s", strerror(errno));
 }
 
@@ -218,7 +240,7 @@ static void handle_query(const uint8_t *pkt, size_t len,
             mdns_name_equal(qs[0].name, host) ? "主机名" : "服务",
             unicast ? "单播" : "组播", hits.host_a, hits.service_ptr, hits.srv,
             hits.txt);
-    send_response(s_sock, from, ifindex, unicast ? id : 0, unicast, &hits,
+    send_response(udp_fd(), from, ifindex, unicast ? id : 0, unicast, &hits,
                   qs, nq);
 }
 
@@ -298,6 +320,9 @@ static void send_probe(int ifindex)
     mdns_msg_t m;
     char host[96], inst[96];
     struct sockaddr_in dst;
+    int fd = udp_fd();
+    if (fd < 0)
+        return;
 
     snapshot(host, sizeof(host), inst, sizeof(inst), NULL);
     /* 探测用 ID=0(组播),问题段问 ANY:既查 A 也查服务名占用 */
@@ -308,17 +333,20 @@ static void send_probe(int ifindex)
         return;
 
     multicast_dst(&dst);
-    bind_iface(s_sock, ifindex);
-    sendto(s_sock, buf, m.len, 0, (struct sockaddr *)&dst, sizeof(dst));
+    bind_iface(fd, ifindex);
+    sendto(fd, buf, m.len, 0, (struct sockaddr *)&dst, sizeof(dst));
 }
 
 static void send_announce(int ifindex)
 {
     mdns_hits_t all = { true, true, true, true };
     struct sockaddr_in dst;
+    int fd = udp_fd();
+    if (fd < 0)
+        return;
     multicast_dst(&dst);
-    bind_iface(s_sock, ifindex);
-    send_response(s_sock, &dst, ifindex, 0, false, &all, NULL, 0);
+    bind_iface(fd, ifindex);
+    send_response(fd, &dst, ifindex, 0, false, &all, NULL, 0);
 }
 
 /* goodbye:TTL=0 的同名记录,让局域网立刻删掉我们(不留幽灵条目) */
@@ -330,8 +358,9 @@ static void send_goodbye(void)
     uint16_t port;
     static const char *const txt[] = { "txtvers=1", "path=/" };
     struct sockaddr_in dst;
+    int fd = udp_fd();
 
-    if (s_sock < 0)
+    if (fd < 0)
         return;
     snapshot(host, sizeof(host), inst, sizeof(inst), &port);
     mdns_msg_begin(&m, buf, sizeof(buf), 0,
@@ -343,11 +372,11 @@ static void send_goodbye(void)
     if (mdns_msg_end(&m) != DG_OK)
         return;
     multicast_dst(&dst);
-    sendto(s_sock, buf, m.len, 0, (struct sockaddr *)&dst, sizeof(dst));
+    sendto(fd, buf, m.len, 0, (struct sockaddr *)&dst, sizeof(dst));
     DG_LOGI(TAG, "已发 goodbye");
 }
 
-/* ---- 主循环 ---- */
+/* ---- IP 跟踪 ---- */
 
 static void refresh_ip(void)
 {
@@ -367,125 +396,159 @@ static void refresh_ip(void)
         DG_LOGI(TAG, "通告地址 %s", ip);
 }
 
-static void *mdns_thread(void *arg)
+/* ---- 统一事件循环上的收包与节拍(loop 线程) ---- */
+
+static void mdns_udp_cb(struct mg_connection *c, int ev, void *ev_data)
+{
+    if (ev == MG_EV_READ) {
+        if (c->recv.len == 0)
+            return;
+        pthread_mutex_lock(&s_mtx);
+        mdns_state_t st = s_state;
+        pthread_mutex_unlock(&s_mtx);
+
+        struct sockaddr_in from;
+        memset(&from, 0, sizeof(from));
+        from.sin_family = AF_INET;
+        memcpy(&from.sin_addr, c->rem.addr.ip, 4);
+        from.sin_port = c->rem.port;
+
+        if (st == ST_PROBING)
+            check_conflict(c->recv.buf, c->recv.len);
+        else if (st == ST_READY)
+            handle_query(c->recv.buf, c->recv.len, &from, 0);
+        /* 探测/通告期不抢答:名字还没确认属于我们 */
+        mg_iobuf_del(&c->recv, 0, c->recv.len);
+    } else if (ev == MG_EV_CLOSE) {
+        s_udp = NULL;
+    }
+    (void)ev_data;
+}
+
+static void mdns_tick(void *arg)
 {
     (void)arg;
-    uint8_t buf[1500];
-    int64_t next_action;
-    int ifindex = 0;
+    if (!s_udp)
+        return;
+    int64_t t = now_ms();
+    if (t < s_next_action)
+        return;
+    s_next_action = t + TICK_MS;
+    int ifindex = out_ifindex();
+
+    pthread_mutex_lock(&s_mtx);
+    mdns_state_t st = s_state;
+    pthread_mutex_unlock(&s_mtx);
+
+    switch (st) {
+    case ST_PROBING:
+        send_probe(ifindex);
+        pthread_mutex_lock(&s_mtx);
+        if (++s_step >= PROBE_COUNT) {
+            s_state = ST_ANNOUNCING;
+            s_step = 0;
+        }
+        pthread_mutex_unlock(&s_mtx);
+        s_next_action = t + PROBE_GAP_MS;
+        break;
+    case ST_ANNOUNCING: {
+        send_announce(ifindex);
+        pthread_mutex_lock(&s_mtx);
+        if (++s_step >= ANNOUNCE_COUNT) {
+            s_state = ST_READY;
+            s_step = 0;
+            /* 注意:此处已持锁,只能直接读 s_host——snapshot() 会再取同一把
+             * 非递归互斥锁,曾经在此自死锁并连带卡死 web 线程 */
+            DG_LOGI(TAG, "%s.local 通告完成(_http._tcp 服务已公告)", s_host);
+        }
+        pthread_mutex_unlock(&s_mtx);
+        s_next_action = t + ANNOUNCE_GAP_MS;
+        break;
+    }
+    case ST_READY: {
+        /* IP 变了(拔插网线/DHCP 换租约)必须重通告,否则局域网缓存里
+         * 还是旧地址——这是"按名字访问"最常见的失灵原因 */
+        char before[64] = "";
+        pthread_mutex_lock(&s_mtx);
+        snprintf(before, sizeof(before), "%u.%u.%u.%u", s_ip[0], s_ip[1],
+                 s_ip[2], s_ip[3]);
+        pthread_mutex_unlock(&s_mtx);
+        refresh_ip();
+        char after[64] = "";
+        pthread_mutex_lock(&s_mtx);
+        snprintf(after, sizeof(after), "%u.%u.%u.%u", s_ip[0], s_ip[1],
+                 s_ip[2], s_ip[3]);
+        pthread_mutex_unlock(&s_mtx);
+        if (strcmp(before, after) != 0) {
+            DG_LOGI(TAG, "地址变化,重新通告");
+            send_announce(ifindex);
+        }
+        s_next_action = t + IP_CHECK_MS;
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+/* ---- 启动/停止(netcore_post 闭包,loop 线程执行) ---- */
+
+static void mdns_udp_cb(struct mg_connection *c, int ev, void *ev_data);
+static int join_all_interfaces(int sock);
+
+static void mdns_setup(void *arg)
+{
+    (void)arg;
+    if (!s_timer_added) {
+        mg_timer_add(netcore_mgr(), TICK_MS, MG_TIMER_REPEAT, mdns_tick, NULL);
+        s_timer_added = true;
+    }
+    s_udp = mg_listen(netcore_mgr(), "udp://0.0.0.0:5353", mdns_udp_cb, NULL);
+    if (!s_udp) {
+        pthread_mutex_lock(&s_mtx);
+        s_running = false;
+        pthread_mutex_unlock(&s_mtx);
+        DG_LOGW(TAG, "5353 监听失败,mDNS 不可用");
+        return;
+    }
+
+    int fd = udp_fd();
+    unsigned char ttl = 255;
+    setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+    unsigned char loop = 1;
+    setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+    int on = 1;
+    /* IP_PKTINFO 备用:mongoose 不透出入接口,单网口场景不需要 */
+    setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &on, sizeof(on));
+    if (join_all_interfaces(fd) == 0)
+        DG_LOGW(TAG, "没有一个网口入组成功:组播可能收不到");
 
     refresh_ip();
     pthread_mutex_lock(&s_mtx);
     s_state = ST_PROBING;
     s_step = 0;
     pthread_mutex_unlock(&s_mtx);
-    next_action = now_ms();
+    s_next_action = now_ms();
 
-    while (1) {
-        pthread_mutex_lock(&s_mtx);
-        bool running = s_running;
-        pthread_mutex_unlock(&s_mtx);
-        if (!running)
-            break;
-
-        struct sockaddr_in from;
-        uint8_t ctrl[128];
-        struct iovec iov = { .iov_base = buf, .iov_len = sizeof(buf) };
-        struct msghdr msg;
-        memset(&msg, 0, sizeof(msg));
-        msg.msg_name = &from;
-        msg.msg_namelen = sizeof(from);
-        msg.msg_iov = &iov;
-        msg.msg_iovlen = 1;
-        msg.msg_control = ctrl;
-        msg.msg_controllen = sizeof(ctrl);
-
-        ssize_t n = recvmsg(s_sock, &msg, 0);
-        ifindex = 0;
-        if (n > 0) {
-            for (struct cmsghdr *c = CMSG_FIRSTHDR(&msg); c;
-                 c = CMSG_NXTHDR(&msg, c)) {
-                if (c->cmsg_level == IPPROTO_IP && c->cmsg_type == IP_PKTINFO) {
-                    struct in_pktinfo pi;
-                    memcpy(&pi, CMSG_DATA(c), sizeof(pi));
-                    ifindex = pi.ipi_ifindex;
-                }
-            }
-            pthread_mutex_lock(&s_mtx);
-            mdns_state_t st = s_state;
-            pthread_mutex_unlock(&s_mtx);
-            if (st == ST_PROBING)
-                check_conflict(buf, (size_t)n);
-            else if (st == ST_READY)
-                handle_query(buf, (size_t)n, &from, ifindex);
-            /* 探测/通告期不抢答:名字还没确认属于我们 */
-        } else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
-                   errno != EINTR) {
-            DG_LOGW(TAG, "recvmsg 失败: %s", strerror(errno));
-        }
-
-        int64_t t = now_ms();
-        if (t < next_action)
-            continue;
-        next_action = t + RECV_TIMEOUT_MS;
-
-        pthread_mutex_lock(&s_mtx);
-        mdns_state_t st = s_state;
-        pthread_mutex_unlock(&s_mtx);
-
-        switch (st) {
-        case ST_PROBING:
-            send_probe(ifindex);
-            pthread_mutex_lock(&s_mtx);
-            if (++s_step >= PROBE_COUNT) {
-                s_state = ST_ANNOUNCING;
-                s_step = 0;
-            }
-            pthread_mutex_unlock(&s_mtx);
-            next_action = t + PROBE_GAP_MS;
-            break;
-        case ST_ANNOUNCING:
-            send_announce(ifindex);
-            pthread_mutex_lock(&s_mtx);
-            if (++s_step >= ANNOUNCE_COUNT) {
-                s_state = ST_READY;
-                s_step = 0;
-                /* 注意:此处已持锁,只能直接读 s_host——snapshot() 会再取同一把
-                 * 非递归互斥锁,曾经在此自死锁并连带卡死 web 线程 */
-                DG_LOGI(TAG, "%s.local 通告完成(_http._tcp 服务已公告)", s_host);
-            }
-            pthread_mutex_unlock(&s_mtx);
-            next_action = t + ANNOUNCE_GAP_MS;
-            break;
-        case ST_READY: {
-            /* IP 变了(拔插网线/DHCP 换租约)必须重通告,否则局域网缓存里
-             * 还是旧地址——这是"按名字访问"最常见的失灵原因 */
-            char before[64] = "";
-            pthread_mutex_lock(&s_mtx);
-            snprintf(before, sizeof(before), "%u.%u.%u.%u", s_ip[0], s_ip[1],
-                     s_ip[2], s_ip[3]);
-            pthread_mutex_unlock(&s_mtx);
-            refresh_ip();
-            char after[64] = "";
-            pthread_mutex_lock(&s_mtx);
-            snprintf(after, sizeof(after), "%u.%u.%u.%u", s_ip[0], s_ip[1],
-                     s_ip[2], s_ip[3]);
-            pthread_mutex_unlock(&s_mtx);
-            if (strcmp(before, after) != 0) {
-                DG_LOGI(TAG, "地址变化,重新通告");
-                send_announce(ifindex);
-            }
-            next_action = t + IP_CHECK_MS;
-            break;
-        }
-        default:
-            break;
-        }
-    }
-    return NULL;
+    char host[96];
+    uint16_t port;
+    snapshot(host, sizeof(host), NULL, 0, &port);
+    DG_LOGI(TAG, "启动:%s(%u 端口)探测中", host, (unsigned)port);
 }
 
-/* ---- 启动/停止 ---- */
+static void mdns_teardown(void *arg)
+{
+    (void)arg;
+    send_goodbye();                            /* 先道别,再收摊 */
+    if (s_udp) {
+        mg_close_conn(s_udp);
+        s_udp = NULL;
+    }
+    pthread_mutex_lock(&s_mtx);
+    s_state = ST_IDLE;
+    s_step = 0;
+    pthread_mutex_unlock(&s_mtx);
+}
 
 /* 逐接口入组:只做 INADDR_ANY 入组时,组播包在部分内核/驱动组合下收不到
  * (实测 eth 口必须按接口入组) */
@@ -507,50 +570,14 @@ static int join_all_interfaces(int sock)
     return joined;
 }
 
-static int open_socket(void)
-{
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0)
-        return -1;
-
-    int on = 1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
-#ifdef SO_REUSEPORT
-    /* 与其它 mDNS 实现(avahi / 手机热点)共存时不抢 5353 */
-    setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
-#endif
-
-    unsigned char ttl = 255;
-    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
-    unsigned char loop = 1;
-    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(MDNS_PORT);
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        DG_LOGW(TAG, "bind 5353 失败(%s),mDNS 不可用", strerror(errno));
-        close(sock);
-        return -1;
-    }
-    if (join_all_interfaces(sock) == 0)
-        DG_LOGW(TAG, "没有一个网口入组成功:组播可能收不到");
-    /* IP_PKTINFO 用来知道包从哪个网口来(多网口时答回原网口) */
-    setsockopt(sock, IPPROTO_IP, IP_PKTINFO, &on, sizeof(on));
-
-    struct timeval tv;
-    tv.tv_sec = 0;
-    tv.tv_usec = RECV_TIMEOUT_MS * 1000;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    return sock;
-}
-
 int mdns_start(void)
 {
     if (mdns_running())
         return DG_OK;
+    if (!netcore_running()) {
+        DG_LOGW(TAG, "netcore 未运行,mDNS 不启动");
+        return DG_ERR_IO;
+    }
 
     /* 主机名限 39 字符:留出 "-9" 后缀空间,重名改名时拼装不会截断 */
     char hbuf[40] = "";
@@ -565,23 +592,7 @@ int mdns_start(void)
     s_running = true;
     pthread_mutex_unlock(&s_mtx);
 
-    s_sock = open_socket();
-    if (s_sock < 0) {
-        pthread_mutex_lock(&s_mtx);
-        s_running = false;
-        pthread_mutex_unlock(&s_mtx);
-        return DG_ERR_IO;
-    }
-
-    if (pthread_create(&s_tid, NULL, mdns_thread, NULL) != 0) {
-        close(s_sock);
-        s_sock = -1;
-        pthread_mutex_lock(&s_mtx);
-        s_running = false;
-        pthread_mutex_unlock(&s_mtx);
-        return DG_ERR_INTERNAL;
-    }
-    DG_LOGI(TAG, "启动:%s.local(%u 端口)探测中", s_host, (unsigned)s_port);
+    netcore_post(mdns_setup, NULL);
     return DG_OK;
 }
 
@@ -589,19 +600,11 @@ void mdns_stop(void)
 {
     if (!mdns_running())
         return;
-    send_goodbye();                            /* 先道别,再收摊 */
     pthread_mutex_lock(&s_mtx);
     s_running = false;
     pthread_mutex_unlock(&s_mtx);
-    pthread_join(s_tid, NULL);
-    if (s_sock >= 0) {
-        close(s_sock);
-        s_sock = -1;
-    }
-    pthread_mutex_lock(&s_mtx);
-    s_state = ST_IDLE;
-    s_step = 0;
-    pthread_mutex_unlock(&s_mtx);
+    /* netcore 已停则闭包被静默丢弃(连接由 mg_mgr_free 兜底关闭) */
+    netcore_post(mdns_teardown, NULL);
 }
 
 bool mdns_running(void)

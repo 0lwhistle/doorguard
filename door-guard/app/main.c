@@ -226,6 +226,7 @@ static const char *const DEP_CAMERA[]    = { "config", "camera" };
 static const char *const DEP_VIS_BE[]    = { "vision_service", "camera" };
 static const char *const DEP_TASKER_ONLY[] = { "tasker" };
 static const char *const DEP_WEB[]       = { "config", "netcore" };
+static const char *const DEP_MDNS[]      = { "config", "netcore" };
 
 /* 跨表依赖解析:服务依赖的 modules 在 holder 表(装配层桥接,registry 保持通用) */
 static int dep_ready(const char *name)
@@ -254,7 +255,7 @@ static registry_err_t register_services(void)
         { "ntp",            mod_ntp,            false, DEP_EVENT_BUS,   1, NULL },
         { "web",            mod_web,            false, DEP_WEB,         2,
           web_server_heartbeat_ms },
-        { "mdns",           mod_mdns,           false, DEP_CONFIG,      1, NULL },
+        { "mdns",           mod_mdns,           false, DEP_MDNS,        2, NULL },
         /* ui 依赖 display:display 由 ui_init 内部初始化(无独立模块),
          * 故此处只声明 config(语言/主题取 cfg) */
         { "ui",             mod_ui,             false, DEP_CONFIG,      1, NULL },
