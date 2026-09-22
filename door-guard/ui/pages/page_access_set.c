@@ -52,24 +52,18 @@ MAKE_PICKER(door, "door_open_ms", door_opts, _("开门时长"))
 MAKE_PICKER(lockn, "pwd_fail_lock_n", lockn_opts, _("密码连错锁定"))
 MAKE_PICKER(locks, "pwd_fail_lock_s", locks_opts, _("锁定秒数"))
 
-static lv_obj_t *s_labels[3];
+static lv_obj_t *s_row_btns[3];
 
 static void refresh_labels(void)
 {
     const dg_cfg_t *c = cfg_get();
     char t[64];
-    if (s_labels[0]) {
-        snprintf(t, sizeof(t), "%s: %dms", _("开门时长"), c->door_open_ms);
-        lv_label_set_text(s_labels[0], t);
-    }
-    if (s_labels[1]) {
-        snprintf(t, sizeof(t), "%s: %d", _("密码连错锁定"), c->pwd_fail_lock_n);
-        lv_label_set_text(s_labels[1], t);
-    }
-    if (s_labels[2]) {
-        snprintf(t, sizeof(t), "%s: %ds", _("锁定秒数"), c->pwd_fail_lock_s);
-        lv_label_set_text(s_labels[2], t);
-    }
+    snprintf(t, sizeof(t), "%s: %dms", _("开门时长"), c->door_open_ms);
+    dg_btn_set_label(s_row_btns[0], t);
+    snprintf(t, sizeof(t), "%s: %d", _("密码连错锁定"), c->pwd_fail_lock_n);
+    dg_btn_set_label(s_row_btns[1], t);
+    snprintf(t, sizeof(t), "%s: %ds", _("锁定秒数"), c->pwd_fail_lock_s);
+    dg_btn_set_label(s_row_btns[2], t);
 }
 
 void page_access_set_create(lv_obj_t *parent)
@@ -84,26 +78,23 @@ void page_access_set_create(lv_obj_t *parent)
     lv_obj_set_style_text_color(title, DG_COL_TEXT(), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 24);
 
-    struct {
+    const struct {
         const char *icon;
         void (*click)(lv_event_t *);
-        lv_obj_t **label;
     } rows[] = {
-        { LV_SYMBOL_OK,       door_click,    &s_labels[0] },
-        { LV_SYMBOL_CLOSE,    lockn_click,   &s_labels[1] },
-        { LV_SYMBOL_EYE_OPEN, locks_click,   &s_labels[2] },
+        { LV_SYMBOL_OK,       door_click  },
+        { LV_SYMBOL_CLOSE,    lockn_click },
+        { LV_SYMBOL_EYE_OPEN, locks_click },
     };
 
-    for (int i = 0; i < 4; i++) {
-        lv_obj_t *btn = dg_btn_create(parent, rows[i].icon, "");
+    /* 循环上限必须与 rows 项数一致:此前写成 4,第 4 次迭代越界读栈上垃圾
+     * 指针直接段错误——点进本页即黑屏(2026-09-22 用户反馈) */
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *btn = dg_btn_create(parent, rows[i].icon, " ");
         lv_obj_set_size(btn, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
         lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, 110 + i * (DG_BTN_H + DG_PAD));
         lv_obj_add_event_cb(btn, rows[i].click, LV_EVENT_CLICKED, NULL);
-        /* 按钮内的文本 label 动态更新 */
-        lv_obj_t *row = lv_obj_get_child(btn, 0);
-        *rows[i].label = lv_label_create(row);
-        lv_obj_set_style_text_font(*rows[i].label, DG_FONT_CN, 0);
-        lv_obj_set_style_text_color(*rows[i].label, DG_COL_BG(), 0);
+        s_row_btns[i] = btn;
     }
     refresh_labels();
 
@@ -115,6 +106,6 @@ void page_access_set_create(lv_obj_t *parent)
 
 void page_access_set_destroy(void)
 {
-    s_labels[0] = s_labels[1] = s_labels[2] = NULL;
+    s_row_btns[0] = s_row_btns[1] = s_row_btns[2] = NULL;
     DG_LOGI("[ACCESS_SET]", "page destroy");
 }

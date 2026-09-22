@@ -55,6 +55,11 @@ int db_user_clear_face(const char *user_id);
 int db_user_del(const char *user_id);
 int db_user_get(const char *user_id, user_rec_t *out);
 int db_user_count(uint32_t *n);
+/** 按 user_id 字典序列出全部用户 ID(用户管理列表数据源)。此前 UI 靠
+ *  "1..2000 逐个探测数字 ID"拼列表,字母/前导零/超 2000 的合法 ID 永远
+ *  不显示(计数却正常)——列表必须来自真实枚举而非猜测。
+ *  ids 为调用方分配的 cap 个槽位;out_n 返回实际写入数(≤cap) */
+int db_user_list_ids(char ids[][DG_UID_LEN], uint32_t cap, uint32_t *out_n);
 /** 按权限计数(role 见 dg_role_t)。用途:菜单入口判断"系统里还有没有管理员"——
  *  一个都没有时必须免认证放行,否则新机/管理员被删光后菜单永远打不开 */
 int db_user_count_role(int32_t role, uint32_t *n);

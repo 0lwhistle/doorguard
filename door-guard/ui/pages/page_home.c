@@ -1,7 +1,7 @@
 /*
  * page_home.c — 主页视图(spec-ui §3.1):推流画布 + 脸框 + 提示条 + 按钮
  *
- * 分层(pages 层,纯视图):建控件、33ms 刷画布、按钮点击转 bridge 动作;
+ * 分层(pages 层,纯视图):建控件、20ms 刷预览、按钮点击转 bridge 动作;
  * 渲染内容事件经 setter 注入(page_home_set_*),业务在 presenter_home。
  */
 #include "page_home.h"
@@ -13,46 +13,119 @@
 
 #include "modules/camera/camera.h"
 #include "modules/net/net_info.h"
+#include "port.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-static lv_obj_t *s_canvas = NULL;
-static lv_color_t *s_canvas_buf = NULL;
+static lv_obj_t *s_preview = NULL;     /* 预览(lv_img:降采样缓冲 + zoom 铺满) */
+static uint32_t *s_prev_buf = NULL;    /* 抽点后的 XRGB 缓冲(lv_img_dsc_t 包裹) */
+static lv_img_dsc_t s_prev_dsc;
+static int32_t s_prev_w, s_prev_h;     /* 缓冲尺寸(已抽点) */
+static int32_t s_frame_w = -1, s_frame_h = -1; /* 接入帧尺寸(变化则重建) */
 static lv_obj_t *s_facebox = NULL;
 static lv_obj_t *s_hint = NULL;
 static lv_obj_t *s_clock = NULL;
 static lv_obj_t *s_net = NULL;         /* WiFi 图标(绿=在线/红=离线) */
 static lv_timer_t *s_pump_timer = NULL;
 static lv_timer_t *s_status_timer = NULL;
-static uint32_t s_last_seq;            /* 上次画到画布的帧序号(去重:相机比刷屏
+static uint32_t s_last_seq;            /* 上次画到缓冲的帧序号(去重:相机比刷屏
                                           慢时不再重复整屏 invalidate) */
+static uint32_t s_stat_frames;         /* 帧率统计(4s 一报,板上标定用) */
+static uint32_t s_stat_t0;
 
-/* ---- 相机帧 → 画布(66ms 轮询,15fps;预览整屏重绘走 CPU,30fps 会把
- * LVGL 时间预算吃光——触摸/弹窗全卡。15fps 对门禁预览足够顺滑) ---- */
+/* ---- 相机帧 → 预览(20ms 轮询采样;相机 30fps) ----
+ * 教训:整幅 720×1280 直拷 + LVGL8.3 纯软渲染整屏重绘,30fps 吃光时间预算
+ * (上轮因此降到 15fps)。现把帧 2:1 抽点进 360×640 缓冲(拷贝带宽 1/4),
+ * lv_img zoom 2x 铺满整屏——检测框/提示/按钮仍是屏幕域坐标,铺满后照常对齐。
+ * 每 4s 报一次实测 fps 与拷贝耗时,板上标定预算用 */
+
+static void preview_setup(const camera_frame_t *f)
+{
+    /* 抽点档位(DG_UI_PREVIEW_DEC 板上标定用):1=原幅直通(默认,非变换
+     * 快路径,板上实测 26fps);2=1/2 幅+zoom 2x(拷贝省 3/4,但 LVGL8.3
+     * 走逐像素变换路径,实测仅 19fps,故不默认)。帧小于屏(模拟器)原样进 */
+    int dec = 0;
+    const char *e = getenv("DG_UI_PREVIEW_DEC");
+    if (e && (*e == '1' || *e == '2' || *e == '4'))
+        dec = *e - '0';
+    if (!dec)
+        dec = 1;
+
+    uint32_t *buf = malloc((size_t)f->w / dec * (f->h / dec) * 4);
+    if (!buf)
+        return;
+    free(s_prev_buf);
+    s_prev_buf = buf;
+    s_prev_w = f->w / dec;
+    s_prev_h = f->h / dec;
+    s_frame_w = f->w;
+    s_frame_h = f->h;
+
+    memset(&s_prev_dsc, 0, sizeof(s_prev_dsc));
+    s_prev_dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
+    s_prev_dsc.header.w = (uint32_t)s_prev_w;
+    s_prev_dsc.header.h = (uint32_t)s_prev_h;
+    s_prev_dsc.data = (const uint8_t *)s_prev_buf;
+    s_prev_dsc.data_size = (size_t)s_prev_w * s_prev_h * 4;
+    lv_img_set_src(s_preview, &s_prev_dsc);
+    lv_img_set_antialias(s_preview, false); /* 最近邻:便宜,且整数倍放大无糊边 */
+    lv_img_set_pivot(s_preview, s_prev_w / 2, s_prev_h / 2);
+    /* cover:放大到铺满整屏(「预览铺满」是脸框/提示屏幕域坐标成立的前提) */
+    int32_t zx = ((int32_t)256 * DG_SCREEN_W + s_prev_w / 2) / s_prev_w;
+    int32_t zy = ((int32_t)256 * DG_SCREEN_H + s_prev_h / 2) / s_prev_h;
+    lv_img_set_zoom(s_preview, (uint16_t)(zx > zy ? zx : zy));
+    lv_obj_center(s_preview);
+    s_last_seq = 0;
+}
+
+static void preview_blit(const camera_frame_t *f)
+{
+    const uint32_t *src = (const uint32_t *)f->pixels;
+    int32_t sx = f->w / s_prev_w;          /* 抽点步长(2/4,或原幅档 1) */
+    int32_t sy = f->h / s_prev_h;
+    if (sx == 1 && sy == 1) {
+        /* 原幅档:整行 memcpy(glibc 走 NEON,比逐元素快 ~3x,实测 blit
+         * 10ms→4ms 级) */
+        for (int32_t y = 0; y < s_prev_h; y++)
+            memcpy(s_prev_buf + (size_t)y * s_prev_w,
+                   src + (size_t)y * f->w, (size_t)s_prev_w * 4);
+        return;
+    }
+    for (int32_t y = 0; y < s_prev_h; y++) {
+        const uint32_t *sr = src + (size_t)(y * sy) * f->w;
+        uint32_t *dr = s_prev_buf + (size_t)y * s_prev_w;
+        for (int32_t x = 0; x < s_prev_w; x++)
+            dr[x] = sr[x * sx];
+    }
+}
 
 static void canvas_timer_cb(lv_timer_t *t)
 {
     (void)t;
     const camera_frame_t *f = camera_latest();
-    if (!f || !s_canvas)
+    if (!f || !s_preview || f->seq == s_last_seq)
         return;
-    int32_t w = f->w > DG_SCREEN_W ? DG_SCREEN_W : f->w;
-    int32_t h = f->h > DG_SCREEN_H ? DG_SCREEN_H : f->h;
-    if (!s_canvas_buf) {
-        s_canvas_buf = malloc((size_t)w * h * sizeof(lv_color_t));
-        if (!s_canvas_buf)
-            return;
-        lv_canvas_set_buffer(s_canvas, s_canvas_buf, w, h, LV_IMG_CF_TRUE_COLOR);
-        lv_obj_center(s_canvas);
-        s_last_seq = 0;
-    }
-    if (f->w == w && f->h == h && f->seq != s_last_seq) {
-        s_last_seq = f->seq;
-        lv_canvas_copy_buf(s_canvas, (const lv_color_t *)f->pixels, 0, 0, w, h);
-        lv_obj_invalidate(s_canvas);
+    if (!s_prev_buf || f->w != s_frame_w || f->h != s_frame_h)
+        preview_setup(f);
+    if (!s_prev_buf)
+        return;
+    uint32_t t0 = dg_ui_tick_ms();
+    preview_blit(f);
+    s_last_seq = f->seq;
+    lv_obj_invalidate(s_preview);
+
+    s_stat_frames++;
+    uint32_t now = dg_ui_tick_ms();
+    if (!s_stat_t0)
+        s_stat_t0 = now;
+    if (now - s_stat_t0 >= 4000) {
+        DG_LOGI("[HOME]", "preview fps=%u blit=%ums",
+                s_stat_frames * 1000u / (now - s_stat_t0), now - t0);
+        s_stat_frames = 0;
+        s_stat_t0 = now;
     }
 }
 
@@ -110,7 +183,7 @@ void page_home_create(lv_obj_t *parent)
 {
     DG_LOGI("[HOME]", "page create");
 
-    s_canvas = lv_canvas_create(parent);
+    s_preview = lv_img_create(parent);
 
     s_facebox = lv_obj_create(parent);
     lv_obj_remove_style_all(s_facebox);
@@ -167,8 +240,8 @@ void page_home_create(lv_obj_t *parent)
     lv_obj_align(verify_btn, LV_ALIGN_BOTTOM_RIGHT, -DG_PAD, -DG_PAD);
     lv_obj_add_event_cb(verify_btn, on_verify_btn, LV_EVENT_CLICKED, NULL);
 
-    s_pump_timer = lv_timer_create(canvas_timer_cb, 66, NULL); /* 15fps:整屏重绘是
-                                                                  CPU 活,30fps 拖垮 UI */
+    s_pump_timer = lv_timer_create(canvas_timer_cb, 20, NULL); /* 50Hz 采样:相机
+                                                                  30fps 自由跑,泵频高于帧频才不吃拍频损失(seq 去重后空转近乎零成本) */
 }
 
 void page_home_destroy(void)
@@ -182,11 +255,15 @@ void page_home_destroy(void)
         lv_timer_del(s_status_timer);
         s_status_timer = NULL;
     }
-    if (s_canvas_buf) {
-        free(s_canvas_buf);
-        s_canvas_buf = NULL;
+    if (s_prev_buf) {
+        free(s_prev_buf);
+        s_prev_buf = NULL;
     }
-    s_canvas = NULL;
+    s_preview = NULL;
+    s_frame_w = -1;
+    s_frame_h = -1;
+    s_stat_frames = 0;
+    s_stat_t0 = 0;
     s_facebox = NULL;
     s_hint = NULL;
     s_clock = NULL;

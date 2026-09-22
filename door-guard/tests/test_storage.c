@@ -546,11 +546,53 @@ static void test_avatar(void)
     DG_CHECK(db_user_get_avatar("20001", got, sizeof(got), &len) == DG_ERR_NOT_FOUND);
 }
 
+/* ================= 8 用户 ID 枚举(用户管理列表数据源) ================= */
+
+/* 回归:UI 列表此前按 "1..2000 数字探测"拼行,字母/前导零/超 2000 的合法
+ * ID 永远不显示(计数却正常)。列表必须来自真实枚举——本用例锁死该语义 */
+static void test_user_list_ids(void)
+{
+    printf("[S8] user list ids: 字母/前导零/超界 ID 全部可枚举且字典序\n");
+    fresh_setup();
+
+    user_rec_t u;
+    u = make_user("abc", "字母ID", "pwd1");
+    DG_CHECK(db_user_add(&u) == DG_OK);
+    u = make_user("007", "前导零", "pwd2");
+    DG_CHECK(db_user_add(&u) == DG_OK);
+    u = make_user("10001", "超两千", "pwd3");
+    DG_CHECK(db_user_add(&u) == DG_OK);
+    u = make_user("123", "普通数字", "pwd4");
+    DG_CHECK(db_user_add(&u) == DG_OK);
+
+    char ids[8][DG_UID_LEN];
+    uint32_t n = 0;
+    DG_CHECK(db_user_list_ids(ids, 8, &n) == DG_OK && n == 4);
+    /* 字典序:007 < 10001 < 123 < abc */
+    DG_CHECK(strcmp(ids[0], "007") == 0);
+    DG_CHECK(strcmp(ids[1], "10001") == 0);
+    DG_CHECK(strcmp(ids[2], "123") == 0);
+    DG_CHECK(strcmp(ids[3], "abc") == 0);
+
+    /* cap 截断:只取前 2 个 */
+    DG_CHECK(db_user_list_ids(ids, 2, &n) == DG_OK && n == 2);
+
+    /* 空库 */
+    DG_CHECK(db_user_del("abc") == DG_OK && db_user_del("007") == DG_OK);
+    DG_CHECK(db_user_del("10001") == DG_OK && db_user_del("123") == DG_OK);
+    DG_CHECK(db_user_list_ids(ids, 8, &n) == DG_OK && n == 0);
+
+    /* 参数防御 */
+    DG_CHECK(db_user_list_ids(NULL, 8, &n) == DG_ERR_PARAM);
+    DG_CHECK(db_user_list_ids(ids, 0, &n) == DG_ERR_PARAM || n == 0);
+}
+
 int main(void)
 {
     test_add();          /* 含 2000 边界,最慢 */
     test_password();
     test_field_valid();
+    test_user_list_ids();
     test_logs();
     test_config();
     test_crypto();

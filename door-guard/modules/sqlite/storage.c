@@ -1036,6 +1036,36 @@ int db_user_count_role(int32_t role, uint32_t *n)
     return rc;
 }
 
+int db_user_list_ids(char ids[][DG_UID_LEN], uint32_t cap, uint32_t *out_n)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!ids || !out_n)
+        return DG_ERR_PARAM;
+
+    *out_n = 0;
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    int rc = DG_OK;
+    if (sqlite3_prepare_v2(s_db, "SELECT user_id FROM users ORDER BY user_id",
+                           -1, &st, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    while (sqlite3_step(st) == SQLITE_ROW && *out_n < cap) {
+        const char *id = (const char *)sqlite3_column_text(st, 0);
+        if (!id) {
+            rc = DG_ERR_DB;
+            break;
+        }
+        snprintf(ids[*out_n], DG_UID_LEN, "%s", id);
+        (*out_n)++;
+    }
+    sqlite3_finalize(st);
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
 int db_verify_password(const char *user_id, const char *pwd, user_rec_t *out)
 {
     if (!s_db)

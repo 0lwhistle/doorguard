@@ -48,30 +48,41 @@ static void refresh_list(void)
     uint32_t total = 0;
     if (db_user_count(&total) != DG_OK)
         return;
-    uint32_t shown = 0;
-    char uid[DG_UID_LEN];
-    for (uint32_t i = 1; i <= DG_USER_MAX && shown < USERS_PAGE_SIZE; i++) {
-        /* 稀疏 ID:从 1 递增探测(用户 ID 由操作员自定义,演示库按序号) */
-        snprintf(uid, sizeof(uid), "%u", i);
+    /* 列表来自真实枚举(字典序,取本页容量),不再按 1..2000 探测数字 ID——
+     * 字母/前导零/超界 ID 的合法用户此前永远不显示,计数却正常 */
+    static char ids[USERS_PAGE_SIZE][DG_UID_LEN];
+    uint32_t n = 0;
+    if (db_user_list_ids(ids, USERS_PAGE_SIZE, &n) != DG_OK)
+        return;
+    for (uint32_t i = 0; i < n; i++) {
         user_rec_t rec;
-        if (db_user_get(uid, &rec) != DG_OK)
+        if (db_user_get(ids[i], &rec) != DG_OK)
             continue;
         char rowtxt[DG_UID_LEN + DG_NAME_LEN + 16];
         snprintf(rowtxt, sizeof(rowtxt), "%s %s [%s]", rec.user_id, rec.user_name,
                  role_name(rec.role));
-        snprintf(s_row_uids[shown], sizeof(s_row_uids[shown]), "%s", rec.user_id);
+        snprintf(s_row_uids[i], sizeof(s_row_uids[i]), "%s", rec.user_id);
         /* 行首头像缩略图(40×40,libjpeg 1/4 缩放解码 + 控件内缓存);
          * 无头像传 NULL,行为与旧列表一致 */
         lv_obj_t *row = dg_list_add_row(s_list, dg_avatar_get(rec.user_id, DG_AVATAR_THUMB),
                                         rowtxt, on_row_click);
-        lv_obj_set_user_data(row, s_row_uids[shown]);
-        shown++;
+        lv_obj_set_user_data(row, s_row_uids[i]);
+        /* 编辑入口必须「看得见」:行点击=编辑是无形交互,用户找不到怎么改
+         * (2026-09-22 反馈「看不到编辑选项」)。行右侧常驻提示,整行可点 */
+        lv_obj_t *hint = lv_label_create(row);
+        lv_label_set_text(hint, _("编辑 >"));
+        lv_obj_set_style_text_font(hint, DG_FONT_CN, 0);
+        lv_obj_set_style_text_color(hint, DG_COL_TEXT(), 0);
+        lv_obj_set_style_text_opa(hint, LV_OPA_70, 0);
+        lv_obj_align(hint, LV_ALIGN_RIGHT_MID, -12, 0);
+        lv_obj_clear_flag(hint, LV_OBJ_FLAG_CLICKABLE);
     }
     if (s_title) {
         char t[32];
         snprintf(t, sizeof(t), "%s (%u)", _("用户管理"), total);
         lv_label_set_text(s_title, t);
     }
+    DG_LOGI("[USERS]", "list rows=%u/%u first=%s", n, total, n ? ids[0] : "-");
 }
 
 static void on_row_click(lv_event_t *e)
