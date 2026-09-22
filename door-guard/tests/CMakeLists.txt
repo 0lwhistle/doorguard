@@ -105,6 +105,8 @@ add_test(NAME test_ota COMMAND test_ota)
 set_tests_properties(test_ota PROPERTIES TIMEOUT 120)
 
 # i18n 一致性:扫描源码 _() 键 + 双 json 覆盖 + 裸中文检查 + 字体字形覆盖
+# v9 模式暂排(C1 时点 ui/ 仍是 v8 API;C3 迁移完成后解除本守卫)
+if(NOT DG_USE_LVGL9)
 add_executable(test_i18n test_i18n.c)
 target_compile_definitions(test_i18n PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_include_directories(test_i18n PRIVATE ${CMAKE_SOURCE_DIR}/third_party/lvgl)
@@ -118,6 +120,7 @@ target_compile_definitions(test_widgets PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DI
 target_link_libraries(test_widgets PRIVATE lvgl dg_ui)
 add_test(NAME test_widgets COMMAND test_widgets)
 set_tests_properties(test_widgets PROPERTIES TIMEOUT 60)
+endif()
 
 # 模块 demo 冒烟(使用示例须始终可运行)
 macro(dg_add_demo name src)
@@ -133,12 +136,22 @@ dg_add_demo(demo_tasker ${CMAKE_SOURCE_DIR}/components/tasker/demo_tasker.c dg_t
 dg_add_demo(demo_holder ${CMAKE_SOURCE_DIR}/components/holder/demo_holder.c dg_holder)
 
 # 触摸 evdev 解析纯逻辑(板上 fts_ts/goodix 事件协议;宿主无设备直测解析)
+# 被测源 touch_evdev.c 含 v8/v9 双栈注册(#ifdef DG_USE_LVGL9),按构建代际
+# 切头文件路径与编译定义;测试内容两个代际完全同一份
 add_executable(test_touch_evdev test_touch_evdev.c
                ${CMAKE_SOURCE_DIR}/modules/display/touch_evdev.c
                ${CMAKE_SOURCE_DIR}/modules/display/touch_activity.c)
-target_include_directories(test_touch_evdev PRIVATE
-    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
-    ${CMAKE_SOURCE_DIR}/third_party/lvgl)
-target_link_libraries(test_touch_evdev PRIVATE lvgl dg_ui dg_log)
+if(DG_USE_LVGL9)
+    target_compile_definitions(test_touch_evdev PRIVATE DG_USE_LVGL9=1)
+    target_include_directories(test_touch_evdev PRIVATE
+        ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
+        ${CMAKE_SOURCE_DIR}/third_party/lvgl9)
+    target_link_libraries(test_touch_evdev PRIVATE lvgl dg_log)
+else()
+    target_include_directories(test_touch_evdev PRIVATE
+        ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
+        ${CMAKE_SOURCE_DIR}/third_party/lvgl)
+    target_link_libraries(test_touch_evdev PRIVATE lvgl dg_ui dg_log)
+endif()
 add_test(NAME test_touch_evdev COMMAND test_touch_evdev)
 set_tests_properties(test_touch_evdev PROPERTIES TIMEOUT 60)

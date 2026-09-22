@@ -27,7 +27,11 @@
 static dg_touch_t s_touch;
 static int s_fd = -1;
 
+#ifdef DG_USE_LVGL9
+static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data);
+#else
 static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data);
+#endif
 
 /* ---------- 纯逻辑:事件解析 ---------- */
 
@@ -215,17 +219,40 @@ int touch_evdev_start(int scr_w, int scr_h)
             s_touch.tx_min, s_touch.tx_max, s_touch.ty_min, s_touch.ty_max,
             scr_w, scr_h, s_touch.swap_xy, s_touch.invert_x, s_touch.invert_y);
 
+#ifdef DG_USE_LVGL9
+    /* v9:indev 是对象式 API;display 由 display_drm_v9/display_sim 先注册,
+     * 这里取默认 display 关联(触摸解析/校准与 v8 完全共用) */
+    lv_indev_t *indev = lv_indev_create();
+    if (!indev) {
+        DG_LOGE("[TOUCH]", "lv_indev_create 失败");
+        close(s_fd);
+        s_fd = -1;
+        return DG_ERR_NO_MEMORY;
+    }
+    lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(indev, touch_read_cb);
+    lv_indev_set_display(indev, lv_display_get_default());
+#else
     static lv_indev_drv_t drv;
     lv_indev_drv_init(&drv);
     drv.type = LV_INDEV_TYPE_POINTER;
     drv.read_cb = touch_read_cb;
     lv_indev_drv_register(&drv);
+#endif
     return DG_OK;
 }
 
+#ifdef DG_USE_LVGL9
+static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
+#else
 static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
+#endif
 {
+#ifdef DG_USE_LVGL9
+    (void)indev;
+#else
     (void)drv;
+#endif
     if (s_fd >= 0) {
         struct input_event ev[32];
         ssize_t n = read(s_fd, ev, sizeof(ev));

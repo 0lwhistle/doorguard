@@ -103,15 +103,41 @@ add_library(dg_jpeg STATIC modules/jpeg/dg_jpeg.c)
 target_include_directories(dg_jpeg PUBLIC ${CMAKE_SOURCE_DIR}/modules/jpeg)
 target_link_libraries(dg_jpeg PUBLIC dg_proto ${DG_JPEG_LIB})
 
-# ---- LVGL 8.3(third_party 源码双端同源编译:板上不再依赖 sysroot 的
-# liblvgl.so,以获得自定义 lv_conf:CJK 字体/256KB 内存池) ----
-file(GLOB_RECURSE LVGL_SRCS third_party/lvgl/src/*.c)
-add_library(lvgl STATIC ${LVGL_SRCS})
-target_include_directories(lvgl PUBLIC ${CMAKE_SOURCE_DIR}/third_party/lvgl)
-target_compile_definitions(lvgl PUBLIC LV_CONF_INCLUDE_SIMPLE)
-target_compile_options(lvgl PRIVATE -w)   # vendored 源码不改动内容,告警豁免
+# ---- LVGL(两代 vendored 源码按 DG_USE_LVGL9 二选一,同一 `lvgl` 目标名,
+# 上层链接点零改动)。OFF = 完整回退 8.3 旧栈(运行期回退通道,必须常绿)。
+# C1 定版:默认 ON(契约 §2);显式 -DDG_USE_LVGL9=OFF 即回退 ----
+option(DG_USE_LVGL9 "Use LVGL 9.5 (third_party/lvgl9) instead of 8.3" ON)
+if(DG_USE_LVGL9)
+    file(GLOB_RECURSE LVGL_SRCS third_party/lvgl9/src/*.c)
+    add_library(lvgl STATIC ${LVGL_SRCS})
+    # include 根 = third_party/lvgl9:`#include "lvgl.h"` 路径与 8.3 一致,
+    # ui 层源码零 include 改动;lv_conf9 就在此根下(LV_CONF_INCLUDE_SIMPLE)
+    target_include_directories(lvgl PUBLIC ${CMAKE_SOURCE_DIR}/third_party/lvgl9)
+    target_compile_definitions(lvgl PUBLIC LV_CONF_INCLUDE_SIMPLE)
+    target_compile_options(lvgl PRIVATE -w)   # vendored 源码不改动内容,告警豁免
+    # v9 内置 Linux DRM 驱动(LV_USE_LINUX_DRM=1)的头会经 lvgl.h 进入所有
+    # 使用方:xf86drmMode.h 内部 #include <drm.h>,须再给 libdrm 子目录路径。
+    # 交叉取 sysroot,宿主取发行版 libdrm-dev;PUBLIC 保证每个含 lvgl.h 的
+    # 编译单元都能解析(drm.h 不在默认搜索路径)
+    if(CMAKE_SYSROOT AND EXISTS "${CMAKE_SYSROOT}/usr/include/libdrm/drm.h")
+        target_include_directories(lvgl SYSTEM PUBLIC
+            ${CMAKE_SYSROOT}/usr/include/libdrm)
+    elseif(EXISTS "/usr/include/libdrm/drm.h")
+        target_include_directories(lvgl SYSTEM PUBLIC /usr/include/libdrm)
+    endif()
+else()
+    # ---- LVGL 8.3(third_party 源码双端同源编译:板上不再依赖 sysroot 的
+    # liblvgl.so,以获得自定义 lv_conf:CJK 字体/256KB 内存池) ----
+    file(GLOB_RECURSE LVGL_SRCS third_party/lvgl/src/*.c)
+    add_library(lvgl STATIC ${LVGL_SRCS})
+    target_include_directories(lvgl PUBLIC ${CMAKE_SOURCE_DIR}/third_party/lvgl)
+    target_compile_definitions(lvgl PUBLIC LV_CONF_INCLUDE_SIMPLE)
+    target_compile_options(lvgl PRIVATE -w)   # vendored 源码不改动内容,告警豁免
+endif()
 
 # ---- UI 子系统(theme/i18n/widgets/page_mgr/字体) ----
+# v9 模式暂不编 ui/(C1 时点 ui/ 仍是 v8 API;C2 迁移完成后解除本守卫)
+if(NOT DG_USE_LVGL9)
 file(GLOB DG_WIDGET_SRCS ui/widgets/*.c)
 add_library(dg_ui STATIC
     ui/ui.c
@@ -147,6 +173,7 @@ add_library(dg_ui STATIC
 target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DIR}/services/access)
 target_link_libraries(dg_ui PUBLIC lvgl dg_config dg_access dg_storage dg_jpeg
                                    dg_net_info)
+endif()
 
 # access:验证状态机 + 认证融合服务(FSM 持有者,日志/开门唯一出口)
 add_library(dg_access STATIC
@@ -291,25 +318,40 @@ if(DG_BUILD_TESTS)
     return()
 endif()
 
-# ---- 显示/相机模块(按端选择 sim 后端;#ifdef 只出现在后端与 main) ----
+# ---- 显示/相机模块(按端与 DG_USE_LVGL9 选择后端;#ifdef 只出现在后端与 main) ----
 if(DG_SIM)
     find_package(SDL2 REQUIRED)
-    add_library(dg_display STATIC modules/display/display_sim.c
-                                  modules/display/touch_activity.c)
+    if(DG_USE_LVGL9)
+        add_library(dg_display STATIC modules/display/display_sim_v9.c
+                                      modules/display/touch_activity.c)
+        target_compile_definitions(dg_display PRIVATE DG_USE_LVGL9=1)
+    else()
+        add_library(dg_display STATIC modules/display/display_sim.c
+                                      modules/display/touch_activity.c)
+    endif()
     target_link_libraries(dg_display PUBLIC lvgl SDL2::SDL2)
     add_library(dg_camera STATIC modules/camera/camera_sim.c)
     target_include_directories(dg_camera PRIVATE ${CMAKE_SOURCE_DIR}/third_party/stb)
     target_link_libraries(dg_camera PUBLIC m)   # stb_image 解码用到 pow
 else()
-    add_library(dg_display STATIC modules/display/display_drm.c
-                                  modules/display/touch_evdev.c
-                                  modules/display/touch_activity.c
-                                  third_party/lv_drivers/drm.c)
-    # 顺序敏感:libdrm 在前——lv_drivers/drm.c 内部 #include <drm.h> 必须解析到
-    # libdrm 的 drm.h 而不是本目录同名头(避免 xf86drm 类型未定义)
-    target_include_directories(dg_display PRIVATE ${CMAKE_SYSROOT}/usr/include/libdrm)
-    target_include_directories(dg_display PRIVATE ${CMAKE_SOURCE_DIR}/third_party/lv_drivers)
-    set_source_files_properties(third_party/lv_drivers/drm.c PROPERTIES COMPILE_OPTIONS "-w")
+    if(DG_USE_LVGL9)
+        # v9:内置 Linux DRM 驱动(dumb x2 + atomic 翻转)在 lvgl 库内编译,
+        # 这里只留薄封装 + 自研触摸;lv_drivers 不再参与
+        add_library(dg_display STATIC modules/display/display_drm_v9.c
+                                      modules/display/touch_evdev.c
+                                      modules/display/touch_activity.c)
+        target_compile_definitions(dg_display PRIVATE DG_USE_LVGL9=1)
+    else()
+        add_library(dg_display STATIC modules/display/display_drm.c
+                                      modules/display/touch_evdev.c
+                                      modules/display/touch_activity.c
+                                      third_party/lv_drivers/drm.c)
+        # 顺序敏感:libdrm 在前——lv_drivers/drm.c 内部 #include <drm.h> 必须解析到
+        # libdrm 的 drm.h 而不是本目录同名头(避免 xf86drm 类型未定义)
+        target_include_directories(dg_display PRIVATE ${CMAKE_SYSROOT}/usr/include/libdrm)
+        target_include_directories(dg_display PRIVATE ${CMAKE_SOURCE_DIR}/third_party/lv_drivers)
+        set_source_files_properties(third_party/lv_drivers/drm.c PROPERTIES COMPILE_OPTIONS "-w")
+    endif()
     target_link_libraries(dg_display PUBLIC lvgl drm)   # libdrm:sysroot 实测有
     add_library(dg_camera STATIC modules/camera/camera_board.c)
     target_include_directories(dg_camera PRIVATE
@@ -317,6 +359,13 @@ else()
         ${CMAKE_SYSROOT}/usr/include/rga)
     # rkaiq:3A 经板上 rkaiq_3A_server;librga:NV12→XRGB 硬件旋转转换
     target_link_libraries(dg_camera PUBLIC rkaiq rga)
+endif()
+
+# LVGL9 最小渲染验证入口(C1 门禁工具):不依赖 ui 层,sim(SDL)与交叉(DRM)
+# 同一份 main;自动取证见 lvgl9_smoke.c 头注(DG_SMOKE_FRAMES/DG_SMOKE_DUMP_BMP)
+if(DG_USE_LVGL9)
+    add_executable(dg_lvgl9_smoke modules/display/lvgl9_smoke.c)
+    target_link_libraries(dg_lvgl9_smoke PRIVATE dg_display)
 endif()
 target_link_libraries(dg_display PUBLIC dg_log)
 target_link_libraries(dg_camera PUBLIC dg_log)
@@ -339,6 +388,8 @@ endif()
 # 可执行文件里烧进 RPATH=/external/iva/...(板上实测 ENOENT 但无害);已移除。
 include_directories(${CMAKE_SOURCE_DIR})
 
+# v9 模式暂不出应用产物(ui/ 迁移完成后解除,与上方 dg_ui 守卫同步)
+if(NOT DG_USE_LVGL9)
 add_executable(door-guard app/main.c)
 # 组件链入应用:装配顺序在 app/main.c(architecture.md §1,main.c 头注同步维护)。
 # --group:lv_conf 时基(LV_TICK_CUSTOM)回引 ui/port.c 而部分 lvgl 成员又被 ui
@@ -351,6 +402,7 @@ target_link_libraries(door-guard PRIVATE
 
 if(DG_SIM)
     target_compile_definitions(door-guard PRIVATE DG_SIM=1)
+endif()
 endif()
 # rockiva     # 官方人脸库(B7 阶段启用)
 # sqlite3     # 存储(启用 storage HAL 时)
