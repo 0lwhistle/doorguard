@@ -87,3 +87,12 @@
   display/ui 层、测试纪律(每阶段跑 `dg-test`)、DEVLOG 逐条记录;
 - 推板前交叉编译零告警;**部署后 md5 核对运行进程**(dg-deploy 写活动槽 + S60 回滚坑);
 - 板端卡死时 `pkill -x door-guard`(勿用 -f,会杀掉自己的 ssh)。
+
+## 8. 三对话执行分工(闲时任务)
+
+- 协作协议/文件所有权/API 契约:**docs/superpowers/specs/lvgl9-migration-contract.md**(唯一权威)
+- 共享日志:**docs/lvgl9-migration-LOG.md**(开工读、收工写)
+- 分工与依赖:C1 基础与显示层(third_party/CMake/modules/display)→ C2 UI 层迁移(ui/**)
+  → C3 测试迁移+板端验收+性能回归(tests/、板端、DEVLOG)。串行依赖,前置 `[DONE]` 才开工;
+  对应本方案阶段 0-1 / 1-2 / 2-3。
+- 回退基线 tag:`lvgl9-baseline`。
