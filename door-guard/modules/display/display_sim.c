@@ -13,6 +13,7 @@
 #include "ui/theme.h"
 
 #include <stdlib.h>
+#include "err.h"
 
 static const char *TAG = "[DISPLAY]";
 
@@ -120,4 +121,25 @@ void display_poll(void)
         if (e.type == SDL_QUIT)
             exit(0);                    /* 关窗即退出:模拟器是开发工具 */
     }
+}
+
+/* ---- video plane 直通:sim 无硬件 plane,恒不可用(页面走软渲染回退) ---- */
+bool display_has_video_plane(void)
+{
+    return false;
+}
+
+int display_video_plane_show(int slot, int dmabuf_fd, int32_t w, int32_t h,
+                             int32_t stride)
+{
+    (void)slot; (void)dmabuf_fd; (void)w; (void)h; (void)stride;
+    return DG_ERR_UNSUPPORTED;
+}
+
+void display_video_plane_hide(void)
+{
+}
+
+void display_clear_fbs(void)
+{
 }

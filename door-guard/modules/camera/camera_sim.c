@@ -153,3 +153,19 @@ void camera_poll(void)
     }
     s_cur = (s_cur + 1) % s_img_cnt;
 }
+
+/* ---- video plane 直通:sim 无硬件,恒不可用 ---- */
+const camera_dmabuf_t *camera_latest_dmabuf(void)
+{
+    return NULL;
+}
+
+void camera_dmabuf_mark_shown(int slot)
+{
+    (void)slot;
+}
+
+void camera_rgb_preview_set(bool on)
+{
+    (void)on;
+}

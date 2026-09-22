@@ -40,12 +40,17 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <linux/dma-heap.h>
 #include <unistd.h>
 
 #define CAM_TAG "[CAMERA]"
 #define CAM_BUF_CNT 4
 #define CAM_OUT_W 720 /* 面板竖屏尺寸;90/270 旋转后目标幅面 */
 #define CAM_OUT_H 1280
+
+/* video plane 直通:旋转后 NV12 的 dma-heap 缓冲池(1 个被 plane 扫描、
+ * 1 个在写、2 个周转;CPU 不 mmap,全程硬件读写) */
+#define VID_BUF_CNT 4
 
 static rk_aiq_sys_ctx_t *s_aiq;
 static int s_vfd = -1;
@@ -55,6 +60,17 @@ static struct {
     void *addr;
     size_t size;
 } s_cap[CAM_BUF_CNT];
+
+static struct {
+    int heap_fd;
+    int fd[VID_BUF_CNT];
+    size_t size;
+} s_vid;
+static int s_vid_w, s_vid_h, s_vid_stride;   /* 旋转后幅面(90° → 720x1280) */
+static camera_dmabuf_t s_dbuf;               /* 最新已旋转帧(seq=0 无帧) */
+static int s_vid_write = -1;                 /* 上次写入槽 */
+static int s_vid_shown = -1;                 /* 正被 plane 扫描的槽 */
+static bool s_rgb_preview = true;            /* XRGB 预览转换开关(plane 模式关) */
 
 /* 三缓冲:capture/视觉(worker 线程)与 UI 轮询并发读,轮转写入——
  * 双缓冲下主循环偶尔连投两帧、UI 还没拷走时第三帧会写回 s_frame 正指向的
@@ -87,6 +103,8 @@ static int xioctl(int fd, unsigned long req, void *arg)
     } while (r < 0 && errno == EINTR);
     return r;
 }
+
+static bool vid_setup(void);
 
 static int rot_from_env(void)
 {
@@ -197,8 +215,9 @@ static void *stream_thread(void *arg)
         return NULL;
     }
     s_ready = true;
-    DG_LOGI(CAM_TAG, "相机后端就绪:%dx%d NV12 → RGA rot=%d → %dx%d XRGB",
-            s_cap_w, s_cap_h, s_rot, s_out_w, s_out_h);
+    DG_LOGI(CAM_TAG, "相机后端就绪:%dx%d NV12 → RGA rot=%d → %dx%d XRGB%s",
+            s_cap_w, s_cap_h, s_rot, s_out_w, s_out_h,
+            vid_setup() ? " + video直通池" : "");
     return NULL;
 }
 
@@ -286,8 +305,8 @@ int camera_init(const char *res_path, camera_frame_fn cb, void *ud)
     return DG_OK;
 }
 
-/* RGA:NV12 → XRGB(BGRA8888 字节序,与 LVGL 32 位直通),含旋转 */
-static bool convert_frame(int buf_idx)
+/* RGA:NV12 → XRGB(BGRA8888 字节序,与 LVGL 32 位直通),含旋转(软渲染回退路径) */
+static bool convert_frame_rgb(int buf_idx)
 {
     /* NV12 Y 平面 1 字节/像素;stride 用驱动返回值(对齐可能大于宽) */
     rga_buffer_t src = wrapbuffer_virtualaddr_t(s_cap[buf_idx].addr, s_cap_w,
@@ -311,6 +330,77 @@ static bool convert_frame(int buf_idx)
         return false;
     }
     return true;
+}
+
+/* video plane 直通缓冲:旋转后 NV12 的 dma-heap 池。reserved(CMA)优先,
+ * system 兜底;CPU 不 mmap——RGA 写、VOP 读,全程硬件 */
+static bool vid_setup(void)
+{
+    s_vid_w = (s_rot == 90 || s_rot == 270) ? s_cap_h : s_cap_w;
+    s_vid_h = (s_rot == 90 || s_rot == 270) ? s_cap_w : s_cap_h;
+    s_vid_stride = s_vid_w;
+    s_vid.size = ((size_t)s_vid_stride * s_vid_h * 3 / 2 + 4095) & ~(size_t)4095;
+
+    const char *heap = "/dev/dma_heap/reserved";
+    s_vid.heap_fd = open(heap, O_RDWR);
+    if (s_vid.heap_fd < 0) {
+        heap = "/dev/dma_heap/system";
+        s_vid.heap_fd = open(heap, O_RDWR);
+    }
+    if (s_vid.heap_fd < 0) {
+        DG_LOGW(CAM_TAG, "dma_heap 不可用,video plane 直通关闭");
+        return false;
+    }
+    for (int i = 0; i < VID_BUF_CNT; i++) {
+        struct dma_heap_allocation_data ad = { 0 };
+        ad.len = s_vid.size;
+        ad.fd_flags = O_RDWR | O_CLOEXEC;
+        if (ioctl(s_vid.heap_fd, DMA_HEAP_IOCTL_ALLOC, &ad) < 0) {
+            DG_LOGW(CAM_TAG, "dma_heap 分配 #%d 失败:%s", i, strerror(errno));
+            close(s_vid.heap_fd);
+            s_vid.heap_fd = -1;
+            return false;
+        }
+        s_vid.fd[i] = (int)ad.fd;
+    }
+    DG_LOGI(CAM_TAG, "video 直通池就绪:%dx%d NV12 x%d(%s)", s_vid_w, s_vid_h,
+            VID_BUF_CNT, heap);
+    return true;
+}
+
+/* 旋转写入第 slot 个 dma-buf 并发布(硬件单次旋转,CPU 零参与)。跳过正被
+ * plane 扫描的槽(撕裂防护),4 槽双跳失败则放弃本帧 */
+static void rotate_to_vid(int cap_idx, uint32_t seq)
+{
+    int cand = (s_vid_write + 1) % VID_BUF_CNT;
+    if (cand == s_vid_shown)
+        cand = (cand + 1) % VID_BUF_CNT;
+    if (cand == s_vid_shown)
+        return;
+
+    rga_buffer_t src = wrapbuffer_virtualaddr_t(s_cap[cap_idx].addr, s_cap_w,
+                                                s_cap_h, s_stride, s_cap_h,
+                                                RK_FORMAT_YCbCr_420_SP);
+    rga_buffer_t dst = wrapbuffer_fd(s_vid.fd[cand], s_vid_w, s_vid_h,
+                                     RK_FORMAT_YCbCr_420_SP,
+                                     s_vid_stride, s_vid_h);
+    int rot_flag = (s_rot == 180)  ? IM_HAL_TRANSFORM_ROT_180
+                   : (s_rot == 270) ? IM_HAL_TRANSFORM_ROT_270
+                                    : (s_rot == 90 ? IM_HAL_TRANSFORM_ROT_90 : 0);
+    IM_STATUS st = imrotate_t(src, dst, rot_flag, 1);
+    if (st != IM_STATUS_NOERROR && st != IM_STATUS_SUCCESS) {
+        static int n_err;
+        if (n_err++ < 3)
+            DG_LOGE(CAM_TAG, "RGA→NV12 失败(%s)", imStrError_t(st));
+        return;
+    }
+    s_vid_write = cand;                      /* 先写内容后发号,读方见新 seq 即完整 */
+    s_dbuf.fd = s_vid.fd[cand];
+    s_dbuf.w = s_vid_w;
+    s_dbuf.h = s_vid_h;
+    s_dbuf.stride = s_vid_stride;
+    s_dbuf.slot = cand;
+    s_dbuf.seq = seq;
 }
 
 /* 归还缓冲(ROCKIVA 释放回调线程调用;V4L2 ioctl 内核侧串行化) */
@@ -349,7 +439,9 @@ void camera_poll(void)
         return; /* EAGAIN=暂无帧,轮询节奏本来就密 */
 
     int idx = buf.index;
-    if (convert_frame(idx)) {
+    s_seq++;                                 /* 帧序号与消费路径解耦:RGA 失败
+                                                也照常发号,视觉/直通不受牵连 */
+    if (s_rgb_preview && convert_frame_rgb(idx)) {
         if (getenv("DG_CAM_DUMP") && s_seq == 0) {
             FILE *f = fopen("/tmp/dg_cam.raw", "wb");
             if (f) {
@@ -368,31 +460,33 @@ void camera_poll(void)
         s_frame.w = s_out_w;
         s_frame.h = s_out_h;
         s_out_idx = (s_out_idx + 1) % 3;
-        s_frame.seq = ++s_seq;
+        s_frame.seq = s_seq;
+    }
+    if (s_vid.heap_fd >= 0)
+        rotate_to_vid(idx, s_seq);
 
-        /* NV12 出口:视觉占用期间不归还,等 release 回调再 QBUF */
-        if (s_nv12_fn) {
-            s_busy[idx] = true;
-            s_fid[idx] = s_frame.seq;
-            s_nv12_fn(s_cap[idx].addr, s_cap_w, s_cap_h, s_frame.seq);
-        }
+    /* NV12 出口:视觉占用期间不归还,等 release 回调再 QBUF */
+    if (s_nv12_fn) {
+        s_busy[idx] = true;
+        s_fid[idx] = s_seq;
+        s_nv12_fn(s_cap[idx].addr, s_cap_w, s_cap_h, s_seq);
+    }
 
-        /* 帧率实测(DG_CAM_FPS_LOG=1):每 5s 报一次实际送达帧率 */
-        if (getenv("DG_CAM_FPS_LOG")) {
-            static uint32_t win_seq;
-            static int64_t win_ms;
-            struct timespec now;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            int64_t ms = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
-            if (win_ms == 0) {
-                win_ms = ms;
-                win_seq = s_seq;
-            } else if (ms - win_ms >= 5000) {
-                DG_LOGI(CAM_TAG, "实测帧率 %.1f fps(5s 窗口 %u 帧)",
-                        (s_seq - win_seq) * 1000.0 / (ms - win_ms), s_seq - win_seq);
-                win_ms = ms;
-                win_seq = s_seq;
-            }
+    /* 帧率实测(DG_CAM_FPS_LOG=1):每 5s 报一次实际送达帧率 */
+    if (getenv("DG_CAM_FPS_LOG")) {
+        static uint32_t win_seq;
+        static int64_t win_ms;
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        int64_t ms = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+        if (win_ms == 0) {
+            win_ms = ms;
+            win_seq = s_seq;
+        } else if (ms - win_ms >= 5000) {
+            DG_LOGI(CAM_TAG, "实测帧率 %.1f fps(5s 窗口 %u 帧)",
+                    (s_seq - win_seq) * 1000.0 / (ms - win_ms), s_seq - win_seq);
+            win_ms = ms;
+            win_seq = s_seq;
         }
     }
 
@@ -425,4 +519,19 @@ int camera_rotation(void)
 const camera_frame_t *camera_latest(void)
 {
     return s_seq ? &s_frame : NULL;
+}
+
+const camera_dmabuf_t *camera_latest_dmabuf(void)
+{
+    return s_dbuf.seq ? &s_dbuf : NULL;
+}
+
+void camera_dmabuf_mark_shown(int slot)
+{
+    s_vid_shown = slot;
+}
+
+void camera_rgb_preview_set(bool on)
+{
+    s_rgb_preview = on;
 }

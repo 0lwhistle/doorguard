@@ -5,7 +5,7 @@
 | 文件 | 端 | 说明 |
 |---|---|---|
 | `camera_sim.c` | DG_SIM | 目录图片循环(stb 解码),开发机无硬件用 |
-| `camera_board.c` | 板 | V4L2+RGA+rkaiq 真实链路(见下) |
+| `camera_board.c` | 板 | V4L2+RGA+rkaiq 真实链路(见下);另有 NV12 dma-buf 直通出口(旋转后 720×1280,`camera_latest_dmabuf`+`mark_shown` 防撕裂,video plane 用) |
 
 ## 板上链路(2026-09-18 B6 打通)
 

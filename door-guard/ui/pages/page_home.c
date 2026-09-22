@@ -10,123 +10,33 @@
 #include "theme.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_popup.h"
+#include "widgets/dg_preview.h"
 
-#include "modules/camera/camera.h"
+#include "modules/display/display.h"
 #include "modules/net/net_info.h"
-#include "port.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-static lv_obj_t *s_preview = NULL;     /* 预览(lv_img:降采样缓冲 + zoom 铺满) */
-static uint32_t *s_prev_buf = NULL;    /* 抽点后的 XRGB 缓冲(lv_img_dsc_t 包裹) */
-static lv_img_dsc_t s_prev_dsc;
-static int32_t s_prev_w, s_prev_h;     /* 缓冲尺寸(已抽点) */
-static int32_t s_frame_w = -1, s_frame_h = -1; /* 接入帧尺寸(变化则重建) */
+static lv_obj_t *s_preview = NULL;     /* dg_preview:plane 直通或软渲染回退 */
 static lv_obj_t *s_facebox = NULL;
 static lv_obj_t *s_hint = NULL;
 static lv_obj_t *s_clock = NULL;
 static lv_obj_t *s_net = NULL;         /* WiFi 图标(绿=在线/红=离线) */
 static lv_timer_t *s_pump_timer = NULL;
 static lv_timer_t *s_status_timer = NULL;
-static uint32_t s_last_seq;            /* 上次画到缓冲的帧序号(去重:相机比刷屏
-                                          慢时不再重复整屏 invalidate) */
-static uint32_t s_stat_frames;         /* 帧率统计(4s 一报,板上标定用) */
-static uint32_t s_stat_t0;
 
-/* ---- 相机帧 → 预览(20ms 轮询采样;相机 30fps) ----
- * 教训:整幅 720×1280 直拷 + LVGL8.3 纯软渲染整屏重绘,30fps 吃光时间预算
- * (上轮因此降到 15fps)。现把帧 2:1 抽点进 360×640 缓冲(拷贝带宽 1/4),
- * lv_img zoom 2x 铺满整屏——检测框/提示/按钮仍是屏幕域坐标,铺满后照常对齐。
- * 每 4s 报一次实测 fps 与拷贝耗时,板上标定预算用 */
-
-static void preview_setup(const camera_frame_t *f)
-{
-    /* 抽点档位(DG_UI_PREVIEW_DEC 板上标定用):1=原幅直通(默认,非变换
-     * 快路径,板上实测 26fps);2=1/2 幅+zoom 2x(拷贝省 3/4,但 LVGL8.3
-     * 走逐像素变换路径,实测仅 19fps,故不默认)。帧小于屏(模拟器)原样进 */
-    int dec = 0;
-    const char *e = getenv("DG_UI_PREVIEW_DEC");
-    if (e && (*e == '1' || *e == '2' || *e == '4'))
-        dec = *e - '0';
-    if (!dec)
-        dec = 1;
-
-    uint32_t *buf = malloc((size_t)f->w / dec * (f->h / dec) * 4);
-    if (!buf)
-        return;
-    free(s_prev_buf);
-    s_prev_buf = buf;
-    s_prev_w = f->w / dec;
-    s_prev_h = f->h / dec;
-    s_frame_w = f->w;
-    s_frame_h = f->h;
-
-    memset(&s_prev_dsc, 0, sizeof(s_prev_dsc));
-    s_prev_dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
-    s_prev_dsc.header.w = (uint32_t)s_prev_w;
-    s_prev_dsc.header.h = (uint32_t)s_prev_h;
-    s_prev_dsc.data = (const uint8_t *)s_prev_buf;
-    s_prev_dsc.data_size = (size_t)s_prev_w * s_prev_h * 4;
-    lv_img_set_src(s_preview, &s_prev_dsc);
-    lv_img_set_antialias(s_preview, false); /* 最近邻:便宜,且整数倍放大无糊边 */
-    lv_img_set_pivot(s_preview, s_prev_w / 2, s_prev_h / 2);
-    /* cover:放大到铺满整屏(「预览铺满」是脸框/提示屏幕域坐标成立的前提) */
-    int32_t zx = ((int32_t)256 * DG_SCREEN_W + s_prev_w / 2) / s_prev_w;
-    int32_t zy = ((int32_t)256 * DG_SCREEN_H + s_prev_h / 2) / s_prev_h;
-    lv_img_set_zoom(s_preview, (uint16_t)(zx > zy ? zx : zy));
-    lv_obj_center(s_preview);
-    s_last_seq = 0;
-}
-
-static void preview_blit(const camera_frame_t *f)
-{
-    const uint32_t *src = (const uint32_t *)f->pixels;
-    int32_t sx = f->w / s_prev_w;          /* 抽点步长(2/4,或原幅档 1) */
-    int32_t sy = f->h / s_prev_h;
-    if (sx == 1 && sy == 1) {
-        /* 原幅档:整行 memcpy(glibc 走 NEON,比逐元素快 ~3x,实测 blit
-         * 10ms→4ms 级) */
-        for (int32_t y = 0; y < s_prev_h; y++)
-            memcpy(s_prev_buf + (size_t)y * s_prev_w,
-                   src + (size_t)y * f->w, (size_t)s_prev_w * 4);
-        return;
-    }
-    for (int32_t y = 0; y < s_prev_h; y++) {
-        const uint32_t *sr = src + (size_t)(y * sy) * f->w;
-        uint32_t *dr = s_prev_buf + (size_t)y * s_prev_w;
-        for (int32_t x = 0; x < s_prev_w; x++)
-            dr[x] = sr[x * sx];
-    }
-}
+/* ---- 相机帧 → 预览(dg_preview 控件,20ms 泵,2026-09-22 video-plane) ----
+ * plane 模式:NV12 dma-buf 直送 VOP2 Overlay(zpos 在 UI 之下),控件只是
+ * 透明占位,预览像素零 CPU;回退模式:原幅直通软渲染(板测 26~27fps)。
+ * 脸框/提示/按钮仍屏幕域坐标,video plane 在 UI 之下照常对齐 */
 
 static void canvas_timer_cb(lv_timer_t *t)
 {
     (void)t;
-    const camera_frame_t *f = camera_latest();
-    if (!f || !s_preview || f->seq == s_last_seq)
-        return;
-    if (!s_prev_buf || f->w != s_frame_w || f->h != s_frame_h)
-        preview_setup(f);
-    if (!s_prev_buf)
-        return;
-    uint32_t t0 = dg_ui_tick_ms();
-    preview_blit(f);
-    s_last_seq = f->seq;
-    lv_obj_invalidate(s_preview);
-
-    s_stat_frames++;
-    uint32_t now = dg_ui_tick_ms();
-    if (!s_stat_t0)
-        s_stat_t0 = now;
-    if (now - s_stat_t0 >= 4000) {
-        DG_LOGI("[HOME]", "preview fps=%u blit=%ums",
-                s_stat_frames * 1000u / (now - s_stat_t0), now - t0);
-        s_stat_frames = 0;
-        s_stat_t0 = now;
-    }
+    dg_preview_pump(s_preview);
 }
 
 /* ---- 状态栏(左上时钟 + 右上网络;1s 轮询) ---- */
@@ -183,7 +93,12 @@ void page_home_create(lv_obj_t *parent)
 {
     DG_LOGI("[HOME]", "page create");
 
-    s_preview = lv_img_create(parent);
+    /* 透明根:video-plane 下未画区域透出下层视频(plane 模式);fb 先清,
+     * 清掉导航上一页的不透明残留。软渲染回退模式 LVGL 画不透明预览,无关 */
+    lv_obj_set_style_bg_opa(parent, LV_OPA_TRANSP, 0);
+    display_clear_fbs();
+
+    s_preview = dg_preview_create(parent, "HOME");
 
     s_facebox = lv_obj_create(parent);
     lv_obj_remove_style_all(s_facebox);
@@ -255,20 +170,12 @@ void page_home_destroy(void)
         lv_timer_del(s_status_timer);
         s_status_timer = NULL;
     }
-    if (s_prev_buf) {
-        free(s_prev_buf);
-        s_prev_buf = NULL;
-    }
+    dg_preview_destroy(s_preview);
     s_preview = NULL;
-    s_frame_w = -1;
-    s_frame_h = -1;
-    s_stat_frames = 0;
-    s_stat_t0 = 0;
     s_facebox = NULL;
     s_hint = NULL;
     s_clock = NULL;
     s_net = NULL;
-    s_last_seq = 0;
 }
 
 /* ---- setter(presenter 渲染入口) ---- */

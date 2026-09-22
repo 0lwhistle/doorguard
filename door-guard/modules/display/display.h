@@ -8,6 +8,9 @@
 #ifndef DG_DISPLAY_H
 #define DG_DISPLAY_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "err.h"
 
 #ifdef __cplusplus
@@ -27,6 +30,25 @@ void display_set_touch_listener(void (*fn)(void));
 
 /** 后端内部用:按下沿通知(touch_evdev/display_sim 的 read_cb 调用) */
 void display_touch_activity(void);
+
+/* ---- 视频 overlay plane(video-plane 直通预览,2026-09-22) ----
+ * 板上把 NV12 dma-buf 直接送 VOP2 硬件扫描输出(zpos 压到 UI plane 之下),
+ * 预览零 CPU;sim 恒 false。show 失败自动置不可用,页面据此走软渲染回退 */
+
+/** 硬件 plane 直通是否可用(首次 show 前调用有效;sim 恒 false) */
+bool display_has_video_plane(void);
+
+/** 显示一帧 NV12(dmabuf_fd 由相机持有,slot 为稳定槽位键做 fb 缓存);
+ *  返回 DG_OK / DG_ERR_*(失败即永久降级) */
+int display_video_plane_show(int slot, int dmabuf_fd, int32_t w, int32_t h,
+                             int32_t stride);
+
+/** 停止视频 plane 显示(离开预览页时调用) */
+void display_video_plane_hide(void);
+
+/** 双 dumb fb 清 0(ARGB 下=全透明)。透明底页面(主页)创建时先调,
+ *  清掉上一页不透明残留;之后 partial 刷新只画控件,未画区保持透明 */
+void display_clear_fbs(void);
 
 #ifdef __cplusplus
 }

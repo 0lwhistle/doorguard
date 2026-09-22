@@ -14,6 +14,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -240,46 +241,9 @@ static int drm_add_conn_property(const char *name, uint64_t value)
 	return 0;
 }
 
-static int drm_dmabuf_set_plane(struct drm_buffer *buf)
-{
-	int ret;
-	static int first = 1;
-	uint32_t flags = DRM_MODE_PAGE_FLIP_EVENT;
-
-	drm_dev.req = drmModeAtomicAlloc();
-
-	/* On first Atomic commit, do a modeset */
-	if (first) {
-		drm_add_conn_property("CRTC_ID", drm_dev.crtc_id);
-
-		drm_add_crtc_property("MODE_ID", drm_dev.blob_id);
-		drm_add_crtc_property("ACTIVE", 1);
-
-		flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
-
-		first = 0;
-	}
-
-	drm_add_plane_property("FB_ID", buf->fb_handle);
-	drm_add_plane_property("CRTC_ID", drm_dev.crtc_id);
-	drm_add_plane_property("SRC_X", 0);
-	drm_add_plane_property("SRC_Y", 0);
-	drm_add_plane_property("SRC_W", drm_dev.width << 16);
-	drm_add_plane_property("SRC_H", drm_dev.height << 16);
-	drm_add_plane_property("CRTC_X", 0);
-	drm_add_plane_property("CRTC_Y", 0);
-	drm_add_plane_property("CRTC_W", drm_dev.width);
-	drm_add_plane_property("CRTC_H", drm_dev.height);
-
-	ret = drmModeAtomicCommit(drm_dev.fd, drm_dev.req, flags, NULL);
-	if (ret) {
-		err("drmModeAtomicCommit failed: %s", strerror(errno));
-		drmModeAtomicFree(drm_dev.req);
-		return ret;
-	}
-
-	return 0;
-}
+/* door-guard:原 drm_dmabuf_set_plane(atomic 双缓冲翻转)已随 video-plane
+ * 改造移除——显示使能见 drm_apply_first_modeset(),刷新见 drm_flush 原位补丁。
+ * 翻转式实现的历史在 git(drm.c 2026-09-22 前) */
 
 static int find_plane(unsigned int fourcc, uint32_t *plane_id, uint32_t crtc_id, uint32_t crtc_idx)
 {
@@ -710,18 +674,18 @@ void drm_wait_vsync(lv_disp_drv_t *disp_drv)
 	drm_dev.req = NULL;
 }
 
+/* door-guard 改造(2026-09-22 video-plane):单 fb 原位补丁,不再双缓冲
+ * 翻转。老路每次 flush 都可能等一次 vblank——partial 下多个脏块串成多次
+ * vblank 等待,预览页 30Hz 直接被拖死;原位补丁只有微秒级 memcpy,小脏块
+ * 撕裂风险低(脏区多为小控件),视频主体走 video plane 不经过这里 */
 void drm_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p)
 {
-	struct drm_buffer *fbuf = drm_dev.cur_bufs[1];
+	struct drm_buffer *fbuf = &drm_dev.drm_bufs[0];
 	lv_coord_t w = (area->x2 - area->x1 + 1);
-	lv_coord_t h = (area->y2 - area->y1 + 1);
 	int i, y;
 
-	dbg("x %d:%d y %d:%d w %d h %d", area->x1, area->x2, area->y1, area->y2, w, h);
-
-	/* Partial update */
-	if ((w != drm_dev.width || h != drm_dev.height) && drm_dev.cur_bufs[0])
-		memcpy(fbuf->map, drm_dev.cur_bufs[0]->map, fbuf->size);
+	dbg("x %d:%d y %d:%d w %d h %d", area->x1, area->x2, area->y1, area->y2, w,
+	    area->y2 - area->y1 + 1);
 
 	for (y = 0, i = area->y1 ; i <= area->y2 ; ++i, ++y) {
                 memcpy((uint8_t *)fbuf->map + (area->x1 * (LV_COLOR_SIZE/8)) + (fbuf->pitch * i),
@@ -729,34 +693,64 @@ void drm_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color
 		       w * (LV_COLOR_SIZE/8));
 	}
 
-	if (drm_dev.req)
-		drm_wait_vsync(disp_drv);
-
-	/* show fbuf plane */
-	if (drm_dmabuf_set_plane(fbuf)) {
-		err("Flush fail");
-		return;
-	}
-	else
-		dbg("Flush done");
-
-	if (!drm_dev.cur_bufs[0])
-		drm_dev.cur_bufs[1] = &drm_dev.drm_bufs[1];
-	else
-		drm_dev.cur_bufs[1] = drm_dev.cur_bufs[0];
-
-	drm_dev.cur_bufs[0] = fbuf;
-
 	lv_disp_flush_ready(disp_drv);
 }
 
 #if LV_COLOR_DEPTH == 32
-#define DRM_FOURCC DRM_FORMAT_XRGB8888
+/* door-guard 补丁(video-plane underlay,2026-09-22):XRGB→ARGB,
+ * 未绘制区域 alpha=0 透出下层视频 plane(配合 drm_clear_fbs 使用) */
+#define DRM_FOURCC DRM_FORMAT_ARGB8888
 #elif LV_COLOR_DEPTH == 16
 #define DRM_FOURCC DRM_FORMAT_RGB565
 #else
 #error LV_COLOR_DEPTH not supported
 #endif
+
+/* door-guard 增补:首次 modeset(使能 connector/crtc/plane 并挂 dumb fb)。
+ * 原实现在首次 flip 里;video-plane 改造后 flush 只做原位补丁,故在此一次
+ * 完成。同步阻塞,仅在 init 路径调用 */
+static void drm_apply_first_modeset(void)
+{
+	uint32_t flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_ALLOW_MODESET;
+
+	drm_dev.req = drmModeAtomicAlloc();
+	drm_add_conn_property("CRTC_ID", drm_dev.crtc_id);
+	drm_add_crtc_property("MODE_ID", drm_dev.blob_id);
+	drm_add_crtc_property("ACTIVE", 1);
+	drm_add_plane_property("FB_ID", drm_dev.drm_bufs[0].fb_handle);
+	drm_add_plane_property("CRTC_ID", drm_dev.crtc_id);
+	drm_add_plane_property("SRC_X", 0);
+	drm_add_plane_property("SRC_Y", 0);
+	drm_add_plane_property("SRC_W", drm_dev.width << 16);
+	drm_add_plane_property("SRC_H", drm_dev.height << 16);
+	drm_add_plane_property("CRTC_X", 0);
+	drm_add_plane_property("CRTC_Y", 0);
+	drm_add_plane_property("CRTC_W", drm_dev.width);
+	drm_add_plane_property("CRTC_H", drm_dev.height);
+
+	if (drmModeAtomicCommit(drm_dev.fd, drm_dev.req, flags, NULL))
+		err("drm_apply_first_modeset failed: %s", strerror(errno));
+	drmModeAtomicFree(drm_dev.req);
+	drm_dev.req = NULL;
+}
+
+/* door-guard 增补:video-plane(display_drm.c)所需的最小状态出口 */
+int drm_fd(void) { return drm_dev.fd; }
+unsigned int drm_crtc_id_get(void) { return drm_dev.crtc_id; }
+unsigned int drm_crtc_idx_get(void) { return drm_dev.crtc_idx; }
+unsigned int drm_ui_plane_id(void) { return drm_dev.plane_id; }
+
+/* door-guard 增补:两个 dumb fb 整体清 0(ARGB 下=全透明)。切换到透明底
+ * 页面(主页)时先清一次,清掉上一页的不透明残留;之后 partial 刷新只画
+ * 控件,未画区域保持透明 */
+void drm_clear_fbs(void)
+{
+	int i;
+	for (i = 0; i < 2; i++) {
+		if (drm_dev.drm_bufs[i].map)
+			memset(drm_dev.drm_bufs[i].map, 0, drm_dev.drm_bufs[i].size);
+	}
+}
 
 void drm_get_sizes(lv_coord_t *width, lv_coord_t *height, uint32_t *dpi)
 {
@@ -788,6 +782,10 @@ void drm_init(void)
 		drm_dev.fd = -1;
 		return;
 	}
+
+	/* door-guard:显示使能一次完成(原在首次 flip 里做;video-plane 改造
+	 * 后 flush 只做原位补丁不再 commit) */
+	drm_apply_first_modeset();
 
 	info("DRM subsystem and buffer mapped successfully");
 }

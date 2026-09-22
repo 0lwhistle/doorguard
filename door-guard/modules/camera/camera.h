@@ -8,6 +8,7 @@
 #ifndef DG_CAMERA_H
 #define DG_CAMERA_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "err.h"
@@ -58,6 +59,27 @@ typedef void (*camera_nv12_release_fn)(uint32_t frame_id);
 void camera_set_nv12_listener(camera_nv12_fn on_frame,
                               camera_nv12_release_fn on_release);
 void camera_nv12_release(uint32_t frame_id);
+
+/* ---- NV12 dma-buf 出口(video plane 直通;sim 无实现) ----
+ * 板上把「旋转后的 NV12」写入 dma-heap 缓冲,UI 取 fd 直送 VOP2 plane
+ * 扫描输出(见 display.h)。槽位协议:最新帧经 latest_dmabuf 发布,UI
+ * show 成功后 mark_shown(slot),相机写入时跳过正被扫描的槽(防撕裂)。 */
+
+typedef struct {
+    int fd;                    /**< NV12 dma-buf(UV 平面由 fb offset 表达) */
+    int32_t w, h, stride;      /**< 旋转后尺寸(横装相机 90° → 720x1280) */
+    uint32_t seq;              /**< 与 camera_frame_t 同源递增序号 */
+    int slot;                  /**< 槽位键(0..VID_BUF_CNT-1) */
+} camera_dmabuf_t;
+
+/** 最近一帧已旋转 NV12(无则 NULL;指针指向模块静态存储,勿持有) */
+const camera_dmabuf_t *camera_latest_dmabuf(void);
+
+/** 标记正被 plane 扫描的槽位;slot<0 取消占用(hide/离开预览页) */
+void camera_dmabuf_mark_shown(int slot);
+
+/** LVGL 预览 RGB(XRGB)转换开关:plane 模式下关掉省一次 RGA;默认开 */
+void camera_rgb_preview_set(bool on);
 
 #ifdef __cplusplus
 }

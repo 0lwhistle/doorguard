@@ -31,6 +31,7 @@ typedef enum {
     DG_ERR_BUSY       = -9,   /**< 资源忙(单实例占用中) */
     DG_ERR_NETWORK    = -10,  /**< 网络不可达/失败 */
     DG_ERR_INTERNAL   = -11,  /**< 未分类内部错误 */
+    DG_ERR_UNSUPPORTED = -12, /**< 当前平台/后端不支持该能力 */
 
     /* ---- 用户管理(spec-database §2 唯一性/上限/必填) ---- */
     DG_ERR_NO_PASSWORD   = -20, /**< 新用户未设置密码,拒绝添加 */

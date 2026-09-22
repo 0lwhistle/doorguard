@@ -5,7 +5,8 @@
 | 文件 | 端 | 说明 |
 |---|---|---|
 | `display_sim.c` | DG_SIM(宿主) | SDL2 窗口 720×1280,SDL 鼠标 → LVGL pointer |
-| `display_drm.c` | 板 | lv_drivers DRM dumb-buffer(双缓冲页翻转);**不用 /dev/fb0**(B4 固件 mmap EBUSY,实测) |
+| `display_drm.c` | 板 | DRM dumb-buffer + atomic(ARGB8888,direct+partial 原位补丁);**不用 /dev/fb0**(B4 固件 mmap EBUSY,实测) |
+| video plane | 板 | NV12 dma-buf 直送 VOP2 Overlay(zpos=0 underlay),预览零 CPU;`display_has_video_plane()` 失败自动降级软渲染 |
 | `touch_evdev.c` | 板 | evdev 触摸 → LVGL pointer(见下) |
 
 ## 触摸(touch_evdev)

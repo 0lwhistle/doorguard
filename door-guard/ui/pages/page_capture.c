@@ -6,7 +6,7 @@
  * 拍下后回看刚入库的照片,可 [重拍] 或 [完成] 返回编辑页。
  *
  * 分层(pages 层,纯视图 + 页内小状态机):
- *   预览    camera_latest → lv_canvas(与主页同一套,33ms 刷新)
+ *   预览    dg_preview 控件(plane 直通/软渲染双模,20ms 泵,与主页同款)
  *   质量    UI_EVT_QUALITY(verdict → 具体文案/颜色,控制拍摄使能)
  *   拍摄    EV_ENROLL_REQUEST(DG_ENROLL_FACE)→ 等 EV_ENROLL_RESULT(5s 超时)
  *   回看    dg_avatar_get(FULL)——照片已同帧入库,从库里读回来最可信
@@ -25,8 +25,9 @@
 #include "widgets/dg_avatar.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_popup.h"
+#include "widgets/dg_preview.h"
 
-#include "modules/camera/camera.h"
+#include "modules/display/display.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,16 +36,13 @@
 
 static char s_uid[DG_UID_LEN];
 
-static lv_obj_t *s_canvas = NULL;
-static lv_color_t *s_canvas_buf = NULL;
+static lv_obj_t *s_preview = NULL;      /* dg_preview:plane 直通或软渲染 */
 static lv_obj_t *s_facebox = NULL;
 static lv_obj_t *s_hint = NULL;
 static lv_obj_t *s_photo = NULL;          /* 回看照片(白底描边容器内) */
 static lv_obj_t *s_btn_shot, *s_btn_cancel, *s_btn_retake, *s_btn_done;
 static lv_timer_t *s_pump_timer = NULL;
 static lv_timer_t *s_wait_timer = NULL;
-static uint32_t s_last_seq;            /* 已画帧序号(与主页同款去重:相机帧率
-                                          高于刷屏节奏时不再重复整屏 invalidate) */
 
 /* 页内状态:LIVE(取景)→ WAIT(已拍等回执)→ REVIEW(回看)/ 退回 LIVE */
 static bool s_review;
@@ -52,29 +50,12 @@ static bool s_shot_enabled;               /* 质量合格才可拍 */
 
 static void set_state_live(void);
 
-/* ---- 预览(与 page_home 同一套:camera_latest → canvas,66ms/15fps + 去重) ---- */
+/* ---- 预览(与主页同款 dg_preview,20ms 泵) ---- */
 
 static void canvas_timer_cb(lv_timer_t *t)
 {
     (void)t;
-    const camera_frame_t *f = camera_latest();
-    if (!f || !s_canvas)
-        return;
-    int32_t w = f->w > DG_SCREEN_W ? DG_SCREEN_W : f->w;
-    int32_t h = f->h > DG_SCREEN_H ? DG_SCREEN_H : f->h;
-    if (!s_canvas_buf) {
-        s_canvas_buf = malloc((size_t)w * h * sizeof(lv_color_t));
-        if (!s_canvas_buf)
-            return;
-        lv_canvas_set_buffer(s_canvas, s_canvas_buf, w, h, LV_IMG_CF_TRUE_COLOR);
-        lv_obj_center(s_canvas);
-        s_last_seq = 0;
-    }
-    if (f->w == w && f->h == h && f->seq != s_last_seq) {
-        s_last_seq = f->seq;
-        lv_canvas_copy_buf(s_canvas, (const lv_color_t *)f->pixels, 0, 0, w, h);
-        lv_obj_invalidate(s_canvas);
-    }
+    dg_preview_pump(s_preview);
 }
 
 /* ---- 质量提示 ---- */
@@ -274,7 +255,11 @@ void page_capture_create(lv_obj_t *parent)
 {
     DG_LOGI("[CAPTURE]", "page create");
 
-    s_canvas = lv_canvas_create(parent);
+    /* 透明根 + 清 fb:与主页同理(plane 模式下未画区域透出下层视频) */
+    lv_obj_set_style_bg_opa(parent, LV_OPA_TRANSP, 0);
+    display_clear_fbs();
+
+    s_preview = dg_preview_create(parent, "CAPTURE");
 
     s_facebox = lv_obj_create(parent);
     lv_obj_remove_style_all(s_facebox);
@@ -328,7 +313,7 @@ void page_capture_create(lv_obj_t *parent)
     lv_obj_align(s_btn_done, LV_ALIGN_BOTTOM_RIGHT, -DG_PAD, -DG_PAD);
     lv_obj_add_event_cb(s_btn_done, on_done, LV_EVENT_CLICKED, NULL);
 
-    s_pump_timer = lv_timer_create(canvas_timer_cb, 66, NULL); /* 15fps,同主页 */
+    s_pump_timer = lv_timer_create(canvas_timer_cb, 20, NULL); /* 50Hz 泵,同主页 */
     set_state_live();
 }
 
@@ -340,12 +325,8 @@ void page_capture_destroy(void)
         s_pump_timer = NULL;
     }
     wait_cancel();
-    if (s_canvas_buf) {
-        free(s_canvas_buf);
-        s_canvas_buf = NULL;
-    }
-    s_last_seq = 0;
-    s_canvas = NULL;
+    dg_preview_destroy(s_preview);
+    s_preview = NULL;
     s_facebox = NULL;
     s_hint = NULL;
     s_photo = NULL;

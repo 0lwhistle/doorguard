@@ -456,7 +456,16 @@ LV_ATTRIBUTE_FAST_MEM static inline lv_color_t lv_color_mix(lv_color_t c1, lv_co
                                    (255 - mix) + LV_COLOR_MIX_ROUND_OFS));
     LV_COLOR_SET_B(ret, LV_UDIV255((uint16_t)LV_COLOR_GET_B(c1) * mix + LV_COLOR_GET_B(c2) *
                                    (255 - mix) + LV_COLOR_MIX_ROUND_OFS));
+#if LV_COLOR_DEPTH == 32
+    /* door-guard 补丁(video-plane underlay,2026-09-22):alpha 按 dst/src
+     * 真实混合,半透明 UI 在 ARGB fb 上写出真实 alpha,VOP2 才能对下层视频
+     * plane 做逐像素合成。dst 不透明(a=255)时结果恒为 0xFF,行为不变 */
+    LV_COLOR_SET_A(ret, LV_UDIV255((uint16_t)LV_COLOR_GET_A(c1) * mix +
+                                   LV_COLOR_GET_A(c2) * (255 - mix) +
+                                   LV_COLOR_MIX_ROUND_OFS));
+#else
     LV_COLOR_SET_A(ret, 0xFF);
+#endif
 #else
     /*LV_COLOR_DEPTH == 1*/
     ret.full = mix > LV_OPA_50 ? c1.full : c2.full;

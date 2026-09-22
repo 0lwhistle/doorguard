@@ -50,6 +50,11 @@ static void create_page(const navigator_page_t *ops)
     lv_obj_t *page = lv_obj_create(s_root);
     lv_obj_remove_style_all(page);
     lv_obj_set_size(page, DG_SCREEN_W, DG_SCREEN_H);
+    /* 容器默认不透明底(video-plane 改造,2026-09-22):remove_style_all
+     * 后容器本透明,而 scr/display 底现在也是透明的——不给底,所有页面都
+     * 会透出下层视频。要透的页面(主页/拍摄页)自行覆盖为 TRANSP */
+    lv_obj_set_style_bg_color(page, DG_COL_BG(), 0);
+    lv_obj_set_style_bg_opa(page, LV_OPA_COVER, 0);
     ops->create(page);
     if (ops->on_enter)
         ops->on_enter();

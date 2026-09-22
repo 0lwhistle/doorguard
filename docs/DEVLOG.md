@@ -4,6 +4,44 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-22(深夜)video plane 直通预览:VOP2 硬件合成落地,预览 30fps 零 CPU
+
+**做了什么**(宿主 31/31 绿、交叉零告警;板端三路验收:plane 提交回读 / fb 导图
+alpha 分析 / CPU 实测):
+1. **硬件探针先行(只读,板上实测)**:crtc 100 上空闲 Overlay plane 132/148,
+   均支持 NV12,zpos 0..7 可写,alpha/CSC 齐备;**Esmart/Cluster 都没有 90°
+   硬件旋转** → RGA 预旋转定案。渲染侧:Mali-G52(libmali/EGL/OpenCL 齐备,
+   无 Vulkan)——本方案用 VOP2 不用 GPU(负载是位块合成,固定功能硬件对口)。
+2. **camera**:旋转后 NV12(720×1280)写 dma-heap(reserved CMA,4 槽),
+   RGA 单次旋转直出 fd;camera_latest_dmabuf/mark_shown 槽位协议防撕裂
+   (跳过正被扫描槽);camera_rgb_preview_set plane 模式关掉 XRGB 转换。
+3. **display**:fb 换 ARGB8888;LVGL 改 direct_mode+单全幅缓冲+原位补丁
+   (替代 full_refresh 双缓冲页翻转——partial 下逐脏块等 vblank 反而更贵);
+   video plane 发现/提交走 atomic(与 UI flip 同 fd,不能混 legacy);
+   失败自动永久降级软渲染(页面双模:dg_preview 控件)。
+4. **UI**:新控件 dg_preview(plane/软渲染双模,主页+拍摄页接入);透明根
+   页面(主页/拍摄页)进页先 display_clear_fbs;navigator 页容器默认不透明
+   底;lv_color_mix 的 alpha 改按 dst/src 真实混合(半透明 scrim 恢复真半透)。
+5. **板端验收**:preview fps=30 cost≈1ms(软渲染 27);整机 CPU 100 ticks/5s
+   ≈ 单核 20%(含视觉/网络全部业务);fb 导图 alpha 分布 95% 透明洞 + 控件
+   255 + scrim 半透 + 抗锯齿边缘——underlay 合成成立;触摸唤醒/进程长稳正常。
+
+**踩了什么坑**:①LVGL8 的 screen_transp 运行时开关被编译宏
+LV_COLOR_SCREEN_TRANSP 门控(lv_refr.c:637):宏不开,渲染脏区前用
+bg_color(白)预填缓冲,fb 永远不透明——透明必须宏+运行时双开;②页面的
+"白底"一直来自 screen(navigator 页容器 remove_style_all 本透明),screen
+改透明后所有页面集体透视频 → navigator 统一给不透明底,主页/拍摄页自覆盖
+TRANSP;③display 层自带白底(lv_disp bg_opa 默认 COVER,"无不透明顶层对象"
+时画满屏)→ lv_disp_set_bg_opa(TRANSP);④同 fd 混用 atomic 与 legacy 会
+EBUSY,video plane 提交必须也走 atomic NONBLOCK;⑤dg-deploy 沿符号链写
+活动槽 + S60 秒退回滚切旧包(前次已记)——部署后必须 md5 核对。
+
+**没做完 / 下一步**:①板端人工看一眼实际观感(视频铺满+控件悬浮+scrim
+半透),偏色则调 plane 的 COLOR_ENCODING(默认 BT.601);②真脸下脸框对齐
+标定与旧特征重录(仍未做);③视频 plane 在待机/菜单页仍被扫描(被不透明
+页盖住,无观感影响);④dg-deploy 改为部署进非活动槽另立任务。
+
+---
 ## 2026-09-22(夜)用户三反馈集中修:预览 15→27fps 实测定档 + 用户列表真枚举/编辑可见 + 门禁设置越界崩页
 
 **做了什么**(宿主 31/31 绿含新 S8、交叉零告警、板端 md5 核对已推;板端实测 + 触摸注入 + 无头页渲染三路验收):
