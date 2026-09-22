@@ -97,24 +97,26 @@ supervise() {
         rc=$?
         dt=$(( $(date +%s) - t0 ))
         log "door-guard 退出(rc=$rc,运行${dt}s)"
+        if [ "$dt" -lt 15 ]; then
+            fail=$((fail + 1))
+        else
+            fail=0
+        fi
+        # 连续 3 次秒退(含坏包 126/127——OTA 装了不能执行的包正是此形态)
+        # 回滚到另一槽;回滚判定必须先于 126/127 跳过逻辑,否则永不触发(实测)
+        if [ "$fail" -ge 3 ]; then
+            other=$(slot_other)
+            if [ -f "$other" ]; then
+                slot_activate "$other"
+                log "!!! 连续 3 次秒退,回滚 → $(basename "$other")"
+                fail=0
+            fi
+        fi
         # 坏包(exec 失败 126/127)不涉及相机,跳过 3A 重启:
         # 快速循环里反复重启 aiq 服务曾把 ISP 驱动搅到内核崩溃(实测)
         if [ "$rc" = 126 ] || [ "$rc" = 127 ]; then
             sleep 2
             continue
-        fi
-        if [ "$dt" -lt 15 ]; then
-            fail=$((fail + 1))
-            if [ "$fail" -ge 3 ]; then
-                other=$(slot_other)
-                if [ -f "$other" ]; then
-                    slot_activate "$other"
-                    log "!!! 连续 3 次秒退,回滚 → $(basename "$other")"
-                    fail=0
-                fi
-            fi
-        else
-            fail=0
         fi
         aiq_restart
         sleep 3
