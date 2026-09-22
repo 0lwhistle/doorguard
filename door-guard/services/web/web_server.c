@@ -569,20 +569,10 @@ static void handle_logs(struct mg_connection *c, struct mg_http_message *hm)
     cJSON_Delete(root);
 }
 
-/* ---- NTP(异步:chronyc waitsync 可阻塞十余秒,不能占住唯一 loop) ---- */
+/* ---- NTP(异步:SNTP 在 netcore loop 内执行,这里只受理 + 去重) ---- */
 
 static pthread_mutex_t s_ntp_mtx = PTHREAD_MUTEX_INITIALIZER;
 static bool s_ntp_running = false;
-
-static void *ntp_thread(void *arg)
-{
-    (void)arg;
-    ntp_service_trigger();                   /* 结果经 EV_NET_NTP_RESULT 广播 */
-    pthread_mutex_lock(&s_ntp_mtx);
-    s_ntp_running = false;
-    pthread_mutex_unlock(&s_ntp_mtx);
-    return NULL;
-}
 
 static void handle_ntp(struct mg_connection *c, struct mg_http_message *hm)
 {
@@ -601,17 +591,15 @@ static void handle_ntp(struct mg_connection *c, struct mg_http_message *hm)
     s_ntp_running = true;
     pthread_mutex_unlock(&s_ntp_mtx);
 
-    pthread_t tid;
-    if (pthread_create(&tid, NULL, ntp_thread, NULL) == 0) {
-        pthread_detach(tid);
-    } else {
+    int rc = ntp_service_trigger();
+    if (rc == DG_ERR_NOT_INIT) {
         pthread_mutex_lock(&s_ntp_mtx);
         s_ntp_running = false;
         pthread_mutex_unlock(&s_ntp_mtx);
-        json_msg(c, 500, "校正线程创建失败");
+        json_msg(c, 500, "校正服务不可用");
         return;
     }
-    /* 202:已受理,结果走 WebSocket 推送(EV_NET_NTP_RESULT) */
+    /* 202:已受理(未联网等失败也走 WS 推送,与旧版语义一致) */
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "pending", true);
     cJSON_AddStringToObject(root, "note", "结果将经 WebSocket 推送");
@@ -990,6 +978,9 @@ static int on_ntp_result(const event_t *e, void *ud)
     const ev_ntp_result_t *r = (const ev_ntp_result_t *)e->data;
     s_ntp_ok = r->ok;
     s_ntp_ts = r->ok ? r->synced_ts : 0;
+    pthread_mutex_lock(&s_ntp_mtx);
+    s_ntp_running = false;                   /* 一次校正落幕,允许下一轮 */
+    pthread_mutex_unlock(&s_ntp_mtx);
 
     char tsbuf[32] = "";
     if (r->ok)
