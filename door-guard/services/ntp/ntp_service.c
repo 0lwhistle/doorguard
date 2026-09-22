@@ -40,6 +40,7 @@ static atomic_bool s_running = false;
 /* loop 线程私有的在途请求 */
 static struct mg_connection *s_sntp_c = NULL;
 static int64_t s_deadline_ms = 0;
+static bool s_attempt_done = false;   /* 本轮是否已发布结果(防重复/防挂住) */
 
 static void publish(bool ok, int err, int64_t ts)
 {
@@ -49,6 +50,15 @@ static void publish(bool ok, int err, int64_t ts)
     ev.err = err;
     ev.synced_ts = ts;
     EVENT_BUS_PUBLISH(EV_NET_NTP_RESULT, &ev);
+}
+
+/* 每轮校正只发一次结果:成功/失败/超时/异常关闭都经此收口。
+ * 少了它曾经挂住:sntp_running 靠结果事件复位,连接静默关闭(如服务端
+ * 回 kiss-of-death)时永不复位,web 侧后续触发一直 409 */
+static void publish_attempt(bool ok, int err, int64_t ts)
+{
+    s_attempt_done = true;
+    publish(ok, err, ts);
 }
 
 /* ---- loop 线程:SNTP 请求与超时 ---- */
@@ -66,26 +76,35 @@ static void sntp_cb(struct mg_connection *c, int ev, void *ev_data)
         else
             DG_LOGI(TAG, "SNTP 同步成功:%lld", (long long)tv.tv_sec);
         s_sntp_c = NULL;
-        mg_close_conn(c);
-        publish(set_ok, set_ok ? DG_OK : DG_ERR_IO, set_ok ? (int64_t)tv.tv_sec : 0);
+        /* 事件回调内禁止 mg_close_conn(立即 free,poll 循环继续用 c 即 UAF,
+         * 板上实测段错误);is_closing 由 poll 末尾统一延迟关闭 */
+        c->is_closing = 1;
+        publish_attempt(set_ok, set_ok ? DG_OK : DG_ERR_IO,
+                        set_ok ? (int64_t)tv.tv_sec : 0);
     } else if (ev == MG_EV_ERROR) {
         /* DNS 解析失败 / 网络不可达:mongoose 经此事件报告并关闭连接 */
         DG_LOGW(TAG, "SNTP 失败: %s", (const char *)ev_data);
         if (s_sntp_c == c) {
             s_sntp_c = NULL;
-            publish(false, DG_ERR_NETWORK, 0);
+            publish_attempt(false, DG_ERR_NETWORK, 0);
         }
     } else if (ev == MG_EV_POLL) {
         if (s_sntp_c == c && (int64_t)mg_millis() > s_deadline_ms) {
             DG_LOGW(TAG, "SNTP 超时(%d ms)", SNTP_TIMEOUT_MS);
             s_sntp_c = NULL;
-            mg_close_conn(c);
-            publish(false, DG_ERR_NETWORK, 0);
+            c->is_closing = 1;
+            publish_attempt(false, DG_ERR_NETWORK, 0);
         }
     } else if (ev == MG_EV_CLOSE) {
-        /* 超时/出错路径已把 s_sntp_c 清空;这里兜底清理指针 */
-        if (s_sntp_c == c)
+        /* 连接关闭而本轮还没结论(服务端回 kiss-of-death/坏报文等,
+         * mongoose 内部解析失败即关连接):补一条失败,别让状态挂住 */
+        if (s_sntp_c == c) {
             s_sntp_c = NULL;
+            if (!s_attempt_done) {
+                DG_LOGW(TAG, "SNTP 连接关闭但未取到时间(服务端应答无效?)");
+                publish_attempt(false, DG_ERR_NETWORK, 0);
+            }
+        }
     }
 }
 
@@ -108,6 +127,7 @@ static void sntp_start(void *arg)
         publish(false, DG_ERR_NETWORK, 0);
         return;
     }
+    s_attempt_done = false;
     s_deadline_ms = mg_millis() + SNTP_TIMEOUT_MS;
     DG_LOGI(TAG, "开始 SNTP 校正(%s)", server);
 }

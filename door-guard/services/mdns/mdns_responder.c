@@ -541,7 +541,7 @@ static void mdns_teardown(void *arg)
     (void)arg;
     send_goodbye();                            /* 先道别,再收摊 */
     if (s_udp) {
-        mg_close_conn(s_udp);
+        s_udp->is_closing = 1;                 /* 延迟关闭(同 web_teardown 注释) */
         s_udp = NULL;
     }
     pthread_mutex_lock(&s_mtx);

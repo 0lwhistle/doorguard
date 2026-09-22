@@ -42,10 +42,13 @@ static int s_dropped = 0;
 static atomic_bool s_running = false;
 static atomic_llong s_hb_ms = 0;
 
+/* 项目心跳约定 = CLOCK_REALTIME 纪元毫秒:main 看门狗的 now_ms 即
+ * REALTIME(旧 web 推送线程心跳同此)。换 MONOTONIC 会与看门狗相差
+ * 整个纪元基数,心跳必然被判"超龄"(板上实测每次启动误报重启) */
 static int64_t now_ms(void)
 {
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    clock_gettime(CLOCK_REALTIME, &ts);
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
@@ -83,6 +86,46 @@ static void *loop_thread(void *arg)
     return NULL;
 }
 
+/* mongoose 内置 DNS 客户端默认查 8.8.8.8(3s 超时)——家用路由/内网常不可达
+ * (板上实测:SNTP 解析 ntp.aliyun.com 超时,而本机 nslookup 走路由器秒回)。
+ * 从 /etc/resolv.conf 取首个 nameserver 覆盖默认值;容错 dhcpcd 风格的
+ * 行尾注释("nameserver 192.168.2.1 # eth0")。仅启动时读一次。 */
+static void load_dns_server(void)
+{
+    static char dns_url[64];                 /* 被 mgr 引用,须与 mgr 同生命周期 */
+
+    FILE *f = fopen("/etc/resolv.conf", "r");
+    if (!f) {
+        DG_LOGW(TAG, "读 /etc/resolv.conf 失败,DNS 用默认 8.8.8.8");
+        return;
+    }
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        char *hash = strchr(line, '#');
+        if (hash)
+            *hash = '\0';                    /* 行尾注释 */
+        char *p = line;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (strncmp(p, "nameserver", 10) != 0)
+            continue;
+        char *ip = p + 10;
+        while (*ip == ' ' || *ip == '\t')
+            ip++;
+        char *end = ip;
+        while (*end && *end != ' ' && *end != '\t' && *end != '\n' && *end != '\r')
+            end++;
+        *end = '\0';
+        if (!ip[0])
+            continue;
+        snprintf(dns_url, sizeof(dns_url), "udp://%s:53", ip);
+        s_mgr.dns4.url = dns_url;
+        DG_LOGI(TAG, "DNS 服务器: %s", ip);
+        break;
+    }
+    fclose(f);
+}
+
 int netcore_start(void)
 {
     if (atomic_load(&s_running))
@@ -90,6 +133,10 @@ int netcore_start(void)
 
     memset(&s_mgr, 0, sizeof(s_mgr));
     mg_mgr_init(&s_mgr);
+    load_dns_server();
+    /* 默认 3s:家用路由对未缓存域名的递归解析常超(板上实测 ntp.aliyun.com
+     * 首查 3s+);10s 与 SNTP 超时同量级,失败路径不受影响 */
+    s_mgr.dnstimeout = 10000;
     s_head = s_tail = s_dropped = 0;
     atomic_store(&s_hb_ms, 0);
 

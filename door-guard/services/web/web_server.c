@@ -1064,14 +1064,16 @@ static void web_teardown(void *arg)
         ota_abort();
         s_ota_c = NULL;
     }
+    /* is_closing:延迟到本轮 poll 末尾关闭;闭包跑在 poll 的定时器上下文里,
+     * 立即 free(mg_close_conn)会让 poll 循环踩已释放内存(板上实测段错误) */
     for (int i = 0; i < WS_MAX_CONN; i++) {
         if (s_ws[i]) {
-            mg_close_conn(s_ws[i]);
+            s_ws[i]->is_closing = 1;
             s_ws[i] = NULL;
         }
     }
     if (s_lsn) {
-        mg_close_conn(s_lsn);
+        s_lsn->is_closing = 1;
         s_lsn = NULL;
     }
 }
