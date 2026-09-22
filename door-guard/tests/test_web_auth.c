@@ -68,7 +68,7 @@ static void t_credentials(void)
 
 static void t_sessions(void)
 {
-    printf("[WA2] 会话表:签发/校验/过期/注销/表满\n");
+    printf("[WA2] 会话表:签发/校验/过期/注销/单会话互踢\n");
     web_session_revoke_all();
     time_t now = time(NULL);
 
@@ -89,21 +89,33 @@ static void t_sessions(void)
     DG_CHECK(web_session_validate(t1, now + WEB_SESSION_TTL_S + 1) == false);
     DG_CHECK(web_session_count(now + WEB_SESSION_TTL_S + 1) == 0);
 
-    /* 注销单条 */
-    char t2[WEB_TOKEN_LEN + 1] = "";
+    /* 单会话策略:新签发吊销其余——web 管理页同一时刻只允许一个管理员在线;
+     * 新登录必胜(崩溃浏览器不会永久占坑,被踢方下一个请求拿 401 回登录页) */
+    char t2[WEB_TOKEN_LEN + 1] = "", t3[WEB_TOKEN_LEN + 1] = "";
     DG_CHECK(web_session_create(t2, sizeof(t2), NULL) == DG_OK);
+    DG_CHECK(web_session_validate(t1, now) == false);      /* 旧会话被踢 */
     DG_CHECK(web_session_validate(t2, now) == true);
-    web_session_revoke(t2);
+    DG_CHECK(web_session_count(now) == 1);
+    DG_CHECK(web_session_create(t3, sizeof(t3), NULL) == DG_OK);
     DG_CHECK(web_session_validate(t2, now) == false);
+    DG_CHECK(web_session_validate(t3, now) == true);
+    DG_CHECK(web_session_count(now) == 1);
 
-    /* 表满:第 N+1 次签发仍必须给可用 token(顶掉最旧的) */
-    char toks[WEB_SESSION_MAX + 1][WEB_TOKEN_LEN + 1];
-    for (int i = 0; i <= WEB_SESSION_MAX; i++) {
+    /* 注销单条 */
+    web_session_revoke(t3);
+    DG_CHECK(web_session_validate(t3, now) == false);
+    DG_CHECK(web_session_count(now) == 0);
+
+    /* 连续登录竞逐(超过旧表容量):始终只有最新 token 有效 */
+    char toks[WEB_SESSION_MAX + 2][WEB_TOKEN_LEN + 1];
+    for (int i = 0; i <= WEB_SESSION_MAX + 1; i++) {
         DG_CHECK(web_session_create(toks[i], WEB_TOKEN_LEN + 1, NULL) == DG_OK);
+        if (i > 0)
+            DG_CHECK(web_session_validate(toks[i - 1], time(NULL)) == false);
     }
     time_t later = time(NULL);
-    DG_CHECK(web_session_validate(toks[WEB_SESSION_MAX], later) == true);
-    DG_CHECK(web_session_count(later) == WEB_SESSION_MAX);   /* 不超上限 */
+    DG_CHECK(web_session_validate(toks[WEB_SESSION_MAX + 1], later) == true);
+    DG_CHECK(web_session_count(later) == 1);
 
     /* 全吊销(改凭据时调用) */
     web_session_revoke_all();

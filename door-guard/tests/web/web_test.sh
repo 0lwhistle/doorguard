@@ -132,6 +132,17 @@ chk "默认凭据登录成功并拿到 token" "[ -n '$TOKEN' ]"
 chk "登录响应含有效期" "echo '$resp' | grep -q expires_in"
 chk "首启标记为默认口令" "[ \"\$(echo '$resp' | jget pwd_default)\" = 'true' ]"
 
+# 单会话策略:同一时刻只允许一个管理员在线,新登录吊销其余会话
+resp=$(curl -s -H 'Content-Type: application/json' \
+    -d '{"user":"admin","pwd":"admin"}' "$BASE/api/login")
+TOKEN2=$(echo "$resp" | jget token)
+chk "第二次登录成功" "[ -n '$TOKEN2' ]"
+code=$(curl -s -o /dev/null -w "%{http_code}" -H "X-Auth-Token: $TOKEN" "$BASE/api/device")
+chk "二次登录后首登录 token 失效 → 401" "[ '$code' = '401' ]"
+code=$(curl -s -o /dev/null -w "%{http_code}" -H "X-Auth-Token: $TOKEN2" "$BASE/api/device")
+chk "新 token 正常可用 → 200" "[ '$code' = '200' ]"
+TOKEN=$TOKEN2                             # 后续用例沿用最新会话
+
 echo "== 5. 设备信息 =="
 resp=$(curl -s -H "X-Auth-Token: $TOKEN" "$BASE/api/device")
 uptime=$(echo "$resp" | jget uptime_s)
@@ -194,6 +205,11 @@ else
 fi
 
 echo "== 8. 账号/口令修改 =="
+# 单会话策略:第 7 节 ws_test.py 自己登录过,已把主脚本的会话踢掉,重新登录
+resp=$(curl -s -H 'Content-Type: application/json' \
+    -d '{"user":"admin","pwd":"admin"}' "$BASE/api/login")
+TOKEN=$(echo "$resp" | jget token)
+chk "WS 段之后重新登录可用" "[ -n '$TOKEN' ]"
 code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "X-Auth-Token: $TOKEN" \
     -H 'Content-Type: application/json' \
     -d '{"old_pwd":"wrong","user":"guard01","pwd":"NewPass123"}' "$BASE/api/account")

@@ -1,10 +1,12 @@
 /*
  * web_session.c — 会话表实现
  *
- * 表结构:定长 8 槽(门禁上位机同时在线的运维人员不会多;定长=无分配、
- * 无泄漏)。顶替策略:优先空槽,否则顶掉"过期最早的槽",保证新登录总能
- * 拿到可用 token——原实现表满时仍返回 token 但没入库,客户端拿到一个
- * 永远无效的 token(实测的坑),这里从设计上排除。
+ * 单会话策略(2026-09-22):web 管理页同一时刻只允许一个管理员在线,
+ * create 签发成功即清除其余全部会话——新登录必胜,自愈性好:崩溃的
+ * 浏览器不会永久占坑,被踢方下一个请求拿 401 由前端路由守卫送回登录页。
+ * 定长 8 槽结构保留(单会话下最多占 1 槽,容量只是防御性上限)。
+ * 原实现"表满顶掉最旧"的换路已被单会话清空覆盖,不存在"token 未入库"
+ * 的历史坑。
  */
 #include "web_session.h"
 
@@ -41,20 +43,9 @@ int web_session_create(char *out, size_t cap, int *expires_in_s)
 
     time_t now = time(NULL);
     pthread_mutex_lock(&s_mtx);
-    session_t *slot = NULL;
-    for (int i = 0; i < WEB_SESSION_MAX; i++) {
-        if (!slot_valid(&s_slots[i], now)) {     /* 空槽或已过期 */
-            slot = &s_slots[i];
-            break;
-        }
-    }
-    if (!slot) {                                 /* 表满:顶掉最早过期的 */
-        slot = &s_slots[0];
-        for (int i = 1; i < WEB_SESSION_MAX; i++) {
-            if (s_slots[i].expiry < slot->expiry)
-                slot = &s_slots[i];
-        }
-    }
+    /* 单会话:签发即清空其余会话(见文件头说明) */
+    memset(s_slots, 0, sizeof(s_slots));
+    session_t *slot = &s_slots[0];
     snprintf(slot->token, sizeof(slot->token), "%s", token);
     slot->expiry = now + WEB_SESSION_TTL_S;
     slot->used = true;

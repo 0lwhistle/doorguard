@@ -5,7 +5,8 @@
  * 抽出来可以脱离 socket 单测(注入 now),而 socket 层只做取头/校验。
  *
  * 语义:
- *   create   签发 32 hex 随机 token(TTL 1h),表满则顶掉最旧的一条
+ *   create   签发 32 hex 随机 token(TTL 1h),并**吊销其余全部会话**
+ *            ——单会话策略:同一时刻只允许一个管理员在线,新登录必胜
  *   validate 校验并按需滑动续期(活跃用户不会被中途踢出)
  *   revoke   单条吊销(logout);revoke_all 全吊销(改凭据时调用)
  * 时间为入参(不内部取时钟):单测可以"快进"验证过期,无需睡一秒。
@@ -23,7 +24,7 @@
 extern "C" {
 #endif
 
-#define WEB_SESSION_MAX    8      /**< 同时在线会话上限 */
+#define WEB_SESSION_MAX    8      /**< 表槽位数(单会话下仅占 1 槽,防御性上限) */
 #define WEB_SESSION_TTL_S  3600   /**< 会话有效期(秒) */
 #define WEB_TOKEN_LEN      32     /**< hex 长度(16B 随机) */
 
