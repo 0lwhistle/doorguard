@@ -43,6 +43,12 @@ int64_t netcore_heartbeat_ms(void);
  */
 void netcore_post(void (*fn)(void *arg), void *arg);
 
+/**
+ * 取 mongoose 管理器。**只能在 loop 线程使用**——即 netcore_post 投递的
+ * 闭包内、或 MG_EV_* 回调里;装配期注册监听/定时器一律走 post 闭包。
+ */
+struct mg_mgr *netcore_mgr(void);
+
 #ifdef __cplusplus
 }
 #endif

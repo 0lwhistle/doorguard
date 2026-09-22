@@ -30,6 +30,7 @@
 #include "holder.h"
 #include "liveness_service.h"
 #include "mdns/mdns_responder.h"
+#include "net/netcore.h"
 #include "ntp/ntp_service.h"
 #include "registry.h"
 #include "web/web_server.h"
@@ -184,6 +185,13 @@ static int mod_liveness(void)
     return liveness_service_start();
 }
 
+/* 统一网络事件循环:web/OTA/NTP/mDNS 全部网络 I/O 的唯一传输层。
+ * 必须先于网络服务族就绪——服务的监听注册经 netcore_post 投递进 loop */
+static int mod_netcore(void)
+{
+    return netcore_start();
+}
+
 /* NTP 服务:订阅 EV_NET_NTP_TRIGGER(菜单/上位机按钮)+ 开机自动校正一次。
  * 必须真装配:只 include 头不初始化时 running=false,触发请求会被静默丢弃
  * (表现为"按钮没反应",不报错——曾经的坑) */
@@ -217,6 +225,7 @@ static const char *const DEP_CONFIG[]    = { "config" };
 static const char *const DEP_CAMERA[]    = { "config", "camera" };
 static const char *const DEP_VIS_BE[]    = { "vision_service", "camera" };
 static const char *const DEP_TASKER_ONLY[] = { "tasker" };
+static const char *const DEP_WEB[]       = { "config", "netcore" };
 
 /* 跨表依赖解析:服务依赖的 modules 在 holder 表(装配层桥接,registry 保持通用) */
 static int dep_ready(const char *name)
@@ -243,7 +252,7 @@ static registry_err_t register_services(void)
         { "enroll",         mod_enroll,         false, DEP_TASKER_ONLY, 1, NULL },
         { "liveness",       mod_liveness,       false, DEP_TASKER_ONLY, 1, NULL },
         { "ntp",            mod_ntp,            false, DEP_EVENT_BUS,   1, NULL },
-        { "web",            mod_web,            false, DEP_CONFIG,      1,
+        { "web",            mod_web,            false, DEP_WEB,         2,
           web_server_heartbeat_ms },
         { "mdns",           mod_mdns,           false, DEP_CONFIG,      1, NULL },
         /* ui 依赖 display:display 由 ui_init 内部初始化(无独立模块),
@@ -277,6 +286,7 @@ static int register_modules(void)
         { "storage",   mod_storage,   true,  DEP_TASKER,    1 },
         { "config",    mod_config,    true,  DEP_STORAGE,   1 },
         { "camera",    mod_camera,    false, DEP_CONFIG,    1 },
+        { "netcore",   mod_netcore,   false, NULL,          0 },
     };
 
     for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {

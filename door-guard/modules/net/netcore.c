@@ -14,6 +14,7 @@
 #include "netcore.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <time.h>
 
@@ -37,8 +38,9 @@ static pthread_mutex_t s_mtx = PTHREAD_MUTEX_INITIALIZER;
 static post_t s_q[NETCORE_POST_MAX];
 static int s_head = 0, s_tail = 0;
 static int s_dropped = 0;
-static volatile bool s_running = false;
-static volatile int64_t s_hb_ms = 0;
+/* 跨线程标志/心跳一律原子量:TSAN 下零竞态,语义与朴素读写一致 */
+static atomic_bool s_running = false;
+static atomic_llong s_hb_ms = 0;
 
 static int64_t now_ms(void)
 {
@@ -74,8 +76,8 @@ static void *loop_thread(void *arg)
 {
     (void)arg;
     mg_timer_add(&s_mgr, NETCORE_DRAIN_MS, MG_TIMER_REPEAT, drain_timer_fn, NULL);
-    while (s_running) {
-        s_hb_ms = now_ms();
+    while (atomic_load(&s_running)) {
+        atomic_store(&s_hb_ms, now_ms());
         mg_mgr_poll(&s_mgr, NETCORE_POLL_MS);
     }
     return NULL;
@@ -83,17 +85,17 @@ static void *loop_thread(void *arg)
 
 int netcore_start(void)
 {
-    if (s_running)
+    if (atomic_load(&s_running))
         return DG_OK;
 
     memset(&s_mgr, 0, sizeof(s_mgr));
     mg_mgr_init(&s_mgr);
     s_head = s_tail = s_dropped = 0;
-    s_hb_ms = 0;
+    atomic_store(&s_hb_ms, 0);
 
-    s_running = true;
+    atomic_store(&s_running, true);
     if (pthread_create(&s_tid, NULL, loop_thread, NULL) != 0) {
-        s_running = false;
+        atomic_store(&s_running, false);
         mg_mgr_free(&s_mgr);
         DG_LOGE(TAG, "loop 线程创建失败,网络层不可用");
         return DG_ERR_IO;
@@ -105,29 +107,29 @@ int netcore_start(void)
 
 void netcore_stop(void)
 {
-    if (!s_running)
+    if (!atomic_load(&s_running))
         return;
 
     pthread_mutex_lock(&s_mtx);
-    s_running = false;                       /* loop 线程 ≤POLL_MS 内退出 */
+    atomic_store(&s_running, false);        /* loop 线程 ≤POLL_MS 内退出 */
     pthread_mutex_unlock(&s_mtx);
     if (s_tid_valid) {
         pthread_join(s_tid, NULL);
         s_tid_valid = false;
     }
     mg_mgr_free(&s_mgr);                     /* 关闭所有残留连接 */
-    s_hb_ms = 0;
+    atomic_store(&s_hb_ms, 0);
     DG_LOGI(TAG, "统一网络事件循环已停止(闭包丢弃累计 %d)", s_dropped);
 }
 
 bool netcore_running(void)
 {
-    return s_running;
+    return atomic_load(&s_running);
 }
 
 int64_t netcore_heartbeat_ms(void)
 {
-    return s_hb_ms;                          /* int64 读原子,与原实现同 */
+    return atomic_load(&s_hb_ms);
 }
 
 void netcore_post(void (*fn)(void *arg), void *arg)
@@ -135,7 +137,7 @@ void netcore_post(void (*fn)(void *arg), void *arg)
     if (!fn)
         return;
     pthread_mutex_lock(&s_mtx);
-    if (!s_running) {
+    if (!atomic_load(&s_running)) {
         pthread_mutex_unlock(&s_mtx);
         return;                              /* 停服竞态:静默丢弃 */
     }
@@ -148,4 +150,9 @@ void netcore_post(void (*fn)(void *arg), void *arg)
     s_q[s_head].arg = arg;
     s_head = next;
     pthread_mutex_unlock(&s_mtx);
+}
+
+struct mg_mgr *netcore_mgr(void)
+{
+    return &s_mgr;                           /* 仅限 loop 线程使用(见头文件) */
 }

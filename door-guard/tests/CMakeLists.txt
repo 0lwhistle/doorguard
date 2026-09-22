@@ -75,7 +75,7 @@ target_include_directories(test_mdns_wire PRIVATE
 add_test(NAME test_mdns_wire COMMAND test_mdns_wire)
 set_tests_properties(test_mdns_wire PROPERTIES TIMEOUT 30)
 
-# web 凭据与会话(直接编入被测源文件:不拉 civetweb,纯逻辑单测)
+# web 凭据与会话(直接编入被测源文件,纯逻辑单测)
 add_executable(test_web_auth test_web_auth.c
     ${CMAKE_SOURCE_DIR}/services/web/web_auth.c
     ${CMAKE_SOURCE_DIR}/services/web/web_session.c)
@@ -85,7 +85,7 @@ add_test(NAME test_web_auth COMMAND test_web_auth)
 set_tests_properties(test_web_auth PROPERTIES TIMEOUT 60)
 
 # netcore:统一网络事件循环(启停/心跳/post 闭包投递;不建真实连接)
-# 直接编 netcore.c:整链 dg_net 会把过渡期的 civetweb 拖进来(mg_* 符号与 mongoose 冲突)
+# netcore 与 mongoose 直连被测源文件(不整链 dg_net,保持单测最小依赖)
 add_executable(test_netcore test_netcore.c
     ${CMAKE_SOURCE_DIR}/modules/net/netcore.c)
 target_include_directories(test_netcore PRIVATE

@@ -9,19 +9,20 @@
 #include "netcore.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <unistd.h>
 
 /* post 的闭包:记录执行并回传自身线程 id,验证"确实跑在 loop 线程" */
 static pthread_t g_ran_tid;
-static int g_ran_cnt;
+static _Atomic int g_ran_cnt;
 static void *g_seen_arg;
 
 static void probe_fn(void *arg)
 {
     g_ran_tid = pthread_self();
     g_seen_arg = arg;
-    g_ran_cnt++;
+    atomic_fetch_add(&g_ran_cnt, 1);
 }
 
 static void nul_fn(void *arg)
@@ -59,24 +60,24 @@ static void t_post(void)
     DG_CHECK(netcore_start() == DG_OK);
 
     int magic = 42;
-    g_ran_cnt = 0;
+    atomic_store(&g_ran_cnt, 0);
     g_seen_arg = NULL;
     netcore_post(probe_fn, &magic);
     bool ran = false;
     for (int i = 0; i < 100 && !ran; i++) {      /* 排水周期 10ms,1s 足够 */
         usleep(10 * 1000);
-        ran = (g_ran_cnt > 0);
+        ran = (atomic_load(&g_ran_cnt) > 0);
     }
     DG_CHECK(ran);
-    DG_CHECK(g_ran_cnt == 1);
+    DG_CHECK(atomic_load(&g_ran_cnt) == 1);
     DG_CHECK(g_seen_arg == &magic);              /* 参数原样送达 */
     DG_CHECK(pthread_equal(g_ran_tid, pthread_self()) == 0);  /* 不是调用者线程 */
 
     netcore_stop();
-    g_ran_cnt = 0;
+    atomic_store(&g_ran_cnt, 0);
     netcore_post(probe_fn, NULL);                /* 停服后:静默丢弃不崩 */
     usleep(50 * 1000);
-    DG_CHECK(g_ran_cnt == 0);
+    DG_CHECK(atomic_load(&g_ran_cnt) == 0);
 }
 
 static void t_restart_cycles(void)

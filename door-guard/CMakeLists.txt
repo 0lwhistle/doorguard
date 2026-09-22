@@ -241,28 +241,11 @@ target_include_directories(dg_liveness PUBLIC ${CMAKE_SOURCE_DIR}/services/liven
 target_link_libraries(dg_liveness PUBLIC dg_proto dg_config)
 
 # mongoose:第三方网络库(GPLv2/商业双许可,单文件 vendored;本项目按 GPLv2 开源路线使用)
-# 统一网络层的唯一传输引擎(web/OTA/NTP/mDNS 全走 modules/net 的 netcore 事件循环)
+# 统一网络层的唯一传输引擎(web/OTA/NTP/mDNS 全走 modules/net 的 netcore 事件循环;
+# 2026-09-22 起 civetweb 退役——两库 mg_* 符号同名,本就不能共存于一个二进制)
 add_library(mongoose STATIC third_party/mongoose/mongoose.c)
 target_include_directories(mongoose PUBLIC third_party/mongoose)
 target_compile_definitions(mongoose PRIVATE MG_ARCH=MG_ARCH_UNIX MG_ENABLE_TCPIP=0)
-
-# civetweb:第三方 HTTP/WebSocket 单库(MIT,vendored)
-add_library(civetweb STATIC third_party/civetweb/civetweb.c)
-target_include_directories(civetweb PUBLIC third_party/civetweb)
-target_include_directories(civetweb PRIVATE ${CMAKE_SOURCE_DIR}/third_party/civetweb)
-target_compile_options(civetweb PRIVATE -w)
-target_compile_definitions(civetweb PRIVATE
-    MG_ENABLE_IPV6=0 MG_ENABLE_SSL=0 MG_DISABLE_POPEN=1
-    NO_SSL=1 NO_SSL_DL=1 MG_ENABLE_MD5=1 USE_WEBSOCKET=1
-    MG_ENABLE_SHA1=1 OPENSSL_API_3_0=1)
-target_compile_definitions(civetweb PUBLIC USE_WEBSOCKET=1)
-# WebSocket 握手应答要用 SHA1:civetweb 在 NO_SSL 下**不**包含 OpenSSL 头,但
-# OPENSSL_API_3_0 分支仍调 EVP_Digest/EVP_get_digestbyname —— 缺原型即隐式声明,
-# 指针返回值被截成 int,握手当场段错误(实测:连上即崩)。civetweb 自身带 -w
-# 把告警全压掉了,所以这个坑只能靠人工发现。这里强制先包含 EVP 头补上原型;
-# 不改 third_party 源码,升级 civetweb 时不必重新打补丁。
-target_compile_options(civetweb PRIVATE
-    -include ${CMAKE_CURRENT_SOURCE_DIR}/third_party/civetweb/dg_openssl_shim.h)
 
 # net:web 上位机 / OTA / NTP / mDNS(源码分驻 services/{web,ota,ntp,mdns} 与 modules/net)
 # net_info:网络接口只读信息(独立小库:web 上位机与 UI 主页网络图标共用,
@@ -273,6 +256,7 @@ target_include_directories(dg_net_info PUBLIC ${CMAKE_SOURCE_DIR}/modules/net
 target_link_libraries(dg_net_info PUBLIC dg_log)
 
 add_library(dg_net STATIC
+    modules/net/netcore.c
     services/web/web_server.c
     services/web/web_pages.c
     services/web/web_auth.c
@@ -285,7 +269,8 @@ add_library(dg_net STATIC
 target_include_directories(dg_net PUBLIC ${CMAKE_SOURCE_DIR}/services
                                          ${CMAKE_SOURCE_DIR}/modules)
 target_link_libraries(dg_net PUBLIC dg_net_info)
-target_link_libraries(dg_net PUBLIC dg_access dg_storage civetweb crypto)
+# crypto:web_auth(PBKDF2)/web_session(RAND)依赖;mongoose 自带 SHA1 无需 shim
+target_link_libraries(dg_net PUBLIC dg_access dg_storage mongoose crypto)
 
 # 固件版本号:git describe 注入(上位机"设备概览"与 /api/device 显示)。
 # 无 git / 无 tag 时退化为 unknown——不能因为版本号取不到就让编译失败。

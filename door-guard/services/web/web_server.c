@@ -1,24 +1,33 @@
 /*
- * web_server.c — 内嵌 web 上位机实现(civetweb)
+ * web_server.c — 内嵌 web 上位机实现(mongoose 统一事件循环)
+ *
+ * 传输层跑在 modules/net/netcore 的单 loop 线程上(2026-09-22 起替代
+ * civetweb 4-worker 线程池):所有连接只在 loop 线程读写,总线回调等
+ * 其他线程经 netcore_post 投递——跨线程碰连接的数据竞争从结构上排除
+ * (旧"推送线程 + 连接表锁 + 连接锁"协议随之废除)。
  *
  * 路由表(method 严格校验:改状态的接口不接受 GET——原来 GET /api/ntp
  * 也能触发联网校时,属错误面过宽的坑):
- *   GET  /                单页应用(HTML;CSS/JS 见 /app.css、/app.js)
- *   GET  /app.css /app.js 样式与脚本(蓝白主题 + 动效)
+ *   GET  /                单页应用(hash 路由回退;CSS/JS 见 /assets 目录)
+ *   GET  /assets/...      构建产物(资源表按精确路径命中)
  *   POST /api/login       登录 → {token,user,pwd_default,expires_in}
  *   POST /api/logout      注销当前 token
  *   GET  /api/device      设备信息(版本/运行时长/用户数/日志数/IP/mDNS/账号/NTP)
  *   GET  /api/logs        门禁日志查询(时间段 + 用户 ID + 分页,JSON)
  *   POST /api/ntp         触发一次 NTP 校正(异步,结果走 WebSocket)
  *   POST /api/account     改账号/口令(需旧口令;成功后所有会话失效)
- *   POST /api/ota/upload  OTA 包流式接收(见 ota_service.h)
+ *   POST /api/ota/upload  OTA 包流式接收(MG_EV_HTTP_HDRS + MG_EV_READ 喂入,
+ *                         按 ota_can_accept() 限流,绝不阻塞 loop;见 ota_service.h)
  *   GET  /api/ws          WebSocket:实时推送认证事件/NTP 结果
  *
- * WebSocket 推送模型(替代原"客户端每 2s 发 ping 才排水"的临时方案):
- *   总线回调只把消息入队(总线线程绝不碰连接);独立的推送线程出队后
- *   逐连接 mg_websocket_write。civetweb 的连接释放路径同样要拿
- *   conn 锁并先经过 close 回调,因此"持连接表锁 + mg_lock_connection"
- *   能保证写期间连接不会被释放(跨线程写导致崩溃的根因即此处)。
+ * WebSocket 推送模型:总线回调只把消息入队(总线线程绝不碰连接),随后
+ * netcore_post 让 loop 线程排空队列并逐连接 mg_ws_send——与旧"civetweb
+ * 推送线程"行为等价,但队列消费方就是连接的唯一合法访问线程,连表无锁。
+ *
+ * OTA 流式收包:mongoose 对收包不背压(不消费 recv 它也会继续读到
+ * MG_MAX_RECV_SIZE 上限后断连),所以按 can_accept 限流喂入;极端慢盘时
+ * 最多缓冲 3MB 由 mongoose 显式断连,客户端可用 X-OTA-Offset 断点续传
+ * (有界失败 + 可恢复,优于秒级阻塞整个 loop)。
  */
 #include "web_server.h"
 #include "web_auth.h"
@@ -28,13 +37,12 @@
 #include "ntp/ntp_service.h"
 #include "net_info.h"
 #include "mdns/mdns_responder.h"
+#include "netcore.h"
 #include "dg_log.h"
 #include "event_bus.h"
 #include "events.h"
 #include "cfg.h"
 #include "storage.h"
-
-#include "civetweb.h"
 
 #include <cJSON.h>
 #include <pthread.h>
@@ -52,37 +60,27 @@ static const char *TAG = "[WEB]";
 #define WS_MAX_CONN      4
 #define WS_QUEUE         24
 #define WS_MSG_MAX       320
-#define HTTP_REASON_OK    "200 OK"
-#define LOG_PAGE_MAX     100         /* 单页上限:别让一次查询把 4 个 worker 拖住 */
+#define LOG_PAGE_MAX     100         /* 单页上限:别让一次查询拖住唯一 loop */
 
-static struct mg_context *s_ctx = NULL;
+static bool s_started = false;
+static struct mg_connection *s_lsn = NULL;   /* HTTP 监听(loop 线程私有) */
 static event_subscription_t *s_subs[8];
 static int s_sub_cnt = 0;
 static time_t s_started_at = 0;
+static int s_port = 8080;
 
 /* 最近一次 NTP 结果(设备信息里显示"已同步/未同步 + 时间") */
 static bool s_ntp_ok = false;
 static int64_t s_ntp_ts = 0;
 
-/* 前置声明:WS 拒连要回一个完整的 401(实现见下方"HTTP 响应工具") */
-static void json_msg(struct mg_connection *conn, int code, const char *msg);
+/* ---- WebSocket 连接表(loop 线程私有,无锁)+ 推送队列(跨线程,互斥) ---- */
 
-/* ---- WebSocket 连接表 + 推送队列 ---- */
+static struct mg_connection *s_ws[WS_MAX_CONN];
 
-typedef struct {
-    struct mg_connection *conn;
-    bool                  used;
-} ws_slot_t;
-
-static ws_slot_t s_ws[WS_MAX_CONN];
 static char s_queue[WS_QUEUE][WS_MSG_MAX];
 static int s_q_head = 0, s_q_tail = 0;
 static int s_q_dropped = 0;
 static pthread_mutex_t s_ws_mtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t s_ws_cond = PTHREAD_COND_INITIALIZER;
-static pthread_t s_pusher;
-static bool s_pusher_run = false;
-static int64_t s_hb_ms = 0;              /* 推送线程每次唤醒刷新(看门狗判活) */
 
 /* 入队(任意线程;满则丢最旧并计数——宁可丢几条实时事件,也不能阻塞总线) */
 static void ws_enqueue(const char *json)
@@ -95,113 +93,58 @@ static void ws_enqueue(const char *json)
     }
     snprintf(s_queue[s_q_head], WS_MSG_MAX, "%s", json);
     s_q_head = next;
-    pthread_cond_signal(&s_ws_cond);
     pthread_mutex_unlock(&s_ws_mtx);
 }
 
-/* 出队(推送线程) */
-static bool ws_dequeue(char *out, size_t cap)
-{
-    if (s_q_tail == s_q_head)
-        return false;
-    snprintf(out, cap, "%s", s_queue[s_q_tail]);
-    s_q_tail = (s_q_tail + 1) % WS_QUEUE;
-    return true;
-}
-
-/* 推送线程:出队 → 广播。持表锁期间写连接,close 回调因此不会与其
- * 并发地把连接摘掉/释放(见文件头说明) */
-static void *ws_pusher_thread(void *arg)
+/* loop 线程(netcore_post 闭包):排空队列,逐连接推送。
+ * 连接表只在 loop 线程读写,CLOSE 事件已把死连接摘除,发送天然安全 */
+static void ws_drain_cb(void *arg)
 {
     (void)arg;
-    while (1) {
-        char msg[WS_MSG_MAX];
-        pthread_mutex_lock(&s_ws_mtx);
-        struct timespec hb_now;
-        clock_gettime(CLOCK_REALTIME, &hb_now);
-        s_hb_ms = (int64_t)hb_now.tv_sec * 1000 + hb_now.tv_nsec / 1000000;
-        while (s_pusher_run && s_q_head == s_q_tail) {
-            struct timespec ts;
-            clock_gettime(CLOCK_REALTIME, &ts);
-            ts.tv_sec += 1;                  /* 1s 超时兜底:保证能响应停止 */
-            pthread_cond_timedwait(&s_ws_cond, &s_ws_mtx, &ts);
-        }
-        if (!s_pusher_run) {
-            pthread_mutex_unlock(&s_ws_mtx);
-            break;
-        }
-        bool have = ws_dequeue(msg, sizeof(msg));
-        if (have) {
-            for (int i = 0; i < WS_MAX_CONN; i++) {
-                if (s_ws[i].used && s_ws[i].conn)
-                    mg_websocket_write(s_ws[i].conn, MG_WEBSOCKET_OPCODE_TEXT,
-                                       msg, strlen(msg));
-            }
-        }
-        pthread_mutex_unlock(&s_ws_mtx);
-    }
-    return NULL;
-}
-
-static int ws_connect(const struct mg_connection *conn, void *ud)
-{
-    (void)ud;
-    /* 浏览器 WebSocket 不能自定义请求头 → token 走查询串。
-     * 校验失败必须显式回 401 再拒绝:否则客户端只看到连接被关,无法区分
-     * "密码错"和"网络断" */
-    const struct mg_request_info *ri = mg_get_request_info(conn);
-    char token[64] = "";
-    if (ri && ri->query_string)
-        mg_get_var(ri->query_string, strlen(ri->query_string), "token", token,
-                   sizeof(token));
-    if (!web_session_validate(token, time(NULL))) {
-        DG_LOGW(TAG, "WebSocket 未授权连接被拒(来源 %s)",
-                ri ? ri->remote_addr : "?");
-        /* 不能用 mg_send_http_error:它先置 conn->status_code,随后的
-         * mg_response_header_start 认为"响应已开始"而不再发状态行,
-         * 客户端只收到裸 body(实测),401 状态丢失。这里自己写完整响应 */
-        json_msg((struct mg_connection *)conn, 401, "未登录或会话已过期");
-        return 1;                            /* 非 0:civetweb 放弃握手 */
-    }
-    return 0;
-}
-
-static void ws_ready(struct mg_connection *conn, void *ud)
-{
-    (void)ud;
+    char msg[WS_MSG_MAX];
     pthread_mutex_lock(&s_ws_mtx);
-    for (int i = 0; i < WS_MAX_CONN; i++) {
-        if (!s_ws[i].used) {
-            s_ws[i].used = true;
-            s_ws[i].conn = conn;
-            break;
-        }
+    bool have = (s_q_tail != s_q_head);
+    if (have) {
+        snprintf(msg, sizeof(msg), "%s", s_queue[s_q_tail]);
+        s_q_tail = (s_q_tail + 1) % WS_QUEUE;
     }
     pthread_mutex_unlock(&s_ws_mtx);
-    DG_LOGI(TAG, "WebSocket 已连接");
-}
 
-static int ws_data(struct mg_connection *conn, int bits, char *data, size_t len,
-                   void *ud)
-{
-    (void)conn; (void)bits; (void)data; (void)len; (void)ud;
-    /* 推送不依赖客户端消息;这里只需保持连接(返回 1) */
-    return 1;
-}
-
-static void ws_close(const struct mg_connection *conn, void *ud)
-{
-    (void)ud;
-    pthread_mutex_lock(&s_ws_mtx);
+    if (!have)
+        return;
     for (int i = 0; i < WS_MAX_CONN; i++) {
-        if (s_ws[i].used && s_ws[i].conn == conn) {
-            s_ws[i].used = false;
-            s_ws[i].conn = NULL;
-            break;
+        if (s_ws[i])
+            mg_ws_send(s_ws[i], msg, strlen(msg), WEBSOCKET_OP_TEXT);
+    }
+}
+
+static void ws_push_async(void)
+{
+    netcore_post(ws_drain_cb, NULL);
+}
+
+static void ws_add(struct mg_connection *c)
+{
+    for (int i = 0; i < WS_MAX_CONN; i++) {
+        if (!s_ws[i]) {
+            s_ws[i] = c;
+            DG_LOGI(TAG, "WebSocket 已连接");
+            return;
         }
     }
-    pthread_mutex_unlock(&s_ws_mtx);
-    DG_LOGI(TAG, "WebSocket 已断开");
+    DG_LOGW(TAG, "WebSocket 连接数达上限,拒绝");   /* 表满:直接关 */
+    c->is_draining = 1;
+}
+
+static void ws_remove(struct mg_connection *c)
+{
+    for (int i = 0; i < WS_MAX_CONN; i++) {
+        if (s_ws[i] == c) {
+            s_ws[i] = NULL;
+            DG_LOGI(TAG, "WebSocket 已断开");
+            return;
+        }
+    }
 }
 
 /* ---- HTTP 响应工具 ---- */
@@ -224,117 +167,123 @@ static const char *reason_phrase(int code)
     }
 }
 
-static void http_send(struct mg_connection *conn, int code, const char *ctype,
+static void http_send(struct mg_connection *c, int code, const char *ctype,
                       const char *body, size_t len, const char *extra_hdr)
 {
-    char hdr[512];
-    int n = snprintf(hdr, sizeof(hdr),
-                     "HTTP/1.1 %d %s\r\n"
-                     "Content-Type: %s\r\n"
-                     "Content-Length: %zu\r\n"
-                     "X-Content-Type-Options: nosniff\r\n"
-                     "Cache-Control: no-store\r\n"
-                     "%s"
-                     "Connection: close\r\n\r\n",
-                     code, reason_phrase(code), ctype, len,
-                     extra_hdr ? extra_hdr : "");
-    if (n > 0)
-        mg_write(conn, hdr, (size_t)n);
+    mg_printf(c,
+              "HTTP/1.1 %d %s\r\n"
+              "Content-Type: %s\r\n"
+              "Content-Length: %zu\r\n"
+              "X-Content-Type-Options: nosniff\r\n"
+              "Cache-Control: no-store\r\n"
+              "%s"
+              "Connection: close\r\n\r\n",
+              code, reason_phrase(code), ctype, len,
+              extra_hdr ? extra_hdr : "");
     if (body && len)
-        mg_write(conn, body, len);
+        mg_send(c, body, len);
+    c->is_draining = 1;                  /* 发完即关:与旧行为一致,无连接复用 */
 }
 
-static void json_reply(struct mg_connection *conn, int code, cJSON *root)
+static void json_reply(struct mg_connection *c, int code, cJSON *root)
 {
     char *s = cJSON_PrintUnformatted(root);
     if (!s) {
-        http_send(conn, 500, "application/json; charset=utf-8",
+        http_send(c, 500, "application/json; charset=utf-8",
                   "{\"msg\":\"内部错误\"}", strlen("{\"msg\":\"内部错误\"}"), NULL);
         return;
     }
-    http_send(conn, code, "application/json; charset=utf-8", s, strlen(s), NULL);
+    http_send(c, code, "application/json; charset=utf-8", s, strlen(s), NULL);
     free(s);
 }
 
-static void json_msg(struct mg_connection *conn, int code, const char *msg)
+static void json_msg(struct mg_connection *c, int code, const char *msg)
 {
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "msg", msg ? msg : "");
-    json_reply(conn, code, root);
+    json_reply(c, code, root);
     cJSON_Delete(root);
 }
 
-static const char *req_method(struct mg_connection *conn)
+/* 来源 IPv4(风控按键值;mongoose 无现成字符串,自行展开) */
+static const char *remote_ip(struct mg_connection *c, char *buf, size_t cap)
 {
-    const struct mg_request_info *ri = mg_get_request_info(conn);
-    return (ri && ri->request_method) ? ri->request_method : "";
+    const uint8_t *p = c->rem.addr.ip;
+    snprintf(buf, cap, "%u.%u.%u.%u", p[0], p[1], p[2], p[3]);
+    return buf;
 }
 
-static bool method_is(struct mg_connection *conn, const char *want)
+static bool method_is(struct mg_http_message *hm, const char *want)
 {
-    return strcmp(req_method(conn), want) == 0;
+    return mg_strcmp(hm->method, mg_str(want)) == 0;
 }
 
-static const char *remote_ip(struct mg_connection *conn)
+static bool uri_is(struct mg_http_message *hm, const char *want)
 {
-    const struct mg_request_info *ri = mg_get_request_info(conn);
-    return (ri && ri->remote_addr) ? ri->remote_addr : "-";
+    return mg_strcmp(hm->uri, mg_str(want)) == 0;
 }
 
 /* ---- 鉴权 ---- */
 
-static const char *header_or_query_token(struct mg_connection *conn, char *buf,
+/* 浏览器 WebSocket 不能自定义请求头 → token 走查询串;其余接口 X-Auth-Token。
+ * mongoose 的头值不是 NUL 结尾,必须先拷贝再用 */
+static const char *header_or_query_token(struct mg_http_message *hm, char *buf,
                                          size_t cap)
 {
-    const char *tok = mg_get_header(conn, "X-Auth-Token");
-    if (tok && tok[0])
-        return tok;
-    const struct mg_request_info *ri = mg_get_request_info(conn);
-    if (ri && ri->query_string &&
-        mg_get_var(ri->query_string, strlen(ri->query_string), "token", buf, cap) > 0 &&
-        buf[0])
+    struct mg_str *h = mg_http_get_header(hm, "X-Auth-Token");
+    if (h && h->len > 0 && h->len < cap) {
+        memcpy(buf, h->buf, h->len);
+        buf[h->len] = '\0';
+        return buf;
+    }
+    if (mg_http_get_var(&hm->query, "token", buf, cap) > 0 && buf[0])
         return buf;
     return NULL;
 }
 
-static bool check_token(struct mg_connection *conn)
+static bool check_token(struct mg_http_message *hm)
 {
     char buf[64];
-    const char *tok = header_or_query_token(conn, buf, sizeof(buf));
+    const char *tok = header_or_query_token(hm, buf, sizeof(buf));
     return web_session_validate(tok, time(NULL));
 }
 
 /* 未授权统一回复 */
-static void reply_unauthorized(struct mg_connection *conn)
+static void reply_unauthorized(struct mg_connection *c)
 {
-    json_msg(conn, 401, "未登录或会话已过期,请重新登录");
+    json_msg(c, 401, "未登录或会话已过期,请重新登录");
+}
+
+/* 请求体拷贝(JSON 解析需要 NUL 结尾;超限拒绝) */
+static bool body_copy(struct mg_http_message *hm, char *buf, size_t cap)
+{
+    if (hm->body.len == 0 || hm->body.len >= cap)
+        return false;
+    memcpy(buf, hm->body.buf, hm->body.len);
+    buf[hm->body.len] = '\0';
+    return true;
 }
 
 /* ---- 登录 / 注销 ---- */
 
-static int handle_login(struct mg_connection *conn, void *ud)
+static void handle_login(struct mg_connection *c, struct mg_http_message *hm)
 {
-    (void)ud;
-    if (!method_is(conn, "POST")) {
-        json_msg(conn, 405, "登录接口只接受 POST");
-        return 200;
-    }
     char body[256] = { 0 };
-    int n = mg_read(conn, body, sizeof(body) - 1);
-    if (n <= 0) {
-        json_msg(conn, 400, "坏请求");
-        return 200;
+    if (!body_copy(hm, body, sizeof(body))) {
+        json_msg(c, 400, "坏请求");
+        return;
     }
     cJSON *j = cJSON_Parse(body);
     if (!j) {
-        json_msg(conn, 400, "坏 json");      /* 坏 json 不崩 */
-        return 200;
+        json_msg(c, 400, "坏 json");      /* 坏 json 不崩 */
+        return;
     }
     cJSON *ju = cJSON_GetObjectItem(j, "user");
     cJSON *jp = cJSON_GetObjectItem(j, "pwd");
     const char *user = cJSON_IsString(ju) ? ju->valuestring : "";
     const char *pwd = cJSON_IsString(jp) ? jp->valuestring : "";
-    const char *ip = remote_ip(conn);
+    char ipbuf[48];
+    const char *ip = remote_ip(c, ipbuf, sizeof(ipbuf));
 
     int retry = 0;
     if (web_auth_login_blocked(ip, &retry)) {
@@ -345,12 +294,12 @@ static int handle_login(struct mg_connection *conn, void *ud)
         cJSON_AddNumberToObject(root, "retry_after_s", retry);
         char *s = cJSON_PrintUnformatted(root);
         if (s) {
-            http_send(conn, 429, "application/json; charset=utf-8", s, strlen(s), hdr);
+            http_send(c, 429, "application/json; charset=utf-8", s, strlen(s), hdr);
             free(s);
         }
         cJSON_Delete(root);
         cJSON_Delete(j);
-        return 200;
+        return;
     }
 
     if (web_auth_verify(user, pwd) != DG_OK) {
@@ -360,19 +309,19 @@ static int handle_login(struct mg_connection *conn, void *ud)
                                 locked ? "尝试次数过多,已临时锁定"
                                        : "账号或密码错误");
         cJSON_AddBoolToObject(root, "locked", locked);
-        json_reply(conn, 401, root);
+        json_reply(c, 401, root);
         cJSON_Delete(root);
         cJSON_Delete(j);
-        return 200;
+        return;
     }
 
     web_auth_login_ok(ip);
     char token[WEB_TOKEN_LEN + 1] = "";
     int expires_in = 0;
     if (web_session_create(token, sizeof(token), &expires_in) != DG_OK) {
-        json_msg(conn, 500, "会话创建失败");
+        json_msg(c, 500, "会话创建失败");
         cJSON_Delete(j);
-        return 200;
+        return;
     }
 
     char userbuf[WEB_AUTH_USER_MAX] = "";
@@ -382,29 +331,22 @@ static int handle_login(struct mg_connection *conn, void *ud)
     cJSON_AddNumberToObject(root, "expires_in", expires_in);
     cJSON_AddStringToObject(root, "user", userbuf);
     cJSON_AddBoolToObject(root, "pwd_default", web_auth_is_default());
-    json_reply(conn, 200, root);
+    json_reply(c, 200, root);
     cJSON_Delete(root);
     cJSON_Delete(j);
     DG_LOGI(TAG, "登录成功(来源 %s,账号 %s)", ip, userbuf);
-    return 200;
 }
 
-static int handle_logout(struct mg_connection *conn, void *ud)
+static void handle_logout(struct mg_connection *c, struct mg_http_message *hm)
 {
-    (void)ud;
-    if (!method_is(conn, "POST")) {
-        json_msg(conn, 405, "注销接口只接受 POST");
-        return 200;
-    }
     char buf[64];
-    const char *tok = header_or_query_token(conn, buf, sizeof(buf));
+    const char *tok = header_or_query_token(hm, buf, sizeof(buf));
     if (!web_session_validate(tok, time(NULL))) {
-        reply_unauthorized(conn);
-        return 200;
+        reply_unauthorized(c);
+        return;
     }
     web_session_revoke(tok);
-    json_msg(conn, 200, "已注销");
-    return 200;
+    json_msg(c, 200, "已注销");
 }
 
 /* ---- 设备信息 ---- */
@@ -428,7 +370,7 @@ static void fmt_uptime(int64_t sec, char *out, size_t cap)
         snprintf(out, cap, "%lld 秒", (long long)sec);
     else if (sec < 3600)
         snprintf(out, cap, "%lld 分 %lld 秒", (long long)(sec / 60),
-                 (long long)(sec % 60));
+                 (long long)(sec % 3600));
     else if (sec < 86400)
         snprintf(out, cap, "%lld 小时 %lld 分", (long long)(sec / 3600),
                  (long long)((sec % 3600) / 60));
@@ -437,16 +379,12 @@ static void fmt_uptime(int64_t sec, char *out, size_t cap)
                  (long long)((sec % 86400) / 3600));
 }
 
-static int handle_device(struct mg_connection *conn, void *ud)
+static void handle_device(struct mg_connection *c, struct mg_http_message *hm)
 {
-    (void)ud;
-    if (!method_is(conn, "GET")) {
-        json_msg(conn, 405, "设备信息只接受 GET");
-        return 200;
-    }
-    if (!check_token(conn)) {
-        reply_unauthorized(conn);
-        return 200;
+    (void)hm;
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
     }
     uint32_t users = 0;
     db_user_count(&users);
@@ -476,7 +414,6 @@ static int handle_device(struct mg_connection *conn, void *ud)
 
     /* 存储占用:库大小 + 分区余量。路径归 storage 管,这里不硬编码
      * (模拟器/板上库路径不同,写死会把上位机显示变成假数据) */
-    const dg_cfg_t *cfg = cfg_get();
     uint64_t db_bytes = 0, disk_free = 0;
     db_storage_stats(&db_bytes, &disk_free);
 
@@ -493,7 +430,7 @@ static int handle_device(struct mg_connection *conn, void *ud)
     cJSON_AddStringToObject(root, "mdns_url", url);
     cJSON_AddBoolToObject(root, "mdns_running", mdns_running());
     cJSON_AddBoolToObject(root, "online", net_info_is_online());
-    cJSON_AddNumberToObject(root, "web_port", cfg ? cfg->web_port : 8080);
+    cJSON_AddNumberToObject(root, "web_port", s_port);
     cJSON_AddStringToObject(root, "web_user", userbuf);
     cJSON_AddBoolToObject(root, "pwd_default", web_auth_is_default());
     cJSON_AddNumberToObject(root, "sessions", web_session_count(time(NULL)));
@@ -511,9 +448,8 @@ static int handle_device(struct mg_connection *conn, void *ud)
     }
     cJSON_AddStringToObject(ntp, "last_ok_at", ntpbuf);
 
-    json_reply(conn, 200, root);
+    json_reply(c, 200, root);
     cJSON_Delete(root);
-    return 200;
 }
 
 /* ---- 日志查询 ---- */
@@ -545,16 +481,11 @@ static int parse_date(const char *s, bool end_of_day, int64_t *out)
     return DG_OK;
 }
 
-static int handle_logs(struct mg_connection *conn, void *ud)
+static void handle_logs(struct mg_connection *c, struct mg_http_message *hm)
 {
-    (void)ud;
-    if (!method_is(conn, "GET")) {
-        json_msg(conn, 405, "日志查询只接受 GET");
-        return 200;
-    }
-    if (!check_token(conn)) {
-        reply_unauthorized(conn);
-        return 200;
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
     }
 
     log_query_t q;
@@ -563,42 +494,40 @@ static int handle_logs(struct mg_connection *conn, void *ud)
     q.page_size = 20;
     q.descending = true;
 
-    const struct mg_request_info *ri = mg_get_request_info(conn);
-    const char *qs = ri ? ri->query_string : NULL;
     char v[96];
-    if (qs && mg_get_var(qs, strlen(qs), "from", v, sizeof(v)) > 0 && v[0]) {
+    if (mg_http_get_var(&hm->query, "from", v, sizeof(v)) > 0 && v[0]) {
         if (parse_date(v, false, &q.ts_from) != DG_OK) {
-            json_msg(conn, 400, "日期格式应为 YYYY-MM-DD");
-            return 200;
+            json_msg(c, 400, "日期格式应为 YYYY-MM-DD");
+            return;
         }
     }
-    if (qs && mg_get_var(qs, strlen(qs), "to", v, sizeof(v)) > 0 && v[0]) {
+    if (mg_http_get_var(&hm->query, "to", v, sizeof(v)) > 0 && v[0]) {
         if (parse_date(v, true, &q.ts_to) != DG_OK) {
-            json_msg(conn, 400, "日期格式应为 YYYY-MM-DD");
-            return 200;
+            json_msg(c, 400, "日期格式应为 YYYY-MM-DD");
+            return;
         }
     }
-    if (qs && mg_get_var(qs, strlen(qs), "user_id", v, sizeof(v)) > 0 && v[0]) {
+    if (mg_http_get_var(&hm->query, "user_id", v, sizeof(v)) > 0 && v[0]) {
         size_t ulen = strlen(v);
         if (ulen >= sizeof(q.user_id)) {
-            json_msg(conn, 400, "用户 ID 过长");
-            return 200;
+            json_msg(c, 400, "用户 ID 过长");
+            return;
         }
         memcpy(q.user_id, v, ulen + 1);   /* 长度已校验,避免 snprintf 截断告警 */
     }
-    if (qs && mg_get_var(qs, strlen(qs), "page", v, sizeof(v)) > 0 && v[0]) {
+    if (mg_http_get_var(&hm->query, "page", v, sizeof(v)) > 0 && v[0]) {
         int pg = atoi(v);
         if (pg < 1) {
-            json_msg(conn, 400, "坏参数:page");
-            return 200;
+            json_msg(c, 400, "坏参数:page");
+            return;
         }
         q.page = (uint32_t)pg;
     }
-    if (qs && mg_get_var(qs, strlen(qs), "page_size", v, sizeof(v)) > 0 && v[0]) {
+    if (mg_http_get_var(&hm->query, "page_size", v, sizeof(v)) > 0 && v[0]) {
         int ps = atoi(v);
         if (ps < 1 || ps > LOG_PAGE_MAX) {
-            json_msg(conn, 400, "坏参数:page_size");
-            return 200;
+            json_msg(c, 400, "坏参数:page_size");
+            return;
         }
         q.page_size = (uint32_t)ps;
     }
@@ -606,8 +535,8 @@ static int handle_logs(struct mg_connection *conn, void *ud)
     access_log_t rows[LOG_PAGE_MAX];
     log_page_t out = { .logs = rows, .max = LOG_PAGE_MAX };
     if (db_log_query(&q, &out) != DG_OK) {
-        json_msg(conn, 400, "坏参数");
-        return 200;
+        json_msg(c, 400, "坏参数");
+        return;
     }
 
     cJSON *root = cJSON_CreateObject();
@@ -636,12 +565,11 @@ static int handle_logs(struct mg_connection *conn, void *ud)
         cJSON_AddNumberToObject(o, "result", rows[i].result);
         cJSON_AddItemToArray(arr, o);
     }
-    json_reply(conn, 200, root);
+    json_reply(c, 200, root);
     cJSON_Delete(root);
-    return 200;
 }
 
-/* ---- NTP(异步:chronyc waitsync 可阻塞十余秒,不能占住 worker 线程) ---- */
+/* ---- NTP(异步:chronyc waitsync 可阻塞十余秒,不能占住唯一 loop) ---- */
 
 static pthread_mutex_t s_ntp_mtx = PTHREAD_MUTEX_INITIALIZER;
 static bool s_ntp_running = false;
@@ -656,23 +584,19 @@ static void *ntp_thread(void *arg)
     return NULL;
 }
 
-static int handle_ntp(struct mg_connection *conn, void *ud)
+static void handle_ntp(struct mg_connection *c, struct mg_http_message *hm)
 {
-    (void)ud;
-    if (!method_is(conn, "POST")) {
-        json_msg(conn, 405, "时间校正只接受 POST");
-        return 200;
-    }
-    if (!check_token(conn)) {
-        reply_unauthorized(conn);
-        return 200;
+    (void)hm;
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
     }
 
     pthread_mutex_lock(&s_ntp_mtx);
     if (s_ntp_running) {
         pthread_mutex_unlock(&s_ntp_mtx);
-        json_msg(conn, 409, "校正进行中,请稍候");
-        return 200;
+        json_msg(c, 409, "校正进行中,请稍候");
+        return;
     }
     s_ntp_running = true;
     pthread_mutex_unlock(&s_ntp_mtx);
@@ -684,40 +608,34 @@ static int handle_ntp(struct mg_connection *conn, void *ud)
         pthread_mutex_lock(&s_ntp_mtx);
         s_ntp_running = false;
         pthread_mutex_unlock(&s_ntp_mtx);
-        json_msg(conn, 500, "校正线程创建失败");
-        return 200;
+        json_msg(c, 500, "校正线程创建失败");
+        return;
     }
     /* 202:已受理,结果走 WebSocket 推送(EV_NET_NTP_RESULT) */
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "pending", true);
     cJSON_AddStringToObject(root, "note", "结果将经 WebSocket 推送");
-    json_reply(conn, 202, root);
+    json_reply(c, 202, root);
     cJSON_Delete(root);
-    return 200;
 }
 
 /* ---- 账号/口令 ---- */
 
-static int handle_account(struct mg_connection *conn, void *ud)
+static void handle_account(struct mg_connection *c, struct mg_http_message *hm)
 {
-    (void)ud;
-    if (!method_is(conn, "POST")) {
-        json_msg(conn, 405, "账号修改只接受 POST");
-        return 200;
-    }
-    if (!check_token(conn)) {
-        reply_unauthorized(conn);
-        return 200;
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
     }
     char body[512] = { 0 };
-    if (mg_read(conn, body, sizeof(body) - 1) <= 0) {
-        json_msg(conn, 400, "坏请求");
-        return 200;
+    if (!body_copy(hm, body, sizeof(body))) {
+        json_msg(c, 400, "坏请求");
+        return;
     }
     cJSON *j = cJSON_Parse(body);
     if (!j) {
-        json_msg(conn, 400, "坏 json");
-        return 200;
+        json_msg(c, 400, "坏 json");
+        return;
     }
     cJSON *jo = cJSON_GetObjectItem(j, "old_pwd");
     cJSON *ju = cJSON_GetObjectItem(j, "user");
@@ -747,8 +665,10 @@ static int handle_account(struct mg_connection *conn, void *ud)
     if (rc == DG_OK) {
         cJSON_AddBoolToObject(root, "ok", true);
         cJSON_AddStringToObject(root, "msg", "已保存,请用新凭据重新登录");
-        json_reply(conn, 200, root);
-        DG_LOGI(TAG, "web 凭据已由 web 端修改(来源 %s)", remote_ip(conn));
+        json_reply(c, 200, root);
+        char ipbuf[48];
+        DG_LOGI(TAG, "web 凭据已由 web 端修改(来源 %s)",
+                remote_ip(c, ipbuf, sizeof(ipbuf)));
     } else {
         cJSON_AddBoolToObject(root, "ok", false);
         if (rc == DG_ERR_BAD_UID)
@@ -761,32 +681,101 @@ static int handle_account(struct mg_connection *conn, void *ud)
             rc = DG_ERR_WRONG_PASSWORD;
         }
         cJSON_AddNumberToObject(root, "err", rc);
-        json_reply(conn, 400, root);
+        json_reply(c, 400, root);
     }
     cJSON_Delete(root);
-    return 200;
 }
 
-/* ---- OTA 上传 ---- */
+/* ---- OTA 上传(流式:HDRS 起、READ 喂、收完落位) ---- */
 
-static int handle_ota(struct mg_connection *conn, void *ud)
+static struct mg_connection *s_ota_c = NULL;   /* 当前上传连接(loop 私有) */
+static int64_t s_ota_remain = 0;               /* 还差多少字节 */
+
+static void ota_fail(struct mg_connection *c, int code, const char *msg)
 {
-    (void)ud;
-    if (!method_is(conn, "POST")) {
-        json_msg(conn, 405, "OTA 上传只接受 POST");
-        return 200;
+    ota_abort();
+    s_ota_c = NULL;
+    json_msg(c, code, msg);
+}
+
+static void ota_complete(void)
+{
+    struct mg_connection *c = s_ota_c;
+    s_ota_c = NULL;
+    if (!c)
+        return;
+    char path[64];
+    int rc = ota_finish(path, sizeof(path));
+    if (rc != DG_OK) {
+        json_msg(c, 422, "校验失败(sha256/大小不符)");
+        return;
     }
-    if (!check_token(conn)) {
-        reply_unauthorized(conn);
-        return 200;
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddStringToObject(root, "staged", path);
+    cJSON_AddBoolToObject(root, "resumed", false);
+    json_reply(c, 200, root);
+    cJSON_Delete(root);
+}
+
+/* 从连接 recv 缓冲喂 ota(限流:只取环形缓冲放得下的量),返回是否继续 */
+static void ota_feed_from(struct mg_connection *c)
+{
+    while (s_ota_c == c && s_ota_remain > 0 && c->recv.len > 0) {
+        size_t take = c->recv.len;
+        if (take > (size_t)s_ota_remain)
+            take = (size_t)s_ota_remain;
+        size_t room = ota_can_accept();
+        if (room == 0)
+            return;                          /* 环满:等写线程排干,RETRY 兜底 */
+        if (take > room)
+            take = room;
+
+        size_t got = 0;
+        if (ota_write_chunk((const uint8_t *)c->recv.buf, take, &got) != DG_OK) {
+            ota_fail(c, 400, "写入失败(超大小?)");
+            return;
+        }
+        mg_iobuf_del(&c->recv, 0, take);
+        s_ota_remain -= (int64_t)take;
     }
-    const char *ver = mg_get_header(conn, "X-OTA-Version");
-    const char *size_s = mg_get_header(conn, "X-OTA-Size");
-    const char *sha = mg_get_header(conn, "X-OTA-SHA256");
-    const char *off_s = mg_get_header(conn, "X-OTA-Offset");
-    if (!ver || !size_s || !sha) {
-        json_msg(conn, 400, "缺少 manifest 头(X-OTA-Version/-Size/-SHA256)");
-        return 200;
+    if (s_ota_c == c && s_ota_remain == 0)
+        ota_complete();
+}
+
+/* 环满且数据已到齐的兜底:netcore_post 稍后重喂(写线程排水是毫秒级) */
+static void ota_retry_cb(void *arg)
+{
+    (void)arg;
+    if (s_ota_c && s_ota_remain > 0)
+        ota_feed_from(s_ota_c);
+}
+
+/* MG_EV_HTTP_HDRS:/api/ota/upload 的头部先至——校验并起会话,正文走 READ。
+ * 摘除头部块会让 mongoose 卸载本连接的 HTTP 解析器(官方大包上传约定):
+ * 此后正文按原始字节经 MG_EV_READ 到达,不再有 MG_EV_HTTP_MSG,整包不进内存 */
+static void ota_start(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!method_is(hm, "POST")) {
+        json_msg(c, 405, "OTA 上传只接受 POST");
+        return;
+    }
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    const char *names[] = { "X-OTA-Version", "X-OTA-Size", "X-OTA-SHA256" };
+    char ver[32] = "", size_s[24] = "", sha[65] = "";
+    struct mg_str *h;
+    if ((h = mg_http_get_header(hm, names[0])) != NULL && h->len < sizeof(ver))
+        memcpy(ver, h->buf, h->len);
+    if ((h = mg_http_get_header(hm, names[1])) != NULL && h->len < sizeof(size_s))
+        memcpy(size_s, h->buf, h->len);
+    if ((h = mg_http_get_header(hm, names[2])) != NULL && h->len < sizeof(sha))
+        memcpy(sha, h->buf, h->len);
+    if (!ver[0] || !size_s[0] || !sha[0]) {
+        json_msg(c, 400, "缺少 manifest 头(X-OTA-Version/-Size/-SHA256)");
+        return;
     }
 
     ota_manifest_t m;
@@ -794,62 +783,46 @@ static int handle_ota(struct mg_connection *conn, void *ud)
     snprintf(m.version, sizeof(m.version), "%s", ver);
     m.size = (uint32_t)strtoul(size_s, NULL, 10);
     snprintf(m.sha256, sizeof(m.sha256), "%s", sha);
-    uint32_t offset = off_s ? (uint32_t)strtoul(off_s, NULL, 10) : 0;
+
+    char off_s[24] = "";
+    uint32_t offset = 0;
+    if ((h = mg_http_get_header(hm, "X-OTA-Offset")) != NULL &&
+        h->len < sizeof(off_s)) {
+        memcpy(off_s, h->buf, h->len);
+        offset = (uint32_t)strtoul(off_s, NULL, 10);
+    }
 
     bool resumed = false;
     int rc = ota_begin(&m, offset, &resumed);
     if (rc == DG_ERR_PARAM) {
-        json_msg(conn, 400, "包大小超限或参数非法");
-        return 200;
+        json_msg(c, 400, "包大小超限或参数非法");
+        return;
     }
     if (rc == DG_ERR_STATE) {
-        json_msg(conn, 409, "续传偏移不符,请重传");
-        return 200;
+        json_msg(c, 409, "续传偏移不符,请重传");
+        return;
     }
     if (rc == DG_ERR_BUSY) {
-        json_msg(conn, 409, "其他上传进行中");
-        return 200;
+        json_msg(c, 409, "其他上传进行中");
+        return;
     }
     if (rc != DG_OK) {
-        json_msg(conn, 500, "开始失败");
-        return 200;
+        json_msg(c, 500, "开始失败");
+        return;
     }
 
-    char buf[8192];
-    int64_t remain = (int64_t)m.size - (int64_t)offset;
-    while (remain > 0) {
-        int n = mg_read(conn, buf, remain > (int64_t)sizeof(buf)
-                            ? (int)sizeof(buf) : (int)remain);
-        if (n <= 0)
-            break;
-        size_t got;
-        if (ota_write_chunk((uint8_t *)buf, (size_t)n, &got) != DG_OK) {
-            ota_abort();
-            json_msg(conn, 400, "写入失败(超大小?)");
-            return 200;
-        }
-        remain -= n;
-    }
-
-    char path[64];
-    rc = ota_finish(path, sizeof(path));
-    if (rc != DG_OK) {
-        json_msg(conn, 422, "校验失败(sha256/大小不符)");
-        return 200;
-    }
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddBoolToObject(root, "ok", true);
-    cJSON_AddStringToObject(root, "staged", path);
-    cJSON_AddBoolToObject(root, "resumed", resumed);
-    json_reply(conn, 200, root);
-    cJSON_Delete(root);
-    DG_LOGI(TAG, "OTA 包已暂存: %s(版本 %s)", path, ver);
-    return 200;
+    s_ota_c = c;
+    s_ota_remain = (int64_t)m.size - (int64_t)offset;
+    /* 头部同拍已带正文:先摘头(触发 mongoose 卸载解析器),再喂正文。
+     * 摘头后正文从 recv[0] 开始,ota_feed_from 的偏移才正确 */
+    size_t hdr_len = (size_t)(hm->body.buf - (const char *)c->recv.buf);
+    mg_iobuf_del(&c->recv, 0, hdr_len);
+    ota_feed_from(c);
 }
 
 /* ---- 静态资源(内嵌前端产物) ---- */
 
-/* 按**精确路径**查资源表(pages/ 由 gen_pages.sh 生成,见 web_pages.h) */
+/* 按精确路径查资源表(pages/ 由 gen_pages.sh 生成,见 web_pages.h) */
 static const dg_web_asset_t *asset_lookup(const char *path)
 {
     if (!path)
@@ -861,31 +834,110 @@ static const dg_web_asset_t *asset_lookup(const char *path)
     return NULL;
 }
 
-/* 兜底路由(注册在 "/"):
- * civetweb 的匹配顺序是"精确 → 路径前缀 → 模式",而 "/" 作为模式能匹配
- * 任何 URI——所以它只能承担兜底,不能用它注册具体接口;反过来也意味着
- * 未知路径都会落到这里,由本函数分派:资源表命中则返回资源,否则单页应用
- * 回退(hash 路由下前端自己处理路径),/api/ 前缀回 JSON 404。
- * (历史坑:把 /api 前缀当 404 处理器单独注册会永远命中不到,因为 "/" 先命中。) */
-static int handle_static(struct mg_connection *conn, void *ud)
+/* ---- 路由分派 ---- */
+
+static void handle_ws(struct mg_connection *c, struct mg_http_message *hm)
 {
-    (void)ud;
-    const struct mg_request_info *ri = mg_get_request_info(conn);
-    const char *uri = (ri && ri->local_uri) ? ri->local_uri : "";
+    /* token 校验失败必须显式回 401 再拒绝:否则客户端只看到连接被关,
+     * 无法区分"密码错"和"网络断"(历史实测坑, mongoose 下天然没有
+     * civetweb "状态行被吞"的问题——升级由这里显式触发) */
+    char token[64] = "";
+    bool ok = mg_http_get_var(&hm->query, "token", token, sizeof(token)) > 0 &&
+              web_session_validate(token, time(NULL));
+    if (!ok) {
+        char ipbuf[48];
+        DG_LOGW(TAG, "WebSocket 未授权连接被拒(来源 %s)",
+                remote_ip(c, ipbuf, sizeof(ipbuf)));
+        json_msg(c, 401, "未登录或会话已过期");
+        return;
+    }
+    ws_add(c);
+    mg_ws_upgrade(c, hm, NULL);
+}
+
+typedef struct {
+    const char *method;
+    const char *uri;
+    const char *method_msg;              /* 方法不符时回的 405 文案 */
+    void (*handler)(struct mg_connection *, struct mg_http_message *);
+} route_t;
+
+static const route_t s_routes[] = {
+    { "POST", "/api/login",   "登录接口只接受 POST",   handle_login },
+    { "POST", "/api/logout",  "注销接口只接受 POST",   handle_logout },
+    { "GET",  "/api/device",  "设备信息只接受 GET",    handle_device },
+    { "GET",  "/api/logs",    "日志查询只接受 GET",    handle_logs },
+    { "POST", "/api/ntp",     "时间校正只接受 POST",   handle_ntp },
+    { "POST", "/api/account", "账号修改只接受 POST",   handle_account },
+};
+
+/* 分派次序:精确路由 → /api/ws 升级 → 未知 /api/ 回 JSON 404 →
+ * 资源表命中返回 → 单页应用回退(hash 路由下前端自己处理路径) */
+static void route(struct mg_connection *c, struct mg_http_message *hm)
+{
+    char uri[128];
+    if (hm->uri.len >= sizeof(uri)) {
+        json_msg(c, 404, "接口不存在");
+        return;
+    }
+    memcpy(uri, hm->uri.buf, hm->uri.len);
+    uri[hm->uri.len] = '\0';
+
+    for (size_t i = 0; i < sizeof(s_routes) / sizeof(s_routes[0]); i++) {
+        if (strcmp(uri, s_routes[i].uri) != 0)
+            continue;
+        if (method_is(hm, s_routes[i].method))
+            s_routes[i].handler(c, hm);
+        else
+            json_msg(c, 405, s_routes[i].method_msg);
+        return;
+    }
+
+    if (strcmp(uri, "/api/ws") == 0) {
+        handle_ws(c, hm);
+        return;
+    }
 
     const dg_web_asset_t *asset = asset_lookup(uri);
     if (asset) {
-        http_send(conn, 200, asset->mime, asset->data, asset->len, NULL);
-        return 200;
+        http_send(c, 200, asset->mime, asset->data, asset->len, NULL);
+        return;
     }
     if (strncmp(uri, "/api/", 5) == 0) {
-        json_msg(conn, 404, "接口不存在");
-        return 200;
+        json_msg(c, 404, "接口不存在");
+        return;
     }
     /* 非资源、非接口:交给单页应用(前端 hash 路由自行决定显示什么) */
-    http_send(conn, 200, "text/html; charset=utf-8", DG_WEB_INDEX_HTML,
+    http_send(c, 200, "text/html; charset=utf-8", DG_WEB_INDEX_HTML,
               strlen(DG_WEB_INDEX_HTML), NULL);
-    return 200;
+}
+
+/* ---- 连接事件入口(loop 线程) ---- */
+
+static void http_handler(struct mg_connection *c, int ev, void *ev_data)
+{
+    if (ev == MG_EV_HTTP_MSG) {
+        route(c, ev_data);
+    } else if (ev == MG_EV_HTTP_HDRS) {
+        struct mg_http_message *hm = ev_data;
+        if (uri_is(hm, "/api/ota/upload") && s_ota_c != c)
+            ota_start(c, hm);
+    } else if (ev == MG_EV_READ) {
+        if (c == s_ota_c) {
+            ota_feed_from(c);
+            /* 环满且客户端数据已到齐(不再有 READ):定时重喂兜底 */
+            if (s_ota_c == c && s_ota_remain > 0 && c->recv.len == 0)
+                netcore_post(ota_retry_cb, NULL);
+        }
+    } else if (ev == MG_EV_WS_MSG) {
+        /* 推送不依赖客户端消息;只需保持连接 */
+    } else if (ev == MG_EV_CLOSE) {
+        if (c == s_ota_c) {                  /* 客户端中途断开:保留 .part 供续传 */
+            ota_abort();
+            s_ota_c = NULL;
+        }
+        ws_remove(c);
+    }
 }
 
 /* ---- 事件 → WebSocket ---- */
@@ -919,6 +971,7 @@ static void ws_push_auth(const ev_auth_result_t *r)
     char *s = cJSON_PrintUnformatted(root);
     if (s) {
         ws_enqueue(s);
+        ws_push_async();
         free(s);
     }
     cJSON_Delete(root);
@@ -950,6 +1003,7 @@ static int on_ntp_result(const event_t *e, void *ud)
     char *s = cJSON_PrintUnformatted(root);
     if (s) {
         ws_enqueue(s);
+        ws_push_async();
         free(s);
     }
     cJSON_Delete(root);
@@ -966,7 +1020,7 @@ static void publish_web_state(void)
     mdns_hostname(st.host, sizeof(st.host));
     web_auth_get_user(st.user, sizeof(st.user));
     st.pwd_default = web_auth_is_default();
-    st.running = (s_ctx != NULL);
+    st.running = s_started;
     EVENT_BUS_PUBLISH(EV_NET_WEB_STATE, &st);
 }
 
@@ -999,9 +1053,41 @@ static int on_web_set(const event_t *e, void *ud)
 
 /* ---- 生命周期 ---- */
 
+/* loop 线程(netcore_post 闭包):建监听。注册动作与 poll 同线程,无并发 */
+static void web_setup(void *arg)
+{
+    (void)arg;
+    char url[32];
+    snprintf(url, sizeof(url), "http://0.0.0.0:%d", s_port);
+    s_lsn = mg_http_listen(netcore_mgr(), url, http_handler, NULL);
+    if (!s_lsn)
+        DG_LOGE(TAG, "web 启动失败(端口 %d 被占?)", s_port);
+    else
+        DG_LOGI(TAG, "web 上位机就绪 :%d(版本 %s)", s_port, DG_FW_VERSION);
+}
+
+static void web_teardown(void *arg)
+{
+    (void)arg;
+    if (s_ota_c) {
+        ota_abort();
+        s_ota_c = NULL;
+    }
+    for (int i = 0; i < WS_MAX_CONN; i++) {
+        if (s_ws[i]) {
+            mg_close_conn(s_ws[i]);
+            s_ws[i] = NULL;
+        }
+    }
+    if (s_lsn) {
+        mg_close_conn(s_lsn);
+        s_lsn = NULL;
+    }
+}
+
 int web_server_start(void)
 {
-    if (s_ctx)
+    if (s_started)
         return DG_OK;
 
     s_started_at = time(NULL);
@@ -1011,36 +1097,19 @@ int web_server_start(void)
         DG_LOGE(TAG, "凭据初始化失败(DB 不可用?),web 上位机不启动");
         return DG_ERR_IO;
     }
-
-
-    const dg_cfg_t *cfg = cfg_get();
-    int port = (cfg && cfg->web_port > 0) ? cfg->web_port : 8080;
-    char port_s[16];
-    snprintf(port_s, sizeof(port_s), "%d", port);
-
-    const char *opts[] = {
-        "listening_ports", port_s,
-        "num_threads", "4",
-        "request_timeout_ms", "10000",
-        NULL,
-    };
-    s_ctx = mg_start(NULL, NULL, opts);
-    if (!s_ctx) {
-        DG_LOGE(TAG, "web 启动失败(端口 %d 被占?)", port);
+    if (!netcore_running()) {
+        DG_LOGE(TAG, "netcore 未运行,web 上位机不启动");
         return DG_ERR_IO;
     }
 
-    /* 静态资源与单页应用共用 "/" 兜底处理器(见 handle_static 注释) */
-    mg_set_request_handler(s_ctx, "/", handle_static, NULL);
-    mg_set_request_handler(s_ctx, "/api/login", handle_login, NULL);
-    mg_set_request_handler(s_ctx, "/api/logout", handle_logout, NULL);
-    mg_set_request_handler(s_ctx, "/api/device", handle_device, NULL);
-    mg_set_request_handler(s_ctx, "/api/logs", handle_logs, NULL);
-    mg_set_request_handler(s_ctx, "/api/ntp", handle_ntp, NULL);
-    mg_set_request_handler(s_ctx, "/api/account", handle_account, NULL);
-    mg_set_request_handler(s_ctx, "/api/ota/upload", handle_ota, NULL);
-    mg_set_websocket_handler(s_ctx, "/api/ws", ws_connect, ws_ready, ws_data,
-                             ws_close, NULL);
+    const dg_cfg_t *cfg = cfg_get();
+    s_port = (cfg && cfg->web_port > 0) ? cfg->web_port : 8080;
+
+    s_started = true;
+    pthread_mutex_lock(&s_ws_mtx);
+    s_q_head = s_q_tail = 0;
+    s_q_dropped = 0;
+    pthread_mutex_unlock(&s_ws_mtx);
 
     s_sub_cnt = 0;
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_AUTH_RESULT, on_auth_result, NULL);
@@ -1048,45 +1117,26 @@ int web_server_start(void)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_WEB_STATE_REQ, on_web_state_req, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_WEB_SET, on_web_set, NULL);
 
-    pthread_mutex_lock(&s_ws_mtx);
-    s_q_head = s_q_tail = 0;
-    s_q_dropped = 0;
-    s_pusher_run = true;
-    pthread_mutex_unlock(&s_ws_mtx);
-    if (pthread_create(&s_pusher, NULL, ws_pusher_thread, NULL) != 0) {
-        DG_LOGE(TAG, "推送线程创建失败:实时事件将不可用");
-        s_pusher_run = false;
-    }
-
+    netcore_post(web_setup, NULL);           /* 监听注册在 loop 线程执行 */
     publish_web_state();
-    DG_LOGI(TAG, "web 上位机就绪 :%d(版本 %s)", port, DG_FW_VERSION);
     return DG_OK;
 }
 
 int64_t web_server_heartbeat_ms(void)
 {
-    return s_hb_ms;                      /* int64 读原子;看门狗容忍轻微滞后 */
+    return netcore_heartbeat_ms();           /* 心跳 = 事件循环线程活性 */
 }
 
 void web_server_stop(void)
 {
+    if (!s_started)
+        return;
+    s_started = false;
+
     for (int i = 0; i < s_sub_cnt; i++)
         event_bus_unsubscribe(s_subs[i]);
     s_sub_cnt = 0;
 
-    pthread_mutex_lock(&s_ws_mtx);
-    if (s_pusher_run) {
-        s_pusher_run = false;
-        pthread_cond_broadcast(&s_ws_cond);
-        pthread_mutex_unlock(&s_ws_mtx);
-        pthread_join(s_pusher, NULL);
-    } else {
-        pthread_mutex_unlock(&s_ws_mtx);
-    }
-
-    if (s_ctx) {
-        mg_stop(s_ctx);
-        s_ctx = NULL;
-    }
+    netcore_post(web_teardown, NULL);        /* netcore 已停则静默丢弃(mgr_free 兜底) */
     web_session_revoke_all();
 }

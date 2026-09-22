@@ -92,8 +92,9 @@ print(f"[2] index.html 引用:{refs}")
 endpoints = read(os.path.join(FRONT, "src", "api", "endpoints.js"))
 api_paths = sorted(set(re.findall(r"'(/api/[a-z/]+)'", endpoints)))
 server = read(os.path.join(WEB, "web_server.c"))
-routes = set(re.findall(r'mg_set_request_handler\(s_ctx,\s*"([^"]+)"', server))
-routes |= set(re.findall(r'mg_set_websocket_handler\(s_ctx,\s*"([^"]+)"', server))
+# mongoose 版路由 = 源码里出现的 /api 字面量(路由表 s_routes + /api/ws 显式升级
+# + /api/ota/upload 的 HDRS 处理);civetweb 时代的 mg_set_request_handler 形态已退役
+routes = set(re.findall(r'"(/api/[a-z/]+)"', server))
 for p in api_paths:
     if p not in routes:
         fails.append(f"前端调用的接口在 web_server.c 里没有路由: {p}")
