@@ -25,6 +25,11 @@
 #include <sys/stat.h>   /* 走查取证:触发文件检查 */
 #include <unistd.h>     /* unlink */
 
+/* DG_UI_PLANE 开关(仅 display_init 读取一次):关=纯主线,video plane
+ * 完全不启用——防止「plane 在跑但 UI 仍 XRGB 不透明」的混合态(预览区
+ * 无像素且下层视频被不透明 UI plane 挡死,2026-09-26 S60 生产实测踩坑) */
+static bool s_ui_plane_on;
+
 int display_init(void)
 {
     lv_display_t *disp = lv_linux_drm_create();
@@ -38,12 +43,10 @@ int display_init(void)
      * 内建,8.3 残影根因已除),screen 透明后不透明页自备底、透明页(主页)
      * 洞出下层;驱动 fourcc 跟随本设置(lv_linux_drm_set_file 内)。关=主线
      * XRGB 现状零影响 */
-    bool ui_plane = false;
     const char *up = getenv("DG_UI_PLANE");
-    if (up && up[0] == '1') {
-        ui_plane = true;
+    s_ui_plane_on = (up && up[0] == '1');
+    if (s_ui_plane_on)
         lv_display_set_color_format(disp, LV_COLOR_FORMAT_ARGB8888);
-    }
 
     char *path = lv_linux_drm_find_device_path();
     lv_result_t res = lv_linux_drm_set_file(disp, path ? path : "/dev/dri/card0", -1);
@@ -56,7 +59,7 @@ int display_init(void)
         return DG_ERR_IO;
     }
 
-    if (ui_plane) {
+    if (s_ui_plane_on) {
         /* screen 透明须在 set_file 成功后:失败路径不留下半透明状态。
          * bottom_layer 的透明由 set_color_format 内建处理,无需另设 */
         lv_obj_set_style_bg_opa(lv_screen_active(), LV_OPA_TRANSP, 0);
@@ -73,8 +76,8 @@ int display_init(void)
         DG_LOGW("[DISPLAY]", "触摸未注册,UI 需经上位机操作");
 
     DG_LOGI("[DISPLAY]", "v9 DRM 后端就绪 %dx%d %s(direct 双缓冲 atomic 翻转%s)",
-            w, h, ui_plane ? "ARGB8888" : "XRGB8888",
-            ui_plane ? ",screen 透明" : "");
+            w, h, s_ui_plane_on ? "ARGB8888" : "XRGB8888",
+            s_ui_plane_on ? ",screen 透明" : "");
     return DG_OK;
 }
 
@@ -284,6 +287,8 @@ static uint32_t vp_fb_for(int slot, int dmabuf_fd, int32_t h, int32_t stride)
 
 bool display_has_video_plane(void)
 {
+    if (!s_ui_plane_on)
+        return false;                  /* 开关关=纯主线,不发现不提交 */
     if (!s_vp.tried)
         s_vp.ok = vp_discover();
     return s_vp.ok;

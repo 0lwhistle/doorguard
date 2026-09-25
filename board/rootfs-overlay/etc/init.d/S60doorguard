@@ -24,6 +24,11 @@ STAGED_VER=$STATE/ota_staged.ver
 # 应用降级为"无人脸检测"(日志 ERROR 明示),其余业务照常
 export DG_IVA_MODEL_DIR="${DG_IVA_MODEL_DIR:-/usr/lib}"
 
+# video plane 直通(2026-09-26 起 生产主线态):ARGB UI + NV12 硬件合成,
+# 整机 CPU 28%→21%(与 v8 基线持平)。不开则回落软渲染;调试可临时
+# DG_UI_PLANE=0 启动对比。注意须与 ARGB 配套——应用内开关已做门控
+export DG_UI_PLANE="${DG_UI_PLANE:-1}"
+
 log() { echo "$(date '+%F %T') $*" >>"$LOG"; }
 
 aiq_restart() {
