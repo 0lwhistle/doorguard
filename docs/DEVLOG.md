@@ -4,6 +4,23 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-26(晚)生产主页无预览修复 + 模块开发指南落档
+
+- **问题(用户现场发现)**:S60 生产启动后主页看不到拍摄画面。
+- **根因**:生产恢复用 S60(不带 `DG_UI_PLANE`),而 `vp_discover` 未被开关
+  门控 → video plane 照常提交相机画面(zpos=0 底层),但 UI 仍 **XRGB 不透明**。
+  三因素叠加:预览控件走透明占位不画像素 + 相机画面在独立硬件 plane +
+  不透明 UI plane 全屏盖住下层 ⇒ 预览区既无 UI 像素也透不出视频(混合态)。
+- **修复**(7d448f0,已推):①`display_has_video_plane` 加开关门控(关=纯主线
+  软渲染,混合态从根上不可能);②`S60doorguard` 脚本 `export DG_UI_PLANE=1`
+  (生产默认直通,即 CPU 28%→21% 的目标架构;调试可 `DG_UI_PLANE=0` 覆盖)。
+  板上验:S60 启动 ARGB+plane=132+preview 直通,md5 da450fc7ba0b 三方一致。
+- **取证提醒**:直通态用 `DG_WALK_DUMP_DIR` 导图时预览区是**黑的**——导图只含
+  UI 平面缓冲,相机画面在独立硬件 plane,扫描输出才合成;别误判为故障。
+- **新增**:`docs/tech/MODULE_DEV_GUIDE.md`(模块开发指南:分层选择/文件清单/
+  代码骨架/约定的 API/硬规范/工作流/参考实现)。
+- 交接:无阻塞项;video plane 直通全链(阶段 A~D+本修复)收官,C3 已 [DONE]。
+---
 ## 2026-09-26(凌晨)video plane 重启:阶段 A/B 完成落库,阶段 C 被 useredit 必死阻塞
 
 - **做了**:①阶段 A「透明点亮」commit 1c497ce:lv_linux_drm fourcc 跟随

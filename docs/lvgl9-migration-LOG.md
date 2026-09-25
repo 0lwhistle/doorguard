@@ -10,6 +10,18 @@
 - 阻塞:…
 - 交接:C2 注意 …
 ---
+## 2026-09-26 18:00 生产主页无预览修复(阶段D 后补) [DONE]
+- **现象**:S60 生产启动后主页无拍摄画面(用户现场发现)。
+- **根因**:生产恢复用 S60(无 DG_UI_PLANE),而 vp_discover 未被开关门控 →
+  video plane 照常提交(相机画面在 zpos=0 底层),UI 却仍 XRGB 不透明 ⇒
+  预览控件透明占位无像素 + 相机画面被不透明 UI plane 盖死 = 混合态。
+- **修复**(7d448f0):display_has_video_plane 加门控(关=纯主线);S60 脚本
+  export DG_UI_PLANE=1(生产默认直通)。板上验证 S60 启动 ARGB+plane=132+
+  preview 直通,md5 da450fc7ba0b 三方一致。
+- **取证提醒**:直通态导图预览区为黑(导图只含 UI 平面,相机画面在独立硬件
+  plane 扫描合成),非故障。
+- 文档:新增 docs/tech/MODULE_DEV_GUIDE.md(模块开发指南)。
+---
 ## 2026-09-26 01:40 video plane 重启 阶段C/D「定案+收尾」 [DONE](C3 解卡转正)
 - **useredit 必死根因定案**:当晚手工改库(INSERT 10001/UPDATE 001 pwd+多次
   scp 回写)所致,与 LVGL9.5/plane/ARGB 无关。复验:恢复原库+应用同款
