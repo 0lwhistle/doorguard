@@ -37,7 +37,11 @@ deliverables/lvgl9-c3-board-walkthrough/50~58);修 menu 宫格内容容器吞 CL
 (dg_btn 同款,C2 责任);性能:fps 29~30✓、切页响应 50/79ms、NEON 生效
 (NONE 37.1%→NEON 28.0%)✓;**整机 CPU 28.0% vs v8 实测 20.9%,超「≤基线 20%」
 判据 → [BLOCKED] 待裁决**(绝对值 0.28 核不阻塞产品;归因/建议见迁移 LOG 顶部)。
-板端 B 槽=v9 NEON 最终版(md5 3ce8bcab,生产运行中)、A 槽=v8 回退位。 |
+板端 B 槽=v9 NEON 最终版(md5 3ce8bcab,生产运行中)、A 槽=v8 回退位。
+**处置已立项 2026-09-25 晚**:实测 28% 中 ~25pp 为预览软渲染一条链(关取流对比),
+9.5 渲染核心已内建透明擦除(lv_refr.c:1038)——video plane 直通重启方案定稿
+(docs/superpowers/specs/2026-09-25-video-plane-v9-restart-plan.md),实施后 CPU
+实测定案转正。 |
 
 ---
 

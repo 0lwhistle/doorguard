@@ -4,7 +4,18 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
-## 2026-09-25 LVGL9.5 迁移 C3 收尾:七页走查✓ 性能报告✓ 唯 CPU 一项超标([BLOCKED] 待裁决)
+## 2026-09-25(晚)C3 CPU 卡点处置立项:video plane 直通 9.5 重启(方案已定稿)
+
+- 板上拆分实测:关取流后同一 v9 整机 CPU 28.0%→0.3~0.4%,即 ~25pp 是预览软渲染
+  一条链;UI/视觉空转/网络仅零头。GPU/UI 绘制优化打不中靶心,卸载预览才是正解。
+- 9.5 源码实证:lv_refr.c:1038 对带 alpha 的 display 逐脏区清透明——8.3 翻车的
+  透明擦除语义缺失已在上游解决;遗留仅内置 DRM 驱动 fourcc 硬编码 XRGB 需 ARGB 化。
+- 方案定稿:docs/superpowers/specs/2026-09-25-video-plane-v9-restart-plan.md
+  (DG_UI_PLANE 开关+失败永久降级,camera dma-heap 池/display 桩已在树;四阶段
+  各带门禁:透明点亮→plane 接通→全页回归+CPU 定案→收尾;待机 hide 保持黑屏语义)。
+- C3 维持 [BLOCKED] 待实施;下一对话按方案开工,走查工具一并入库 tools/board-walk/。
+
+---
 
 **做了什么**(全程记 `docs/lvgl9-migration-LOG.md` 顶部;走查 9 图
 `deliverables/lvgl9-c3-board-walkthrough/50~58`):

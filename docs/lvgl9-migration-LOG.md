@@ -10,6 +10,23 @@
 - 阻塞:…
 - 交接:C2 注意 …
 ---
+## 2026-09-25 17:20 C3 处置立项:video plane 直通 9.5 重启(方案定稿,CPU 卡点出路)
+
+- **实测补强(2026-09-25 晚,修正本日上条目的归因深度)**:板上关取流对比——同一
+  v9 版本整机 CPU 从 28.0% 降至 0.3~0.4%,即 28% 中约 24~25pp 来自预览软渲染
+  (XRGB→lv_image→LVGL 渲染管线重绘),UI/视觉空转/网络仅零头。CPU 回归不是
+  LVGL 9 渲染整体变慢,而是预览上屏一条链——GPU/UI 绘制优化均打不中靶心。
+- **9.5 透明擦除语义实证(方案核心依据)**:lvgl9/src/core/lv_refr.c:1038——
+  display color_format 带 alpha 时,每刷新周期逐脏区 lv_draw_buf_clear(清透明)
+  再画内容。8.3 翻车根因(透明区域不写 fb→残影堆积)已在上游机制层面解决。
+  遗留:内置 DRM 驱动 fourcc 硬编码 XRGB8888(lv_linux_drm.c:38)需 ARGB 化。
+- **方案定稿**:docs/superpowers/specs/2026-09-25-video-plane-v9-restart-plan.md
+  (目标架构/改动面/四阶段门禁/风险预案/待机 hide 决策)。要点:DG_UI_PLANE=1
+  显式开关+失败永久降级软渲染,主线零影响;camera dma-heap 池(F4)与 display
+  接口桩(F5)已在树;走查工具入库 tools/board-walk/ 一并纳入本任务。
+- **状态**:C3 维持 [BLOCKED],待本方案实施后按 §6 实测定案(CPU≤20% 且无残影
+  →转 [DONE])。下一对话按方案文档直接开工。
+---
 ## 2026-09-25 15:45 C3-测试与板端验收 [BLOCKED](唯一卡点:整机 CPU 超基线判据;其余门禁全过)
 
 - **做了**:
