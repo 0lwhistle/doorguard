@@ -264,6 +264,18 @@ int lv_linux_drm_get_fd(lv_display_t * disp)
     return drm_dev ? drm_dev->fd : -1;
 }
 
+uint32_t lv_linux_drm_get_plane_id(lv_display_t * disp)
+{
+    drm_dev_t * drm_dev = disp ? lv_display_get_driver_data(disp) : NULL;
+    return drm_dev ? drm_dev->plane_id : 0;
+}
+
+uint32_t lv_linux_drm_get_crtc_id(lv_display_t * disp)
+{
+    drm_dev_t * drm_dev = disp ? lv_display_get_driver_data(disp) : NULL;
+    return drm_dev ? drm_dev->crtc_id : 0;
+}
+
 void lv_linux_drm_set_mode_cb(lv_display_t * disp, lv_linux_drm_select_mode_cb_t callback)
 {
     LV_UNUSED(disp);
@@ -1220,6 +1232,15 @@ static void drm_del_event_cb(lv_event_t * e)
 
     lv_display_set_driver_data(disp, NULL);
     lv_free(drm_dev);
+}
+
+void lv_linux_drm_wait_flip(lv_display_t * disp)
+{
+    /* doorguard: video-plane 更新前调用,确保本驱动的挂起 flip 已完成,
+     * 其后外部对同一 crtc 的 atomic 提交才不会把驱动挤成 EBUSY
+     * (EBUSY 的 flip 不入队 → flush_wait 的 poll 永久等不到事件) */
+    if(disp)
+        drm_flush_wait(disp);
 }
 
 static uint32_t tick_get_cb(void)

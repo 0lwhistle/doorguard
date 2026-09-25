@@ -10,6 +10,29 @@
 - 阻塞:…
 - 交接:C2 注意 …
 ---
+## 2026-09-25 23:30 video plane 重启 阶段B「plane 接通」 [DONE]
+- 做了:①display_drm_v9 桩换 f519b1e 实现(vp_discover/zpos=0/NV12 AddFB2
+  每槽缓存/atomic 提交/失败永久降级),fd 与 crtc/plane_id 经新增访问器
+  lv_linux_drm_get_fd/get_plane_id/get_crtc_id 取自 v9 驱动(同 fd 禁混
+  legacy);②DG_UI_PLANE_FORCE_FAIL=1 降级演练注入(3 行)。③板上实锚:
+  video plane=132(Esmart)zpos=0 就绪;preview=video-plane 直通 fps=29~30
+  cost≈0ms;整机 CPU 28.0%→20%(同口径 /proc/pid/stat,达标判据线);
+  待机三态导图:主页透明洞 95.2%→待机 100% 黑屏(hide 生效,黑屏+时钟
+  语义保持)→唤醒恢复 95.2%;降级演练 FORCE_FAIL→软渲染回退 ✓。
+- **关键坑(必读)**:video commit 用 NONBLOCK 会与 v9 驱动的 UI flip 排队
+  互撞——驱动 commit EBUSY 失败后 flip 不入队,其 flush_wait 的 poll 永久
+  等不到事件 → 主循环卡死 12s → main.c 看门狗 exit(1)(无 core 无 segv,
+  极难定位)。修复=show 前 lv_linux_drm_wait_flip(等驱动挂起 flip)+
+  video commit 改阻塞模式(应用完才返回)。修复后 1h+ 稳定。
+- 实测补充:整机 20% 残余=视觉线程(与 plane 无关,降级模式同量级)+
+  show 每帧 8 次 vp_prop ioctl(可优化点:属性 id 缓存,留 C/D 阶段裁夺)。
+  DG_WALK_DUMP_DIR 取证时启动必须带;S60 调试期间必须 stop(否则拉起循环
+  污染观测,本次 ALIVE/DEAD 交替即 S60 拉起循环假象)。
+- 状态:代码未提交到 LOG 时点的产物 md5 e79edafb7482(板上 B 槽运行中)。
+- 交接:C 阶段=七页走查(走查脚本时序按 A 条目 v8 教训:密码弹窗 5s 计时
+  全速输入)+CPU 三方定案(20% vs 判据 20% 压线,可顺带 vp_prop 缓存优化
+  冲一下余量)+走查工具入库 tools/board-walk/(含注入库 v4 ftruncate 修复)。
+---
 ## 2026-09-25 22:00 video plane 重启 阶段A「透明点亮」 [DONE]
 - 做了:①lv_linux_drm fourcc 跟随 display color_format(默认 XRGB 零影响;
   DG_UI_PLANE=1 → ARGB8888),新增 lv_linux_drm_get_fd 访问器(B 阶段同 fd

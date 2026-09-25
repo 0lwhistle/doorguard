@@ -79,6 +79,26 @@ lv_result_t lv_linux_drm_set_file(lv_display_t * disp, const char * file, int64_
 int lv_linux_drm_get_fd(lv_display_t * disp);
 
 /**
+ * Get the plane id the driver scans out the UI on (doorguard: video-plane
+ * discovery must not pick the UI plane).
+ */
+uint32_t lv_linux_drm_get_plane_id(lv_display_t * disp);
+
+/**
+ * Get the crtc id the driver drives (doorguard: video-plane atomic commits
+ * target the same crtc).
+ */
+uint32_t lv_linux_drm_get_crtc_id(lv_display_t * disp);
+
+/**
+ * Wait until the driver's pending page flip finishes (doorguard: call before
+ * committing another plane on the same crtc — a queued atomic that returns
+ * EBUSY never enters the flip queue, and the driver's flush-wait poll would
+ * then block forever on an event that is never generated).
+ */
+void lv_linux_drm_wait_flip(lv_display_t * disp);
+
+/**
  * @brief Automatically find a suitable DRM device path
  *
  * Scans the system for available DRM devices and returns the path to a suitable
