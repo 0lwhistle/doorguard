@@ -32,8 +32,12 @@ sim=自写 SDL;ui/ 全量迁移+v9 image 描述符(magic+stride)+字体 v9 工�
 test_widgets/test_i18n 迁 v9,**31/31 全绿零告警**;板上部署修两真 bug:libc free
 释放 tlsf 内存→lv_free、**dg_btn 内容行容器吞 CLICKED**(v9 lv_obj 默认 CLICKABLE);
 注入触摸走真实 evdev 链:按下沿唤醒✓、完整管理员登录流✓、切页无残影✓;S60 秒退
-回滚实战生效。**剩余**:菜单子页板端走查、CPU/NEON A/B 性能报告;板端 B 槽=v9、
-A 槽=v8 回退位;板端截图见 deliverables/lvgl9-c{2,3}-board*。 |
+回滚实战生效。**C3 收尾 2026-09-25 [BLOCKED]**:七页真机走查+残影专项✓(图
+deliverables/lvgl9-c3-board-walkthrough/50~58);修 menu 宫格内容容器吞 CLICKED
+(dg_btn 同款,C2 责任);性能:fps 29~30✓、切页响应 50/79ms、NEON 生效
+(NONE 37.1%→NEON 28.0%)✓;**整机 CPU 28.0% vs v8 实测 20.9%,超「≤基线 20%」
+判据 → [BLOCKED] 待裁决**(绝对值 0.28 核不阻塞产品;归因/建议见迁移 LOG 顶部)。
+板端 B 槽=v9 NEON 最终版(md5 3ce8bcab,生产运行中)、A 槽=v8 回退位。 |
 
 ---
 

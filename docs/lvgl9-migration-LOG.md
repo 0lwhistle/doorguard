@@ -10,6 +10,51 @@
 - 阻塞:…
 - 交接:C2 注意 …
 ---
+## 2026-09-25 15:45 C3-测试与板端验收 [BLOCKED](唯一卡点:整机 CPU 超基线判据;其余门禁全过)
+
+- **做了**:
+  1. 走查环境重建:注入库重写三代(v1 覆盖写竞态丢命令→v2 追加写+库内动作队列→
+     v3 独立线程发射+事件帧瘦身 P4/R2;gesture 关闭下 SLOT/BTN 冗余可去)。实测
+     弹窗+预览软渲染负载下事件消费 ~110ms/事件、主页 ~30ms/事件;P/R 跨帧间隔
+     由「读空+80ms」保证,PRESSED 时长 ~0.5s(<400ms 长按阈值会吞 CLICKED)。
+  2. 登录链路真机走通:菜单按钮→管理员认证(5s 内点验证)→UID→方式选择→密码→
+     「管理员验证通过进菜单」。FSM 时序实测:UID/密码数字键不重置 5s 计时(确认
+     才提交),弹窗打开即计时;~660ms/键 ×5 键=3.3s 可过窗。验证按钮(非菜单入口)
+     验证成功只回普通模式不进菜单(FSM succeed/back_to_normal),进菜单必走
+     verify_from_admin 路径。
+  3. **发现并修复 v9 迁移真语义差异(责任阶段 C2,C3 发现)**:page_menu 宫格卡片
+     内容容器(lv_obj col)默认 CLICKABLE 赢过卡片吞 CLICKED——dg_btn 行容器同款
+     (见 09-23 条目),menu 自绘未复用 dg_btn 故漏修;grid 布局容器顺手 clear。
+     两处 lv_obj_clear_flag(CLICKABLE),dg-build 零告警,修复后宫格触摸全通。
+  4. **七页真机走查全过(门禁③✓)**:菜单/用户管理/用户编辑/门禁设置/记录查询
+     (30 条真实业务日志)/设备管理/web 设置逐页导图,中文渲染/布局/无残影;
+     残影专项=多轮急速往返后主页终帧干净✓。归档
+     deliverables/lvgl9-c3-board-walkthrough/50~58(58=记录查询「最后一行底色
+     发灰」观察项:仅导航漂移+无效点击序列后出现一次,正常路径未复现,留证)。
+  5. 性能报告(门禁④):
+     - fps:29~30(基线 27,目标 30)✓
+     - 切页响应:tap→帧变化 50ms(菜单→用户管理)/79ms(返回),注入+md5 轮询法
+       (粒度 ~70ms);v8 无同口径基线,绝对值如实
+     - NEON A/B(/proc/pid/stat utime+stime/10s,稳态,无注入):NONE 37.1% vs
+       NEON 28.0% 单核,**NEON 相对降 25%,生效 ✓**
+     - **v8/v9 同口径对比(A 槽 v8 实测 20.9%):v9 28.0%,回归 +7.1pp(+34% 相对)**
+  6. 生产恢复 ✓:原库(db/wal/shm/key)自 /root/dg_db_backup_v8/ 还原,S60 启动,
+     md5 三方一致(3ce8bcab),fps=30,生产库 001/002 确认。
+- **卡点(门禁④ CPU 判据不过)**:判据「CPU≤基线 20%」,实测 v9 NEON 28.0% vs
+  v8 20.9%(同法同状态:主页+预览流,稳态)。绝对值 0.28 核(四核整机 7%)产品
+  不阻塞,但迁移回归真实存在;fps/走查/NEON 有效性均达标。
+- **交接(建议)**:
+  - CPU 回归归因线索:同预览软渲染(20ms 泵+整帧 invalidate)同 30ms 刷新,v9
+    渲染管线开销更高,NEON 已生效;方向=video plane 直通重做(f519b1e 可考)、
+    渲染管线专项,或用户裁决接受偏差后本条转 [DONE]。
+  - 注入库/走查/性能脚本源码在 Windows 侧 tmp_walk/(dg_touch_inject.c v3、
+    walk_login/walk_pages/walk_ghost、perf_cpu/perf_switch、raw2png),建议入库
+    tools/board-walk/(本次未动:C3 文件边界只许 tests/docs/板端操作)。
+  - 板端:B 槽=v9 NEON 最终版(md5 3ce8bcab)=生产运行中(S60);A 槽=v8;
+    辅助物留板 /tmp(dg_touch_inject.so、walk*.sh、perf_*.sh)+WSL /root/dg_walk/。
+- **门禁记分**:①零告警✓ ②31/31✓ ③七页走查+无残影+触摸✓ ④fps✓/**CPU✗**/
+  NEON✓ ⑤DEVLOG/PROJECT_PLAN✓ ⑥commit+push✓(本条目随本 commit)
+---
 ## 2026-09-23 03:30 C3-测试与板端验收 [WIP](测试迁移+部署+登录流已过;子页走查与性能报告未完)
 
 - **做了**:

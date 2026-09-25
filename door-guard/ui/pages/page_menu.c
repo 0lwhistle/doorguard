@@ -57,6 +57,8 @@ static lv_obj_t *cell_create(lv_obj_t *parent, const char *icon, const char *lab
 
     lv_obj_t *col = lv_obj_create(cell);
     lv_obj_remove_style_all(col);
+    /* v9 命中测试:默认 CLICKABLE 的内容容器会赢过卡片吞掉 CLICKED(同 dg_btn 行容器修复) */
+    lv_obj_clear_flag(col, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_center(col);
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
@@ -104,6 +106,7 @@ void page_menu_create(lv_obj_t *parent)
 
     lv_obj_t *grid = lv_obj_create(parent);
     lv_obj_remove_style_all(grid);
+    lv_obj_clear_flag(grid, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(grid, DG_SCREEN_W - 2 * DG_PAD, 800);
     lv_obj_align(grid, LV_ALIGN_CENTER, 0, 20);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
