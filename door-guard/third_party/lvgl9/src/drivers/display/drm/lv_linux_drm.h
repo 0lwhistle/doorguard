@@ -69,6 +69,16 @@ lv_display_t * lv_linux_drm_create(void);
 lv_result_t lv_linux_drm_set_file(lv_display_t * disp, const char * file, int64_t connector_id);
 
 /**
+ * Get the DRM fd owned by the driver (doorguard: video-plane overlay commits
+ * must reuse this fd — mixing a second fd's legacy/atomic state on the same
+ * CRTC is not supported).
+ *
+ * @param disp pointer to the display object created with lv_linux_drm_create()
+ * @return the open DRM fd, or -1 if unavailable
+ */
+int lv_linux_drm_get_fd(lv_display_t * disp);
+
+/**
  * @brief Automatically find a suitable DRM device path
  *
  * Scans the system for available DRM devices and returns the path to a suitable

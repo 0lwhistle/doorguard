@@ -207,7 +207,15 @@ lv_result_t lv_linux_drm_set_file(lv_display_t * disp, const char * file, int64_
 
     drm_dev_t * drm_dev = lv_display_get_driver_data(disp);
 
-    ret = drm_setup(drm_dev, file, connector_id, DRM_FOURCC);
+    /* Fourcc follows the display color format set before this call (doorguard:
+     * DG_UI_PLANE=1 needs ARGB8888 so LVGL9's per-dirty-area transparent clear
+     * in lv_refr matches the scanout format). Default stays XRGB8888. */
+    uint32_t fourcc = DRM_FOURCC;
+    if(lv_display_get_color_format(disp) == LV_COLOR_FORMAT_ARGB8888) {
+        fourcc = DRM_FORMAT_ARGB8888;
+    }
+
+    ret = drm_setup(drm_dev, file, connector_id, fourcc);
     if(ret) {
         return LV_RESULT_INVALID;
     }
@@ -248,6 +256,12 @@ lv_result_t lv_linux_drm_set_file(lv_display_t * disp, const char * file, int64_
     LV_LOG_INFO("Resolution is set to %" LV_PRId32 "x%" LV_PRId32 " at %" LV_PRId32 "dpi",
                 hor_res, ver_res, lv_display_get_dpi(disp));
     return LV_RESULT_OK;
+}
+
+int lv_linux_drm_get_fd(lv_display_t * disp)
+{
+    drm_dev_t * drm_dev = disp ? lv_display_get_driver_data(disp) : NULL;
+    return drm_dev ? drm_dev->fd : -1;
 }
 
 void lv_linux_drm_set_mode_cb(lv_display_t * disp, lv_linux_drm_select_mode_cb_t callback)

@@ -33,6 +33,18 @@ int display_init(void)
         return DG_ERR_IO;
     }
 
+    /* DG_UI_PLANE=1(video plane 直通阶段 A,2026-09-25 方案):display 换
+     * ARGB8888——v9 渲染核心对带 alpha 的 display 逐脏区清透明(lv_refr.c
+     * 内建,8.3 残影根因已除),screen 透明后不透明页自备底、透明页(主页)
+     * 洞出下层;驱动 fourcc 跟随本设置(lv_linux_drm_set_file 内)。关=主线
+     * XRGB 现状零影响 */
+    bool ui_plane = false;
+    const char *up = getenv("DG_UI_PLANE");
+    if (up && up[0] == '1') {
+        ui_plane = true;
+        lv_display_set_color_format(disp, LV_COLOR_FORMAT_ARGB8888);
+    }
+
     char *path = lv_linux_drm_find_device_path();
     lv_result_t res = lv_linux_drm_set_file(disp, path ? path : "/dev/dri/card0", -1);
     /* 路径由驱动 lv_zalloc(tlsf 池)分配:必须用 lv_free——libc free 会
@@ -42,6 +54,12 @@ int display_init(void)
     if (res != LV_RESULT_OK) {
         DG_LOGE("[DISPLAY]", "DRM 设备打开/配置失败");
         return DG_ERR_IO;
+    }
+
+    if (ui_plane) {
+        /* screen 透明须在 set_file 成功后:失败路径不留下半透明状态。
+         * bottom_layer 的透明由 set_color_format 内建处理,无需另设 */
+        lv_obj_set_style_bg_opa(lv_screen_active(), LV_OPA_TRANSP, 0);
     }
 
     int32_t w = lv_display_get_horizontal_resolution(disp);
@@ -54,8 +72,9 @@ int display_init(void)
     if (touch_evdev_start(w, h) != DG_OK)
         DG_LOGW("[DISPLAY]", "触摸未注册,UI 需经上位机操作");
 
-    DG_LOGI("[DISPLAY]", "v9 DRM 后端就绪 %dx%d XRGB8888(direct 双缓冲 atomic 翻转)",
-            w, h);
+    DG_LOGI("[DISPLAY]", "v9 DRM 后端就绪 %dx%d %s(direct 双缓冲 atomic 翻转%s)",
+            w, h, ui_plane ? "ARGB8888" : "XRGB8888",
+            ui_plane ? ",screen 透明" : "");
     return DG_OK;
 }
 

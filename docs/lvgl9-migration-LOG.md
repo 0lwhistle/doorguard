@@ -10,6 +10,30 @@
 - 阻塞:…
 - 交接:C2 注意 …
 ---
+## 2026-09-25 22:00 video plane 重启 阶段A「透明点亮」 [DONE]
+- 做了:①lv_linux_drm fourcc 跟随 display color_format(默认 XRGB 零影响;
+  DG_UI_PLANE=1 → ARGB8888),新增 lv_linux_drm_get_fd 访问器(B 阶段同 fd
+  atomic 用);②display_drm_v9 DG_UI_PLANE=1 下 set_color_format(ARGB)+screen
+  bg_opa TRANSP(bottom_layer 透明由 v9 内建)。③板上取证(192.168.137.130,
+  无流 DG_CAM_DEV=/dev/video99 + 有流两态):ARGB 日志 ✓;不透明页(菜单/
+  users)全 255 且视觉与 C3 XRGB 版一致;无流主页透明洞 alpha=0 占 95.12%
+  (f519b1e 95% 洞法复现,v9 逐脏区透明擦除板上成立);scrim 半透明(α≈102)
+  混合正常;残影专项 4 轮急速往返终帧 95.15% 透明=零残影;预览软渲染 fps
+  29~30 不回退。dg-build 零告警 + dg-test 31/31。
+- 实测发现(重要):ARGB 下软渲染预览链路事件消费 110→285ms/事件(透明擦除
+  +alpha blend 每帧整屏重绘),即降级态主循环变慢 ~2.6×——直通态(B 阶段)
+  预览不进 LVGL,不受影响;这正是 B 阶段的意义。注入走查须注意弹窗 5s 计时
+  (密码弹窗超时文案也是「验证失败」,勿误判密码错)。
+- 工具修正(未入库,D 阶段一并):注入库 v4=feed 消费改 ftruncate 不再 unlink
+  (旧版读空即 unlink 与 writer append 竞态丢键,板上实测 UID 第 2 键起全丢);
+  walk_login v8 时序(方式选择 sleep 8 超 5s 阈值是 v7 偶败根因)。
+- 环境:板上新增走查用户 10001(walk,管理员,密码哈希走查时临时重置);
+  生产库 001/002 未动内容,生产包备份 /root/dg_app.B.bak0925(3ce8bcab)。
+- 交接:B 阶段=display_drm_v9 桩换 f519b1e 实现(vp_discover/zpos=0/atomic
+  提交,fd 用 lv_linux_drm_get_fd;需注意 UI plane 排除——RK3576 UI plane
+  不支持 NV12,f519b1e 的 ui_plane 条件可保留);dg_preview 双模/待机 hide
+  (home 退出→dg_preview_destroy→plane_hide)已就绪,接通即生效。
+---
 ## 2026-09-25 17:20 C3 处置立项:video plane 直通 9.5 重启(方案定稿,CPU 卡点出路)
 
 - **实测补强(2026-09-25 晚,修正本日上条目的归因深度)**:板上关取流对比——同一
