@@ -10,6 +10,22 @@
 - 阻塞:…
 - 交接:C2 注意 …
 ---
+## 2026-09-26 00:40 video plane 重启 阶段C「全页回归」 [BLOCKED](useredit 必死,与 LVGL9.5/plane/ARGB 均无关)
+- **现象**:任何二进制/任何模式,用户管理→点行打开 user_edit 时应用静默
+  消失(无 core/无 segv/无 abort)。8/8 轮复现,含 **C3 生产版 3ce8bcab**
+  (今早七页全过的同一二进制)——**LVGL9.5 渲染核心/ARGB/plane/注入库
+  v3·v4/OOM 全部对照排除**(逐项切割,见排查手册)。
+- 排查手册(完整证据链+下一步):docs/superpowers/specs/2026-09-26-useredit
+  -crash-debug.md。**头号嫌疑=今晚手工改库**(INSERT 10001/UPDATE 001 pwd
+  +多次 scp 回写);次要=板子软件态(已 reboot -f 复位,待回连验证)。
+- 已做的处置:原生产库已恢复(7e4505043a0d=001/002);B 槽=今日版
+  7d3f2f8ac6da(A+B);hide 补阻塞修复(NONBLOCK 遗漏点,见阶段 B 条目的
+  时序契约,同样适用于 hide)已提交;板子 reboot 复位中。
+- 交接:接手按手册 §7 顺序——①等板回连②重传工具(WSL /root/dg_walk/→
+  板上 /tmp,重启已清)③走查用户用应用同款 storage 路径重建(**禁止手工
+  INSERT**)④七页重跑;过→CPU 定案(直通 20% 已实测,判据达标)→阶段 D;
+  仍死→core+交叉 gdb / 宿主 sim(gdb 可用)。手册 §8 有全部踩坑清单。
+---
 ## 2026-09-25 23:30 video plane 重启 阶段B「plane 接通」 [DONE]
 - 做了:①display_drm_v9 桩换 f519b1e 实现(vp_discover/zpos=0/NV12 AddFB2
   每槽缓存/atomic 提交/失败永久降级),fd 与 crtc/plane_id 经新增访问器

@@ -4,6 +4,33 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-26(凌晨)video plane 重启:阶段 A/B 完成落库,阶段 C 被 useredit 必死阻塞
+
+- **做了**:①阶段 A「透明点亮」commit 1c497ce:lv_linux_drm fourcc 跟随
+  display color_format + get_fd 访问器;DG_UI_PLANE=1 下 ARGB+screen 透明。
+  板上实证:无流主页透明洞 alpha=0 占 95.12%、残影专项 4 轮急速往返终帧
+  95.15% 透明(零残影)、软渲染 fps 29~30 不回退。②阶段 B「plane 接通」
+  commit 7b68570:display_drm_v9 桩换 f519b1e 实现(fd/crtc/ui_plane 经新增
+  访问器取自 v9 驱动同 fd);板上 plane=132 zpos=0 直通,**fps 29~30
+  cost≈0ms,整机 CPU 28.0%→20%(同口径,判据达标)**,待机三态(透明洞
+  95.2%→100% 黑屏 hide→唤醒恢复)全过,降级演练过。
+- **关键坑(已修)**:video commit NONBLOCK 与 v9 驱动 UI flip 排队互撞→
+  驱动 flip EBUSY 不入队→flush_wait poll 永久等不到事件→主循环卡死 12s
+  →看门狗 exit(无 core 静默死,极难定位)。修复=lv_linux_drm_wait_flip
+  等挂起 flip + show/hide 都改阻塞 commit。
+- **卡着**:阶段 C 七页走查发现「users→user_edit 打开必死」——**与
+  LVGL9.5/ARGB/plane/注入库全无关**(C3 生产版同死,8 轮对照),头号嫌疑
+  =今晚手工改库(INSERT 用户/UPDATE pwd+scp 回写)。已恢复原库(001/002)+
+  板子 reboot -f 复位。**完整证据链与下一步**:docs/superpowers/specs/
+  2026-09-26-useredit-crash-debug.md(排查手册,接手必读)。
+- **没做完**:阶段 C 七页回归+CPU 定案(直通 20% 已测,待七页过后定案);
+  阶段 D(DEV_HANDBOOK/tools/board-walk 入库/生产恢复/最终 commit+push)。
+- **下一步**:按排查手册 §7——应用同款 storage 路径重建走查用户(禁止手工
+  INSERT)→七页重跑→过则 CPU 定案转 [DONE] 并收尾;仍死→core+交叉 gdb。
+- **环境**:板 192.168.137.130 已 reboot 等回连;B 槽=今日版 7d3f2f8ac6da,
+  备份 .bak0925=3ce8bcab;原库 7e4505043a0d;走查工具在 WSL /root/dg_walk/
+  (板上 /tmp 重启已清,需重传;注入库 v4=ftruncate 修复,别用回 unlink 版)。
+---
 ## 2026-09-25(晚)C3 CPU 卡点处置立项:video plane 直通 9.5 重启(方案已定稿)
 
 - 板上拆分实测:关取流后同一 v9 整机 CPU 28.0%→0.3~0.4%,即 ~25pp 是预览软渲染

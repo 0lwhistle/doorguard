@@ -320,13 +320,16 @@ void display_video_plane_hide(void)
 {
     if (!s_vp.ok)
         return;
-    int fd = lv_linux_drm_get_fd(lv_display_get_default());
+    lv_display_t *disp = lv_display_get_default();
+    int fd = lv_linux_drm_get_fd(disp);
     uint32_t fb_prop = vp_prop(s_vp.plane_id, "FB_ID");
     if (!fb_prop)
         return;
+    /* 与 show 同一时序契约:先等驱动挂起 flip,阻塞提交(见 show 注释) */
+    lv_linux_drm_wait_flip(disp);
     drmModeAtomicReqPtr req = drmModeAtomicAlloc();
     drmModeAtomicAddProperty(req, s_vp.plane_id, fb_prop, 0);
-    drmModeAtomicCommit(fd, req, DRM_MODE_ATOMIC_NONBLOCK, NULL);
+    drmModeAtomicCommit(fd, req, 0, NULL);
     drmModeAtomicFree(req);
 }
 
