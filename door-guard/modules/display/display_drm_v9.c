@@ -123,6 +123,10 @@ static struct {
     bool ok;
     unsigned plane_id;
     uint32_t zpos_prop;
+    /* show/hide 的属性 id 缓存:plane 属性 id 静态不变,每帧 8 次
+     * vp_prop(16+ ioctl)是直通态主循环可省的开销(板上实测 1~2pp) */
+    uint32_t p_fb, p_crtc, p_srcx, p_srcy, p_srcw, p_srch;
+    uint32_t p_crtc_x, p_crtc_y, p_crtc_w, p_crtc_h;
     /* fb 缓存:相机槽位固定,导入/AddFB 每槽只做一次 */
     struct {
         int slot;
@@ -205,9 +209,10 @@ static bool vp_discover(void)
                       (p->possible_crtcs & (1u << crtc_idx)) &&
                       p->plane_id != ui_plane;
         if (usable) {
-            s_vp.zpos_prop = vp_prop(p->plane_id, "zpos");
-            if (s_vp.zpos_prop) {
+            uint32_t zpos = vp_prop(p->plane_id, "zpos");
+            if (zpos) {                      /* 无 zpos 无法压层,跳过找下一个 */
                 s_vp.plane_id = p->plane_id;
+                s_vp.zpos_prop = zpos;
                 found = true;
             }
         }
@@ -215,6 +220,20 @@ static bool vp_discover(void)
     }
     drmModeFreePlaneResources(pr);
     if (!found)
+        return false;
+
+    /* 属性 id 一次查齐缓存(show/hide 每帧零属性查询) */
+    s_vp.p_fb = vp_prop(s_vp.plane_id, "FB_ID");
+    s_vp.p_crtc = vp_prop(s_vp.plane_id, "CRTC_ID");
+    s_vp.p_srcx = vp_prop(s_vp.plane_id, "SRC_X");
+    s_vp.p_srcy = vp_prop(s_vp.plane_id, "SRC_Y");
+    s_vp.p_srcw = vp_prop(s_vp.plane_id, "SRC_W");
+    s_vp.p_srch = vp_prop(s_vp.plane_id, "SRC_H");
+    s_vp.p_crtc_x = vp_prop(s_vp.plane_id, "CRTC_X");
+    s_vp.p_crtc_y = vp_prop(s_vp.plane_id, "CRTC_Y");
+    s_vp.p_crtc_w = vp_prop(s_vp.plane_id, "CRTC_W");
+    s_vp.p_crtc_h = vp_prop(s_vp.plane_id, "CRTC_H");
+    if (!s_vp.p_fb || !s_vp.p_crtc)
         return false;
 
     drmModeAtomicReqPtr req = drmModeAtomicAlloc();
@@ -290,20 +309,20 @@ int display_video_plane_show(int slot, int dmabuf_fd, int32_t w, int32_t h,
     int fd = lv_linux_drm_get_fd(disp);
     lv_linux_drm_wait_flip(disp);
     drmModeAtomicReqPtr req = drmModeAtomicAlloc();
-    drmModeAtomicAddProperty(req, s_vp.plane_id, vp_prop(s_vp.plane_id, "FB_ID"), fb);
-    drmModeAtomicAddProperty(req, s_vp.plane_id, vp_prop(s_vp.plane_id, "CRTC_ID"),
-                             lv_linux_drm_get_crtc_id(lv_display_get_default()));
-    drmModeAtomicAddProperty(req, s_vp.plane_id, vp_prop(s_vp.plane_id, "SRC_X"), 0);
-    drmModeAtomicAddProperty(req, s_vp.plane_id, vp_prop(s_vp.plane_id, "SRC_Y"), 0);
-    drmModeAtomicAddProperty(req, s_vp.plane_id, vp_prop(s_vp.plane_id, "SRC_W"),
+    drmModeAtomicAddProperty(req, s_vp.plane_id, s_vp.p_fb, fb);
+    drmModeAtomicAddProperty(req, s_vp.plane_id, s_vp.p_crtc,
+                             lv_linux_drm_get_crtc_id(disp));
+    drmModeAtomicAddProperty(req, s_vp.plane_id, s_vp.p_srcx, 0);
+    drmModeAtomicAddProperty(req, s_vp.plane_id, s_vp.p_srcy, 0);
+    drmModeAtomicAddProperty(req, s_vp.plane_id, s_vp.p_srcw,
                              (uint64_t)w << 16);
-    drmModeAtomicAddProperty(req, s_vp.plane_id, vp_prop(s_vp.plane_id, "SRC_H"),
+    drmModeAtomicAddProperty(req, s_vp.plane_id, s_vp.p_srch,
                              (uint64_t)h << 16);
-    drmModeAtomicAddProperty(req, s_vp.plane_id, vp_prop(s_vp.plane_id, "CRTC_X"), 0);
-    drmModeAtomicAddProperty(req, s_vp.plane_id, vp_prop(s_vp.plane_id, "CRTC_Y"), 0);
-    drmModeAtomicAddProperty(req, s_vp.plane_id, vp_prop(s_vp.plane_id, "CRTC_W"),
+    drmModeAtomicAddProperty(req, s_vp.plane_id, s_vp.p_crtc_x, 0);
+    drmModeAtomicAddProperty(req, s_vp.plane_id, s_vp.p_crtc_y, 0);
+    drmModeAtomicAddProperty(req, s_vp.plane_id, s_vp.p_crtc_w,
                              DG_SCREEN_W);
-    drmModeAtomicAddProperty(req, s_vp.plane_id, vp_prop(s_vp.plane_id, "CRTC_H"),
+    drmModeAtomicAddProperty(req, s_vp.plane_id, s_vp.p_crtc_h,
                              DG_SCREEN_H);
     int rc = drmModeAtomicCommit(fd, req, 0, NULL);   /* 阻塞:应用完才返回 */
     drmModeAtomicFree(req);
@@ -322,13 +341,10 @@ void display_video_plane_hide(void)
         return;
     lv_display_t *disp = lv_display_get_default();
     int fd = lv_linux_drm_get_fd(disp);
-    uint32_t fb_prop = vp_prop(s_vp.plane_id, "FB_ID");
-    if (!fb_prop)
-        return;
     /* 与 show 同一时序契约:先等驱动挂起 flip,阻塞提交(见 show 注释) */
     lv_linux_drm_wait_flip(disp);
     drmModeAtomicReqPtr req = drmModeAtomicAlloc();
-    drmModeAtomicAddProperty(req, s_vp.plane_id, fb_prop, 0);
+    drmModeAtomicAddProperty(req, s_vp.plane_id, s_vp.p_fb, 0);
     drmModeAtomicCommit(fd, req, 0, NULL);
     drmModeAtomicFree(req);
 }

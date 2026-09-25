@@ -10,6 +10,30 @@
 - 阻塞:…
 - 交接:C2 注意 …
 ---
+## 2026-09-26 01:40 video plane 重启 阶段C/D「定案+收尾」 [DONE](C3 解卡转正)
+- **useredit 必死根因定案**:当晚手工改库(INSERT 10001/UPDATE 001 pwd+多次
+  scp 回写)所致,与 LVGL9.5/plane/ARGB 无关。复验:恢复原库+应用同款
+  storage 路径重建用户(useradd.c,链接应用同款 storage.c;**禁止手工 INSERT**
+  已入手册)→ 直通模式七页走查全过:登录链(方式选择页恢复)→users→
+  **user_edit 打开+返回**→access_set→logs→device→web_set→急速往返→
+  应用存活,各页导图干净无残影(记录查询页 31 条真实日志含当晚验证记录)。
+- **性能定案(同口径 /proc/pid/stat utime+stime)**:直通 20.7/21.6/21.4%
+  (show 属性 id 缓存优化后)vs 软渲染 28.0% vs v8 基线 20.9%——**与 v8
+  持平(±抖动),预览软渲染 25pp 回归消除**;fps 29~30✓。C3 判据处置:
+  **[BLOCKED]→[DONE] 转正**(CPU 回到基线水平,预览上屏零 CPU;残余构成
+  为视觉链固有开销,v8 基线同含)。
+- **阶段 D 完成**:DEV_HANDBOOK §4(ICS DHCP 重启换 IP 坑+走查工具指引)/
+  §5(直通落地+NONBLOCK 时序契约)更新;走查工具入库 tools/board-walk/
+  (注入库 v3/v4、walk_login v8/walk_pages2/3、standby_hide、perf、导图、
+  宿主调试程序 useradd/verify/pbtest/hb + README 坐标表);PROJECT_PLAN ⑤h。
+- **板端终态**:B 槽=含 A/B 的 050682ca8fdf(DG_UI_PLANE=1 直通,原库 001/
+  002+走查用户 10001),生产恢复交 S60;回退链:DG_UI_PLANE 关=主线、
+  .bak0925=3ce8bcab、git lvgl9-baseline。
+- 遗留(不阻塞):①直通态 CPU 20~21.5% 略高于绝对 20% 目标线 0.5~1.5pp
+  (视觉链固有,如需再压可做视觉链降载,超出本任务范围);②perf_threads2
+  的 busybox awk 线程级绝对值不可信(整机口径可信);③板上 /tmp 工具重启
+  即清,重传从 tools/board-walk/ 或 WSL /root/dg_walk/。
+---
 ## 2026-09-26 00:40 video plane 重启 阶段C「全页回归」 [BLOCKED](useredit 必死,与 LVGL9.5/plane/ARGB 均无关)
 - **现象**:任何二进制/任何模式,用户管理→点行打开 user_edit 时应用静默
   消失(无 core/无 segv/无 abort)。8/8 轮复现,含 **C3 生产版 3ce8bcab**

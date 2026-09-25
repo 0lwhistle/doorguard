@@ -66,9 +66,11 @@
 
 ## 4. 板端速查
 
-- **网络**:默认 IP **192.168.2.95**(DHCP;变了改 env/env.sh 的 DOORGUARD_IP)
+- **网络**:默认 IP **192.168.2.95**(DHCP;**reboot 后 ICS 网段 DHCP 可能重新分配——2026-09-25 实测 .130→.73,连不上先在板端 `ip addr` 查实际地址**;变了改 env/env.sh 的 DOORGUARD_IP)
 - **SSH**:`root` / 密码 `a231634904`(开发板局域网口令;WSL 公钥已装,`dg-deploy` 免密)
 - 串口 **1500000 8N1**(不是 115200);dropbear 拒绝空密码
+- **走查/取证工具**:仓库 `tools/board-walk/`(注入库/七页走查脚本/CPU 采样/导图,README 含坐标表与编译命令);LVGL 走查方法论与坑见该 README + `docs/superpowers/specs/2026-09-26-useredit-crash-debug.md` §8
+- **应用侧单帧导图**:`DG_WALK_DUMP_DIR=<dir>` 启动后 `touch /tmp/dg_shot` → `<dir>/dg_screen.raw`(720x1280×4B)
 
 ```bash
 dmesg | grep -i imx415        # 传感器探测/出流状态
@@ -110,7 +112,7 @@ JSON,`face_model_tag` 遗留键以 cur_config.json 的 face.model_tag 为准);
 - **已定位(2026-09-18 B6)**:IMX415(cam2 口,实体名 `m02_b_imx415 8-0037`)→ rkcif → **rkisp-vir2 = /dev/media5**,mainpath = **/dev/video51**;实体名查法 `cat /sys/class/video4linux/v4l-subdev*/name`
 - 两条取流路径:
   - **rkcif 直采**:RAW10 裸帧(无 3A),仅用于验证传感器出图
-  - **rkisp + rkaiq 3A**:正式成像路径,**已打通**(door-guard 在用):V4L2 单平面 NV12 1280x720 → RGA 旋转90+转 XRGB → LVGL(软渲染 27fps,当前主线)。②**video plane 直通已实现并实测 30fps 零 CPU,因 LVGL8.3 透明擦除语义缺失(残影)回退**,实现见 git f519b1e,待 LVGL9.5 迁移后重启( dma-heap 直通池代码已在,按需激活零开销)。视觉(NPU)走 NV12 CPU 指针路径不变。⚠️ 3 个死坑:uAPI2 参数是传感器实体名(非 media 节点,传错段错误);aiq2.lock 死锁需"取流线程与 prepare 并发会合";librga 成功码有两个——详见 door-guard/modules/camera/README.md
+  - **rkisp + rkaiq 3A**:正式成像路径,**已打通**(door-guard 在用):V4L2 单平面 NV12 1280x720 → RGA 旋转90 → 双出口:①转 XRGB → LVGL 软渲染(降级态,26~30fps);②**NV12 写 dma-heap 池 → VOP2 video plane(Overlay 132)硬件合成直通(2026-09-25 重启落地,主线态:DG_UI_PLANE=1)**——LVGL9.5 内建逐脏区透明擦除(lv_refr.c 对带 alpha display),8.3 透明擦除缺失根因已除;实测 fps 29~30、整机 CPU 28.0%(软渲染)→~21%(直通,与 v8 基线 20.9% 持平)。**时序契约(必守)**:video plane 的 atomic 提交前必须 `lv_linux_drm_wait_flip` 等驱动挂起 flip 完成,且用**阻塞 commit**(NONBLOCK 排队会把驱动 flip 挤成 EBUSY——失败的 flip 不入队,驱动 flush_wait 的 poll 永久等不到事件=主循环卡死 12s 被看门狗杀,无 core 静默死)。plane 直通关闭=自动降级软渲染(DG_UI_PLANE_FORCE_FAIL=1 可演练)。视觉(NPU)走 NV12 CPU 指针路径不变。⚠️ 3 个死坑:uAPI2 参数是传感器实体名(非 media 节点,传错段错误);aiq2.lock 死锁需"取流线程与 prepare 并发会合";librga 成功码有两个——详见 door-guard/modules/camera/README.md
 - door-guard 相机链路开关与环境变量见 `door-guard/modules/camera/README.md`
 
 ---

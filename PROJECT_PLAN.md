@@ -41,7 +41,21 @@ deliverables/lvgl9-c3-board-walkthrough/50~58);修 menu 宫格内容容器吞 CL
 **处置已立项 2026-09-25 晚**:实测 28% 中 ~25pp 为预览软渲染一条链(关取流对比),
 9.5 渲染核心已内建透明擦除(lv_refr.c:1038)——video plane 直通重启方案定稿
 (docs/superpowers/specs/2026-09-25-video-plane-v9-restart-plan.md),实施后 CPU
-实测定案转正。 |
+实测定案转正。⑤h **2026-09-25/26 video plane 直通重启落地:阶段 A/B [DONE]、
+C3 解卡转正**(commit 1c497ce/7b68570/aa4f7d3):阶段 A=display ARGB 化+
+screen 透明(DG_UI_PLANE=1 开关,关=主线零影响)——9.5 内建逐脏区透明擦除
+板上实证:无流主页透明洞 alpha=0 占 95.12%、4 轮急速往返零残影;阶段 B=
+video plane 接通(f519b1e 实现移植,fd/crtc/ui_plane 经 lv_linux_drm 新访问器
+同 fd atomic;**必守时序契约**:video 提交前 lv_linux_drm_wait_flip 等驱动挂起
+flip+阻塞 commit——NONBLOCK 排队会把驱动 flip 挤成 EBUSY→flush_wait 永久
+poll=主循环卡死 12s 被看门狗静默杀);实测直通 fps 29~30 cost≈0ms、整机 CPU
+28.0%→~21%(与 v8 基线 20.9% 持平,预览软渲染 25pp 回归消除)、待机三态
+(透明洞→100% 黑屏 hide→唤醒恢复)、DG_UI_PLANE_FORCE_FAIL 降级演练过;
+show 属性 id 缓存(每帧 16+ ioctl→0)。阶段 C 七页走查✓(排查插曲:首夜
+「user_edit 打开必死」经 8 轮对照系**当晚手工改库**所致——恢复原库+应用同款
+storage 路径重建用户后全过,与 9.5/plane/ARGB 无关;手册
+docs/superpowers/specs/2026-09-26-useredit-crash-debug.md);走查工具入库
+tools/board-walk/。 |
 
 ---
 
