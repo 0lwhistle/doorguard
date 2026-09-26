@@ -40,7 +40,10 @@
  *========================*/
 /* v9.5 内置 NEON 加速为 C 内联实现(arm_neon.h),x86 宿主编不了;
  * 平台条件开:aarch64(板端 RK3576)= NEON,其余 = NONE。sim 与板共用本文件 */
-#if defined(__aarch64__)
+#if defined(DG_LVGL_NO_NEON)
+    /* 排障开关:疑似 NEON 绘制路径崩溃时 -DDG_LVGL_NO_NEON 一键回 C 实现 */
+    #define LV_USE_DRAW_SW_ASM   LV_DRAW_SW_ASM_NONE
+#elif defined(__aarch64__)
     #define LV_USE_DRAW_SW_ASM   LV_DRAW_SW_ASM_NEON
 #else
     #define LV_USE_DRAW_SW_ASM   LV_DRAW_SW_ASM_NONE

@@ -107,6 +107,7 @@ target_link_libraries(dg_jpeg PUBLIC dg_proto ${DG_JPEG_LIB})
 # 上层链接点零改动)。OFF = 完整回退 8.3 旧栈(运行期回退通道,必须常绿)。
 # C1 定版:默认 ON(契约 §2);显式 -DDG_USE_LVGL9=OFF 即回退 ----
 option(DG_USE_LVGL9 "Use LVGL 9.5 (third_party/lvgl9) instead of 8.3" ON)
+option(DG_LVGL_NO_NEON "Force LVGL SW draw C path (NEON crash triage)" OFF)
 if(DG_USE_LVGL9)
     file(GLOB_RECURSE LVGL_SRCS third_party/lvgl9/src/*.c)
     add_library(lvgl STATIC ${LVGL_SRCS})
@@ -114,6 +115,9 @@ if(DG_USE_LVGL9)
     # ui 层源码零 include 改动;lv_conf9 就在此根下(LV_CONF_INCLUDE_SIMPLE)
     target_include_directories(lvgl PUBLIC ${CMAKE_SOURCE_DIR}/third_party/lvgl9)
     target_compile_definitions(lvgl PUBLIC LV_CONF_INCLUDE_SIMPLE)
+    if(DG_LVGL_NO_NEON)
+        target_compile_definitions(lvgl PUBLIC DG_LVGL_NO_NEON)
+    endif()
     target_compile_options(lvgl PRIVATE -w)   # vendored 源码不改动内容,告警豁免
     # v9 内置 Linux DRM 驱动(LV_USE_LINUX_DRM=1)的头会经 lvgl.h 进入所有
     # 使用方:xf86drmMode.h 内部 #include <drm.h>,须再给 libdrm 子目录路径。
@@ -132,6 +136,9 @@ else()
     add_library(lvgl STATIC ${LVGL_SRCS})
     target_include_directories(lvgl PUBLIC ${CMAKE_SOURCE_DIR}/third_party/lvgl)
     target_compile_definitions(lvgl PUBLIC LV_CONF_INCLUDE_SIMPLE)
+    if(DG_LVGL_NO_NEON)
+        target_compile_definitions(lvgl PUBLIC DG_LVGL_NO_NEON)
+    endif()
     target_compile_options(lvgl PRIVATE -w)   # vendored 源码不改动内容,告警豁免
 endif()
 
