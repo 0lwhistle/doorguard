@@ -4,6 +4,54 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-27 双段错误定案 + 颜色互换:三连修复(v9 迁移深水区例程,取证链全打通)
+
+**做了什么**:两个 rc=139 段错误从取证到修复全部 core 定案,31/31 绿零告警,
+修复 042b6f5 已推板。
+
+**Bug1:点带头像用户的编辑页必崩(d7908bf)**。dg_avatar 的 v9 适配按
+sizeof(lv_color_t)=3 分配/步进(**v9 的 lv_color_t 是固定 3B RGB 结构,与
+LV_COLOR_DEPTH=32 无关**——v8→v9 语义变化),header.cf 却声明 XRGB8888
+(4B)。LVGL 按 4B 读,160×160 头像累计越界 ~25KB 撞未映射页。有头像用户
+必崩、无头像(walk)永不崩、宿主 x86 越界落在映射页不崩——三个"不可能同时
+成立"的观察被同一根因贯穿。修复:cf 改 RGB888 与缓冲一致,删逐像素转换。
+
+**Bug2:拍摄页点「完成」崩(7e09fa7)**。navigator 销毁顺序反了:先
+lv_obj_delete 整棵页对象树、后调页面 destroy()——page_capture/home 的
+destroy 访问自己的控件(dg_preview_destroy 读 user_data/free 缓冲),摸到的
+是池回收后**被复用者重写**的死对象(st 指针变池内地址,free 到
+0x4000000000000000=浮点 2.0 位模式)。主页↔待机同路径潜伏同雷(时序侥幸
+未爆)。修复:生命周期改 on_exit → destroy → 删树,一处修全部页。
+
+**Bug3:首修引入红蓝互换(042b6f5)**。LVGL 的 RGB888 字节序约定是
+B,G,R(blue 在低字节),blend 到 RGB888 逐字节 copy 不转通道;libjpeg
+JCS_RGB 输出 R,G,B。cf 改对后直接 memcpy=红蓝互换,肤色发蓝(特征在
+拍摄瞬间已按正确颜色提取,识别不受影响,纯显示)。修复:拷贝时交换 R/B。
+
+**取证链(可复用,已全部走通)**:S60 supervise 循环 `ulimit -c unlimited`
+(入仓库)+ 现场 `/proc/sys/kernel/core_pattern=/tmp/core.%p`(重启丢要重写)
+→ 崩溃自动落 core → scp 回 WSL → `gdb-multiarch --batch -ex "set sysroot
+<sysroot>" bt 板上二进制(未 strip)**。挂死形态:kill -SEGV 强制落核。
+WSL NAT 到 ICS 网段不通 → Windows portproxy 2223 + DOORGUARD_SSH_PORT
+(5792b91)。教训:①**文档契约先行但代码未同步**(spec 写"s_granted_presence
+已删",代码还在)——状态以代码为准,不以上一个对话的转述为准;②**宿主
+不崩≠没病**,x86 越界落映射页、板端撞 unmapped,跨平台差异掩盖 UB,内存
+问题终裁必须靠 core/ASan;③static pool 槽被 img 持 src 时,槽复用/清理
+必须与控件生命周期同步核对。
+
+**内存池评估**(用户问):两个 bug 都不是池能防的——①是编译期常量错误
+(格式/字宽),②是生命周期顺序(且 LVGL 对象本来就在池里,照样被复用
+重写)。对症药:宿主 sim 开 ASan/UBSan 跑走查(越界/UAF 首次访问即报,
+不依赖撞 unmapped);v9 内存位图构造收口到一个带 cf/stride/data_size
+一致性断言的辅助函数。
+
+**下一步**:①真人复测:点 ttt(编辑页+头像显示)/完整录入/主页↔待机
+切换;②拍摄回看/预览颜色待用户确认,若实时预览(plane 直通)仍偏色,
+查 VOP2/RGA 的 Y2R 矩阵与 range(BT.601/709);③RGA ioctl 卡死(挂形态
+一次)独立待立项;④ttt 刷脸"识别不出"待 1:N 最高分日志量化。
+
+---
+
 ## 2026-09-26(深夜)用户五项反馈集中修 + 推板改走 OTA A/B(31/31 绿,零告警,OTA 上板实测)
 
 **五项反馈**:
