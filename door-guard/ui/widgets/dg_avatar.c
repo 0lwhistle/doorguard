@@ -1,8 +1,16 @@
 /*
  * dg_avatar.c — 头像显示控件实现
  *
- * 链路:db_user_get_avatar(自动解密)→ dg_jpeg_decode_rgb(缩放解码)→
- * RGB888 转 lv_color_t(XRGB8888,与 LV_COLOR_DEPTH=32 一致)→ lv_image_dsc_t。
+ * 链路:db_user_get_avatar(自动解密)→ dg_jpeg_decode_rgb(缩放解码,
+ * RGB888)→ 直接以 RGB888 声明为 lv_image_dsc_t,绘制时由 LVGL blend
+ * 自动转换到 fb 格式。
+ *
+ * ⚠️ v9 格式一致性(2026-09-27 段错误定案):header.cf 必须与像素缓冲的
+ * 真实字宽一致。lv_color_t 在 v9 里是固定 3 字节 RGB 结构(与
+ * LV_COLOR_DEPTH 无关),早期适配按 sizeof(lv_color_t)=3 分配/步进、
+ * 却声明 cf=XRGB8888(4B)——LVGL 按 4B 读,越界直到撞未映射页。
+ * 有头像的用户进编辑页必崩,无头像用户(walk)不受影响。cf 改 RGB888
+ * 后三者(w*3)自洽,且省掉逐像素 lv_color_make 转换。
  *
  * 缓存策略:按 size 分池(FULL 2 槽 / THUMB 8 槽),uid 命中即返,
  * 不命中轮转覆盖——列表页 6 行 + 编辑页 1 张,池容量就是按这个页面结构定的,
@@ -23,10 +31,12 @@
 #define FULL_MAX    160                 /* 头像约定边长(proto 侧生成方保证 */
 #define THUMB_MAX   (FULL_MAX / 4)      /* 40:libjpeg 1/4 缩放解码正好 */
 
+#define AV_BPP     3                    /* RGB888:3 字节/像素,cf 用 RGB888 */
+
 typedef struct {
     char uid[DG_UID_LEN];
     lv_image_dsc_t dsc;
-    uint8_t *px;                        /* malloc 的像素缓冲,dsc.data 指向它 */
+    uint8_t *px;                        /* malloc 的像素缓冲(RGB888),dsc.data 指向它 */
     bool used;
 } slot_t;
 
@@ -36,7 +46,7 @@ static int s_full_pos, s_thumb_pos;
 
 /* 解码暂存(仅 LVGL 线程使用):JPEG 明文 + RGB888 中转,避免逐槽扩栈 */
 static uint8_t s_jpeg[DG_AVATAR_JPEG_MAX];
-static uint8_t s_rgb[FULL_MAX * FULL_MAX * 3];
+static uint8_t s_rgb[FULL_MAX * FULL_MAX * AV_BPP];
 
 static slot_t *pool_pick(dg_avatar_size_t size)
 {
@@ -48,14 +58,6 @@ static slot_t *pool_pick(dg_avatar_size_t size)
     slot_t *s = &s_thumb[s_thumb_pos];
     s_thumb_pos = (s_thumb_pos + 1) % THUMB_SLOTS;
     return s;
-}
-
-/* RGB888 → lv_color_t:逐像素组色,LVGL 自身的位域排布保证端序正确 */
-static void rgb_to_lv(const uint8_t *rgb, int n, lv_color_t *out)
-{
-    for (int i = 0; i < n; i++) {
-        out[i] = lv_color_make(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
-    }
 }
 
 static const lv_image_dsc_t *load_into(slot_t *s, const char *uid)
@@ -79,23 +81,24 @@ static const lv_image_dsc_t *load_into(slot_t *s, const char *uid)
         return NULL;
     }
 
+    /* RGB888 原样入槽:jpeg 解码输出即像素,不再逐像素转色 */
     free(s->px);                        /* 轮转覆盖:旧像素让位 */
-    s->px = malloc((size_t)w * h * sizeof(lv_color_t));
+    s->px = malloc((size_t)w * h * AV_BPP);
     if (!s->px) {
         s->used = false;
         s->uid[0] = '\0';
         memset(&s->dsc, 0, sizeof(s->dsc));
         return NULL;
     }
-    rgb_to_lv(s_rgb, w * h, (lv_color_t *)s->px);
+    memcpy(s->px, s_rgb, (size_t)w * h * AV_BPP);
 
     memset(&s->dsc, 0, sizeof(s->dsc));
     s->dsc.header.magic = LV_IMAGE_HEADER_MAGIC;  /* v9:set_src 靠 magic 识别内存位图 */
     s->dsc.header.w = (uint32_t)w;
     s->dsc.header.h = (uint32_t)h;
-    s->dsc.header.stride = (uint32_t)w * sizeof(lv_color_t);
-    s->dsc.data_size = (uint32_t)((size_t)w * h * sizeof(lv_color_t));
-    s->dsc.header.cf = LV_COLOR_FORMAT_XRGB8888;
+    s->dsc.header.stride = (uint32_t)w * AV_BPP;
+    s->dsc.data_size = (uint32_t)((size_t)w * h * AV_BPP);
+    s->dsc.header.cf = LV_COLOR_FORMAT_RGB888;    /* 与 3B 缓冲一致(见文件头 ⚠️) */
     s->dsc.data = s->px;
     snprintf(s->uid, sizeof(s->uid), "%s", uid);
     s->used = true;
