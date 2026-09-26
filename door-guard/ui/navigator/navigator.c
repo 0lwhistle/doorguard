@@ -29,7 +29,12 @@ static const navigator_page_t *find_page(const char *name)
     return NULL;
 }
 
-/* 销毁当前页:on_exit 先于 LVGL 子树删除 */
+/* 销毁当前页:生命周期顺序 on_exit → destroy → 删 LVGL 子树。
+ * destroy 必须先于 lv_obj_delete:页面的 destroy 会访问自己的控件
+ * (dg_preview_destroy 读 user_data/free 资源),先删树再 destroy
+ * 摸到的就是已回收重写的死对象——板上拍摄页点「完成」段错误的
+ * 根因(2026-09-27,core 定案)。各页 destroy 只做「停定时器 +
+ * 清资源 + 静态指针置空」,不依赖对象树存活,先调无碍。 */
 static void destroy_current(void)
 {
     if (s_depth == 0)
@@ -37,11 +42,11 @@ static void destroy_current(void)
     const navigator_page_t *cur = s_stack[s_depth - 1];
     if (cur->on_exit)
         cur->on_exit();
+    if (cur->destroy)
+        cur->destroy();
     lv_obj_t *obj = lv_obj_get_child(s_root, 0);
     if (obj)
         lv_obj_delete(obj);
-    if (cur->destroy)
-        cur->destroy();
 }
 
 /* 构建页容器 + create + on_enter */
@@ -139,11 +144,11 @@ nav_err_t navigator_reload(void)
     const navigator_page_t *cur = s_stack[s_depth - 1];
     if (cur->on_exit)
         cur->on_exit();
+    if (cur->destroy)
+        cur->destroy();              /* 同 destroy_current:先拆页,再删树 */
     lv_obj_t *obj = lv_obj_get_child(s_root, 0);
     if (obj)
         lv_obj_delete(obj);
-    if (cur->destroy)
-        cur->destroy();
     create_page(cur);
     return NAV_OK;
 }
