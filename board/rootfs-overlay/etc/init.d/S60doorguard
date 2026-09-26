@@ -99,6 +99,7 @@ ota_watch() {
 supervise() {
     fail=0
     while :; do
+        ulimit -c unlimited          # 崩溃留 core(排障:core_pattern 由现场设)
         t0=$(date +%s)
         "$DAEMON" >>"$LOG" 2>&1
         rc=$?

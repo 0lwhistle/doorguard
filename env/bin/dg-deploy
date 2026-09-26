@@ -22,18 +22,22 @@ fi
 ip="${1:-${DOORGUARD_IP:-}}"
 [ -n "$ip" ] || { echo "用法: dg-deploy [-r] <板子IP>,或先 export DOORGUARD_IP=<IP>"; exit 1; }
 
-bin="$DOORGUARD_ROOT/door-guard/build/door-guard"
+bin="${DOORGUARD_BIN:-$DOORGUARD_ROOT/door-guard/build/door-guard}"
 [ -x "$bin" ] || { echo "没有编译产物,先执行 dg-build"; exit 1; }
 
-sshx() { ssh "root@$ip" "$@"; }
+# DOORGUARD_SSH_PORT 非空 = 全部 ssh/scp 走该端口(如 WSL 经 Windows
+# portproxy 转发:DOORGUARD_IP=<网关IP> DOORGUARD_SSH_PORT=2223)
+sshp=() scpp=()
+[ -n "${DOORGUARD_SSH_PORT:-}" ] && { sshp=(-p "$DOORGUARD_SSH_PORT"); scpp=(-P "$DOORGUARD_SSH_PORT"); }
+sshx() { ssh "${sshp[@]}" "root@$ip" "$@"; }
 
 echo "==> 资源直推(语言包/自启脚本;资源文件不走槽位)"
 # S60 必须先于"监听检查"上板:旧版脚本的 stop 有自毁 bug,restart/stop+start
 # 都靠它;先换新脚本,后面的服务重建才可靠
 sshx 'mkdir -p /root/ui/lang'
-scp -q "$DOORGUARD_ROOT"/door-guard/ui/lang/*.json "root@$ip:/root/ui/lang/" 2>/dev/null || true
+scp -q "${scpp[@]}" "$DOORGUARD_ROOT"/door-guard/ui/lang/*.json "root@$ip:/root/ui/lang/" 2>/dev/null || true
 if [ -f "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" ]; then
-    scp -q "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" "root@$ip:/etc/init.d/S60doorguard"
+    scp -q "${scpp[@]}" "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" "root@$ip:/etc/init.d/S60doorguard"
     sshx 'chmod +x /etc/init.d/S60doorguard'
 fi
 
@@ -63,7 +67,7 @@ echo "    当前活动槽 $cur_slot"
 
 echo "==> 暂存 OTA 包"
 sshx 'mkdir -p /var/lib/door-guard'
-scp -q "$bin" "root@$ip:/var/lib/door-guard/ota_staged.bin"
+scp -q "${scpp[@]}" "$bin" "root@$ip:/var/lib/door-guard/ota_staged.bin"
 sha=$(sha256sum "$bin" | cut -d' ' -f1)
 printf '%s  ota_staged.bin\n' "$sha" | sshx 'cat > /var/lib/door-guard/ota_staged.bin.sha256'
 ver=$(git -C "$DOORGUARD_ROOT" describe --always --dirty 2>/dev/null || date +%F-%H%M%S)
