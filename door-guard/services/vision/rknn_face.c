@@ -306,6 +306,12 @@ int rknn_align_plan(const float src_kps[RKNN_FACE_KPS][2], float m[6])
 void rknn_align_warp(const uint8_t *src, int sw, int sh, const float m[6],
                      uint8_t *dst, int dw, int dh)
 {
+    rknn_align_warp_ex(src, sw, sh, m, dst, dw, dh, false);
+}
+
+void rknn_align_warp_ex(const uint8_t *src, int sw, int sh, const float m[6],
+                        uint8_t *dst, int dw, int dh, bool clamp_edge)
+{
     if (!src || !dst || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0)
         return;
 
@@ -321,13 +327,20 @@ void rknn_align_warp(const uint8_t *src, int sw, int sh, const float m[6],
             /* 逆映射:目标 (u,v) → 源坐标,再双线性采样 */
             const float dx = (float)u - m[2];
             const float dy = (float)v - m[5];
-            const float sx = ( m[4] * dx - m[1] * dy) * inv;
-            const float sy = (-m[3] * dx + m[0] * dy) * inv;
+            float sx = ( m[4] * dx - m[1] * dy) * inv;
+            float sy = (-m[3] * dx + m[0] * dy) * inv;
 
             uint8_t *o = dst + ((size_t)v * dw + u) * 3;
             if (sx < 0.0f || sy < 0.0f || sx > (float)(sw - 1) || sy > (float)(sh - 1)) {
-                o[0] = o[1] = o[2] = 0;
-                continue;
+                if (!clamp_edge) {
+                    o[0] = o[1] = o[2] = 0;
+                    continue;
+                }
+                /* 边缘钳位:人眼观看的头像用边缘延伸代替黑块 */
+                if (sx < 0.0f) sx = 0.0f;
+                if (sy < 0.0f) sy = 0.0f;
+                if (sx > (float)(sw - 1)) sx = (float)(sw - 1);
+                if (sy > (float)(sh - 1)) sy = (float)(sh - 1);
             }
             const int x0 = (int)sx, y0 = (int)sy;
             const int x1 = (x0 + 1 < sw) ? x0 + 1 : x0;

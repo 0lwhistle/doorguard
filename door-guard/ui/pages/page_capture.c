@@ -287,6 +287,10 @@ void page_capture_create(lv_obj_t *parent)
 
     /* 回看照片:白底描边小窗,盖在预览之上(160×160 原尺寸) */
     s_photo = lv_image_create(parent);
+    /* 固定窗 + CONTAIN:内容等比铺满格心(源恒为方形 160×160 时 1:1,
+     * 未来尺寸变化也不会出黑边/变形) */
+    lv_obj_set_size(s_photo, 160, 160);
+    lv_image_set_inner_align(s_photo, LV_IMAGE_ALIGN_CONTAIN);
     lv_obj_set_style_border_width(s_photo, 4, 0);
     lv_obj_set_style_border_color(s_photo, DG_COL_OK(), 0);
     lv_obj_set_style_radius(s_photo, 8, 0);

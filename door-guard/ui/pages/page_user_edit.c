@@ -188,8 +188,6 @@ static void refresh(void)
         const lv_image_dsc_t *av = dg_avatar_get(s_uid, DG_AVATAR_FULL);
         if (av && rec.face_vec_len > 0) {
             lv_image_set_src(s_img_face, av);
-            lv_image_set_scale(s_img_face, (uint16_t)(256 * 96 / 160));
-            lv_obj_update_layout(s_img_face);
             lv_obj_clear_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_add_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
@@ -466,8 +464,13 @@ void page_user_edit_create(lv_obj_t *parent)
     lv_obj_t *face_row = row_create_h(col, _("人脸"), &s_val_face, &s_btn_face, 128);
     lv_obj_add_event_cb(s_btn_face, on_face, LV_EVENT_CLICKED, NULL);
     s_img_face = lv_image_create(face_row);
-    /* 不加边框:zoom 只缩小绘制,部件包围盒仍是 160×160,边框会画到行外 */
-    lv_obj_align(s_img_face, LV_ALIGN_RIGHT_MID, -218, 0);
+    /* 预览窗 96×96 + CONTAIN:内容按窗口等比内缩居中,任何尺寸头像都
+     * 铺满格心(旧实现控件随源 160×160 自适应 + 手工 scale,内容缩到
+     * 96 却锚在控件左上,包围盒溢出行底且「填不满」)。右移量按新宽度
+     * 同步收窄,与「修改」按钮保持原间距 */
+    lv_obj_set_size(s_img_face, 96, 96);
+    lv_image_set_inner_align(s_img_face, LV_IMAGE_ALIGN_CONTAIN);
+    lv_obj_align(s_img_face, LV_ALIGN_RIGHT_MID, -282, 0);
     lv_obj_add_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
 
     row = row_create(col, _("指纹"), &s_val_finger, NULL);

@@ -21,6 +21,7 @@
 #ifndef DG_RKNN_FACE_H
 #define DG_RKNN_FACE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -103,11 +104,19 @@ int rknn_nms(rknn_face_t *faces, int n, float iou_thresh);
 int rknn_align_plan(const float src_kps[RKNN_FACE_KPS][2], float m[6]);
 
 /**
- * 按 m 把 src 的 RGB888 重采样到 dst(双线性,逆映射采样;越界填 0)。
+ * 按 m 把 src 的 RGB888 重采样到 dst(双线性,逆映射采样)。
  * 常规用法:rknn_align_warp(..., dst, 112, 112) 得到 ArcFace 输入。
+ * 越界策略 = 填 0(黑色):与识别模型训练/评测的边界约定一致,勿改。
  */
 void rknn_align_warp(const uint8_t *src, int sw, int sh, const float m[6],
                      uint8_t *dst, int dw, int dh);
+
+/**
+ * 同上,越界策略可选:clamp_edge=true 时源坐标钳到边界(边缘像素复制),
+ * 用于人眼观看的头像——出界填黑会在旋转对齐+特写时留下大块黑角。
+ */
+void rknn_align_warp_ex(const uint8_t *src, int sw, int sh, const float m[6],
+                        uint8_t *dst, int dw, int dh, bool clamp_edge);
 
 /** 原地 L2 归一化(零向量保持不变) */
 void rknn_l2_normalize(float *v, int n);

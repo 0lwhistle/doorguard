@@ -490,8 +490,52 @@ static bool recognize(const uint8_t *nv12, int w, int h,
         const float s = (float)RKNN_AVATAR_SZ / 112.0f;
         for (int i = 0; i < 6; i++)
             mb[i] = m[i] * s;
-        rknn_align_warp(s_roi, dw, dw, mb, s_avatar_warp, RKNN_AVATAR_SZ,
-                        RKNN_AVATAR_SZ);
+        /* 内容铺满(修"头像黑边"):特写+大倾角时,输出方块的回映采样区
+         * 会超出 ROI,越界处填黑=用户看到的内容黑角。按回映四角相对输出
+         * 中心预映点 c 的半跨度与 c 到 ROI 边缘的余量,求最大可行缩放 k
+         * (<1 时围绕输出中心等比缩小视角):构图/朝向不变,脸稍小但
+         * 方形铺满;极端情形(脸贴框,k 无解)由 warp 边缘钳位兜底 */
+        {
+            const float det = mb[0] * mb[4] - mb[1] * mb[3];
+            const float oc = (float)RKNN_AVATAR_SZ * 0.5f;
+            if (det > 1e-12f || det < -1e-12f) {
+                const float inv = 1.0f / det;
+                const float corners[4][2] = {
+                    {0.0f, 0.0f}, {(float)RKNN_AVATAR_SZ, 0.0f},
+                    {(float)RKNN_AVATAR_SZ, (float)RKNN_AVATAR_SZ},
+                    {0.0f, (float)RKNN_AVATAR_SZ},
+                };
+                float ccx, ccy;
+                {
+                    const float dx = oc - mb[2], dy = oc - mb[5];
+                    ccx = ( mb[4] * dx - mb[1] * dy) * inv;
+                    ccy = (-mb[3] * dx + mb[0] * dy) * inv;
+                }
+                float hx = 0.0f, hy = 0.0f;
+                for (int i = 0; i < 4; i++) {
+                    const float dx = corners[i][0] - mb[2];
+                    const float dy = corners[i][1] - mb[5];
+                    const float sx = ( mb[4] * dx - mb[1] * dy) * inv;
+                    const float sy = (-mb[3] * dx + mb[0] * dy) * inv;
+                    const float ex = fabsf(sx - ccx), ey = fabsf(sy - ccy);
+                    if (ex > hx) hx = ex;
+                    if (ey > hy) hy = ey;
+                }
+                const float mx = fminf(ccx, (float)dw - ccx);
+                const float my = fminf(ccy, (float)dw - ccy);
+                float k = 1.0f;
+                if (hx > 1e-3f && mx / hx < k) k = mx / hx;
+                if (hy > 1e-3f && my / hy < k) k = my / hy;
+                if (k > 0.05f && k < 1.0f) {
+                    for (int i = 0; i < 6; i++)
+                        mb[i] *= k;
+                    mb[2] += (1.0f - k) * oc;   /* D_k∘M':围绕输出中心缩放 */
+                    mb[5] += (1.0f - k) * oc;
+                }
+            }
+        }
+        rknn_align_warp_ex(s_roi, dw, dw, mb, s_avatar_warp, RKNN_AVATAR_SZ,
+                           RKNN_AVATAR_SZ, true);
         /* 诊断日志(节流):对齐拟合出的面内旋转角。头像歪斜/识别分数异常时
          * 第一时间看这里——检测输入已旋到正立域,正常应 ≈0°(即被摄者头部
          * 的自然倾角,±10° 内);明显偏离=关键点或模板出了问题 */
