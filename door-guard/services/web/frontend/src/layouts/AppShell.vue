@@ -18,6 +18,8 @@ const router = useRouter()
 
 const NAV = [
   { to: '/', name: 'dashboard', label: '设备概览', icon: 'gauge' },
+  { to: '/users', name: 'users', label: '用户管理', icon: 'users' },
+  { to: '/settings', name: 'settings', label: '系统设置', icon: 'sliders' },
   { to: '/logs', name: 'logs', label: '记录查询', icon: 'list' },
   { to: '/account', name: 'account', label: '账号安全', icon: 'key' },
   { to: '/firmware', name: 'firmware', label: '固件升级', icon: 'upload' },

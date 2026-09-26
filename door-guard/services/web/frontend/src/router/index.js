@@ -28,6 +28,18 @@ const routes = [
         meta: { title: '设备概览' },
       },
       {
+        path: 'users',
+        name: 'users',
+        component: () => import('../views/UsersView.vue'),
+        meta: { title: '用户管理' },
+      },
+      {
+        path: 'settings',
+        name: 'settings',
+        component: () => import('../views/SettingsView.vue'),
+        meta: { title: '系统设置' },
+      },
+      {
         path: 'logs',
         name: 'logs',
         component: () => import('../views/LogsView.vue'),

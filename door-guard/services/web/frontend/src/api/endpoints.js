@@ -12,6 +12,13 @@ export const PATHS = {
   logs: '/api/logs',
   ntp: '/api/ntp',
   account: '/api/account',
+  users: '/api/users',
+  usersAdd: '/api/users/add',
+  usersUpdate: '/api/users/update',
+  usersPwd: '/api/users/pwd',
+  usersDelete: '/api/users/delete',
+  usersFaceClear: '/api/users/face_clear',
+  accessSet: '/api/access_set',
   ws: '/api/ws',
 }
 

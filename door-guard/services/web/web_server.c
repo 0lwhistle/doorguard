@@ -1248,7 +1248,7 @@ static const web_set_item_t s_set_items[] = {
     { "lost_hold_ms",      "脸框消失滞回",    "ms", false,    0,  2000,  50,   200 },
     { "min_face_px",       "识别最小人脸",    "px", false,   40,   400,  10,    80 },
     { "liveness_enable",   "活体检测开关",    "",   false,    0,     1,   1,     0 },
-    { "match_threshold",   "1:N 识别阈值",    "",   true,  0.30,  1.00, 0.01,  0 },
+    { "face_match_threshold", "1:N 识别阈值",    "",   true,  0.30,  1.00, 0.01,  0 },
     { "det_threshold",     "检测出框阈值",    "",   true,  0.30,  0.95, 0.01,  0 },
     { "det_score_min",     "检测分下限",      "",   true,  0.30,  1.00, 0.01,  0 },
     { "blur_min",          "清晰度下限",      "",   true,  0.0, 50000,  5,     0 },
@@ -1264,7 +1264,7 @@ static bool cfg_value_of(const dg_cfg_t *c, const char *key, double *out)
     else if (!strcmp(key, "lost_hold_ms"))       *out = c->face_lost_hold_ms;
     else if (!strcmp(key, "min_face_px"))        *out = c->face_min_px;
     else if (!strcmp(key, "liveness_enable"))    *out = c->liveness_enable;
-    else if (!strcmp(key, "match_threshold"))    *out = c->face_match_threshold;
+    else if (!strcmp(key, "face_match_threshold"))    *out = c->face_match_threshold;
     else if (!strcmp(key, "det_threshold"))      *out = c->face_det_threshold;
     else if (!strcmp(key, "det_score_min"))      *out = c->face_det_score_min;
     else if (!strcmp(key, "blur_min"))           *out = c->face_blur_min;
@@ -1408,16 +1408,26 @@ static void route(struct mg_connection *c, struct mg_http_message *hm)
     memcpy(uri, hm->uri.buf, hm->uri.len);
     uri[hm->uri.len] = '\0';
 
+    /* 同一 URI 可注册多个方法(/api/access_set 有 GET+POST):URI 命中但
+     * 方法不符时必须继续扫完——否则排在后面的正确方法条目永远轮不到,
+     * 请求被先行 405(2026-09-27 宿主功能验收抓出)。全部扫完仍无方法
+     * 匹配,才按首个命中条目的文案回 405 */
+    const route_t *hit = NULL;
     for (size_t i = 0; i < sizeof(s_routes) / sizeof(s_routes[0]); i++) {
         if (strcmp(uri, s_routes[i].uri) != 0)
             continue;
-        if (method_is(hm, s_routes[i].method))
+        if (hit == NULL)
+            hit = &s_routes[i];
+        if (method_is(hm, s_routes[i].method)) {
             s_routes[i].handler(c, hm);
-        else
-            json_msg(c, 405, s_routes[i].method_msg);
-        return;
+            return;
+        }
     }
 
+    if (hit != NULL) {
+        json_msg(c, 405, hit->method_msg);
+        return;
+    }
     if (strcmp(uri, "/api/ws") == 0) {
         handle_ws(c, hm);
         return;
