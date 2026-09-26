@@ -52,6 +52,7 @@ static const cfg_meta_t META[] = {
     { "blur_min",            "face.blur_min",             CK_DBL,  0.0, 50000 },
     { "det_score_min",       "face.det_score_min",        CK_DBL, 0.30,  1.00 },
     { "det_threshold",       "face.det_threshold",        CK_DBL, 0.30,  0.95 },
+    { "lost_hold_ms",        "face.lost_hold_ms",         CK_INT,    0,  2000 },
     { "liveness_enable",      "face.liveness_enable",     CK_INT,    0,     1 },
     { "standby_timeout_s",    "ui.standby_timeout_s",     CK_INT,   15,    60 },
     { "menu_timeout_s",       "ui.menu_timeout_s",        CK_INT,    5,   120 },
@@ -226,6 +227,8 @@ static void defaults_apply(dg_cfg_t *c)
     c->face_blur_min = 50.0;            /* 清晰度下限(板上标定,见日志"清晰度") */
     c->face_det_score_min = 0.70;       /* 检测分数下限 */
     c->face_det_threshold = 0.60;       /* 检测器出框阈值(空场景幻检 0.5x) */
+    c->face_lost_hold_ms = 200;         /* LOST 滞回:防单帧漏检闪框(2026-09-26 起
+                                           从代码魔数 600 提为配置,默认收紧到 200) */
     c->liveness_enable = 0;              /* 活体算法 B8 落地前默认关 */
     /* 后端名/口径留空 = 用"第一个注册的后端"+该后端自带口径:同一份模板在
      * PC(sim)与板上(rockiva)都成立,不用两套配置 */
@@ -256,6 +259,7 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "liveness_enable"))      cur = c->liveness_enable;
         else if (!strcmp(m->key, "standby_timeout_s"))    cur = c->standby_timeout_s;
         else if (!strcmp(m->key, "menu_timeout_s"))       cur = c->menu_timeout_s;
+        else if (!strcmp(m->key, "lost_hold_ms"))         cur = c->face_lost_hold_ms;
         else if (!strcmp(m->key, "web_port"))             cur = c->web_port;
         else return;
         v = clamp_int(v, m->lo, m->hi, cur, m->key);
@@ -265,6 +269,7 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "liveness_enable"))      c->liveness_enable = v;
         else if (!strcmp(m->key, "standby_timeout_s"))    c->standby_timeout_s = v;
         else if (!strcmp(m->key, "menu_timeout_s"))       c->menu_timeout_s = v;
+        else if (!strcmp(m->key, "lost_hold_ms"))         c->face_lost_hold_ms = v;
         else if (!strcmp(m->key, "web_port"))             c->web_port = v;
     } else if (m->kind == CK_DBL) {
         if (!cJSON_IsNumber(item))

@@ -95,11 +95,6 @@ static int s_lb_src_w, s_lb_src_h;
 static bool s_face_present;            /* worker 写;on_mode_changed(总线线程)置
                                           false 仅单字写,读侧滞后一帧无实义 */
 static int64_t s_last_det_ms;          /* 最近一次检出的时刻:LOST 滞回用 */
-/* 一次在场只放行一次:1:N 是持续上报的,人站在镜头前会每 300ms 命中一次。
- * 不设这道闸,FSM 就会开门→结果→回普通→再开门地循环:继电器反复动作、
- * 日志刷屏、弹窗反复建销(把 UI 拖垮 = 主页面卡死),脸框也因状态反复切换
- * 而闪烁。语义:走开(发 FACE_LOST)再回来 = 新的一次,可以再开。*/ 
-static bool s_granted_presence;
 
 /* 最近一次质量测量与判定:供日志标定 + 拍摄页实时提示(下一班接入 UI) */
 static face_quality_t s_last_q;
@@ -175,7 +170,6 @@ static void pub_face_lost(void)
     if (!s_face_present)
         return;
     s_face_present = false;
-    s_granted_presence = false;         /* 人走了:下次来算新的一次 */
     EVENT_BUS_PUBLISH_EMPTY(EV_VISION_FACE_LOST);
 }
 
@@ -324,6 +318,10 @@ static void verify_against_target(const float *feat)
 
 static void search_1n(const float *feat)
 {
+    /* 命中持续上报(每识别周期一次):「一次在场只放行一次」的去重由 FSM 的
+     * window_done 独家收口,这里不设闸——视觉侧设闸会把站在镜头前点菜单的
+     * 人挡死:普通模式早已放行过这一场,闸落了,管理员模式永远等不到命中
+     * (2026-09-26 「管理员验证过不了」的根因)。防开门/弹窗循环由 FSM 保证 */
     pthread_mutex_lock(&s_lib.mtx);
     int best_i = -1;
     float best = -2.0f;
@@ -354,16 +352,6 @@ static void search_1n(const float *feat)
                 cfg_get()->face_match_threshold, best_uid);
     }
 
-    if (s_granted_presence) {
-        static int64_t last_log;
-        const int64_t t = now_ms();
-        if (t - last_log >= 5000) {
-            last_log = t;
-            DG_LOGI(TAG, "本次在场已放行过,忽略重复命中(人离开后再来才会再开)");
-        }
-        return;
-    }
-
     user_rec_t rec;
     memset(&rec, 0, sizeof(rec));
     if (best < cfg_get()->face_match_threshold ||
@@ -381,7 +369,6 @@ static void search_1n(const float *feat)
     snprintf(m.user_name, sizeof(m.user_name), "%s", rec.user_name);
     m.role = rec.role;
     m.score_permille = (int32_t)(best * 1000.0f + 0.5f);
-    s_granted_presence = true;              /* 本次在场不再重复放行 */
     EVENT_BUS_PUBLISH(EV_VISION_MATCH_1N, &m);
     DG_LOGI(TAG, "1:N 命中 %s(%s) %d‰", rec.user_id, rec.user_name,
             m.score_permille);
@@ -650,8 +637,10 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
     if (n <= 0) {
         camera_nv12_release(frame_id);
         /* 滞回:单帧漏检(分数抖动/识别帧占用造成的检测间隙)立刻发 LOST 会让
-         * 脸框闪烁——600ms 内保持最后位置不发,超时才真正判定"人走了" */
-        if (s_face_present && now_ms() - s_last_det_ms > 600)
+         * 脸框闪烁——lost_hold_ms 内保持最后位置不发,超时才判定"人走了"。
+         * 时长走配置(出厂 200ms):调小框跟手但易闪,调大稳但"框滞后于人" */
+        if (s_face_present &&
+            now_ms() - s_last_det_ms > (int64_t)cfg_get()->face_lost_hold_ms)
             pub_face_lost();
         return;
     }

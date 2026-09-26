@@ -673,6 +673,12 @@ static void face_lost(void)
     auth_fsm_handle(&s_fsm, FSM_EV_FACE_LOST, NULL);
 }
 
+/* 通用:任意触摸(屏幕键盘每次敲击也走这条) */
+static void touch(void)
+{
+    auth_fsm_handle(&s_fsm, FSM_EV_TOUCH, NULL);
+}
+
 static void t13_presence_window(void)
 {
     printf("[F13] 路过不弹失败;站着只判一次;命中后不再弹失败;离开重新武装\n");
@@ -734,6 +740,93 @@ static void t13_presence_window(void)
     DG_CHECK(last_act(FSM_ACT_SET_TIMER)->d.timer.timer_id == FSM_TMR_MATCH_WINDOW);
 }
 
+/* ================= 14 在场去重收口 FSM + 触摸续期(2026-09-26) ================= */
+
+static void t14_presence_dedup_and_touch(void)
+{
+    printf("[F14] 触摸续 5s;管理员拒绝同在场只弹一次;命中后站着点菜单能过;"
+           "同在场不重复开门;回普通不补判\n");
+
+    /* --- 触摸重开 5s 无操作计时(验证流程/管理员认证态);旧 seq 事件被弃 --- */
+    fsm_reset();
+    auth_fsm_handle(&s_fsm, FSM_EV_VERIFY_BTN, NULL);   /* 进 V_INPUT_UID */
+    const act_rec_t *t0 = last_act(FSM_ACT_SET_TIMER);
+    DG_CHECK(t0 && t0->d.timer.timer_id == FSM_TMR_STEP_5S);
+    touch();                                            /* 键盘敲击 = 触摸 */
+    const act_rec_t *t1 = last_act(FSM_ACT_SET_TIMER);
+    DG_CHECK(t1->d.timer.timer_id == FSM_TMR_STEP_5S);
+    DG_CHECK(t1->d.timer.seq != t0->d.timer.seq);       /* 新表起,旧表作废 */
+    fsm_event_data_t td;
+    memset(&td, 0, sizeof(td));
+    td.timer.timer_id = FSM_TMR_STEP_5S;
+    td.timer.seq = t0->d.timer.seq;                     /* 旧 seq 到期 */
+    auth_fsm_handle(&s_fsm, FSM_EV_TIMER, &td);
+    DG_CHECK(s_fsm.state == ST_VERIFY);                 /* 不得被拉回普通 */
+
+    fsm_reset();
+    admin_count(1);
+    auth_fsm_handle(&s_fsm, FSM_EV_MENU_BTN, NULL);
+    DG_CHECK(s_fsm.state == ST_ADMIN_AUTH);
+    touch();
+    DG_CHECK(last_act(FSM_ACT_SET_TIMER)->d.timer.timer_id == FSM_TMR_ADMIN_5S);
+
+    /* --- 管理员模式:非管理员同在场只弹一次失败(1:N 每 300ms 重报) --- */
+    handle_match(mk_match("10002", "路人", DG_ROLE_NORMAL, true));
+    DG_CHECK(s_fsm.state == ST_ADMIN_AUTH);
+    DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 1);
+    DG_CHECK(count_act(FSM_ACT_WRITE_LOG) == 1);
+    handle_match(mk_match("10002", "路人", DG_ROLE_NORMAL, true));
+    DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 1);       /* 不刷屏 */
+    DG_CHECK(count_act(FSM_ACT_WRITE_LOG) == 1);
+    face_lost();                                        /* 走开再回来 = 新的一次 */
+    handle_match(mk_match("10002", "路人", DG_ROLE_NORMAL, true));
+    DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 2);
+
+    /* --- 普通模式命中放行过 → 人没走直接点菜单 → 管理员人脸必须能过 ---
+     * (原视觉在场闸把这场挡死 = 「管理员验证过不了」的板上主诉) --- */
+    fsm_reset();
+    face_detected();
+    handle_match(mk_match("00001", "管理员", DG_ROLE_ADMIN, true));
+    DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 1);        /* 普通模式先放行一次 */
+    timer_fire(FSM_TMR_RESULT_3S);
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+    face_detected();                                    /* 人没走 */
+    admin_count(1);
+    auth_fsm_handle(&s_fsm, FSM_EV_MENU_BTN, NULL);
+    DG_CHECK(s_fsm.state == ST_ADMIN_AUTH);
+    handle_match(mk_match("00001", "管理员", DG_ROLE_ADMIN, true));
+    DG_CHECK(s_fsm.state == ST_MENU);                   /* 必须能过 */
+    DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 1);        /* 进菜单不开门 */
+
+    /* --- 普通模式同在场去重:命中后 1:N 重报,不重复开门/弹窗 --- */
+    fsm_reset();
+    face_detected();
+    handle_match(mk_match("10001", "张三", DG_ROLE_NORMAL, true));
+    DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 1);
+    handle_match(mk_match("10001", "张三", DG_ROLE_NORMAL, true));
+    DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 1);        /* 重报忽略 */
+    timer_fire(FSM_TMR_RESULT_3S);
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+    handle_match(mk_match("10001", "张三", DG_ROLE_NORMAL, true));
+    DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 1);        /* 回普通人还站着:仍不重开 */
+
+    /* --- 验证流程失败回普通:人还站着不补枪「验证失败」;走开再来重判 --- */
+    fsm_reset();
+    face_detected();                                    /* 流程期间人站在镜头前 */
+    uid_flow("99999", false, DG_ROLE_NORMAL, 0);        /* 用户不存在 */
+    DG_CHECK(s_fsm.state == ST_RESULT);
+    timer_fire(FSM_TMR_RESULT_3S);
+    DG_CHECK(s_fsm.state == ST_NORMAL && s_fsm.match_enabled);
+    face_detected();
+    const act_rec_t *tw = last_act(FSM_ACT_SET_TIMER);
+    DG_CHECK(tw->d.timer.timer_id != FSM_TMR_MATCH_WINDOW);  /* 不补判 */
+    face_lost();
+    face_detected();
+    DG_CHECK(last_act(FSM_ACT_SET_TIMER)->d.timer.timer_id ==
+             FSM_TMR_MATCH_WINDOW);                     /* 新在场重新判定 */
+}
+
+
 int main(void)
 {
     t01_normal_hit();
@@ -750,6 +843,7 @@ int main(void)
     t11_misc_invariants();
     t12_menu_entry_and_verify_flow();
     t13_presence_window();
+    t14_presence_dedup_and_touch();
 
     DG_TEST_EXIT();
 }

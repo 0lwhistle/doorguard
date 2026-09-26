@@ -203,6 +203,11 @@ static void back_to_normal(auth_fsm_t *fsm)
     fsm->verify_from_admin = false;
     fsm->idle_s = 0;                    /* 回主页:待机倒计时重新开始倒数 */
     fsm->menu_idle_s = 0;
+    /* 验证流程/管理员会话结束回普通:人还站在镜头前就别对同一场重开判定窗
+     * (否则输错密码被弹回普通模式的瞬间,1:N 恢复立刻补一枪「验证失败」);
+     * 人走开(FACE_LOST 复位)再回来才算是新的一次 */
+    if (fsm->face_present)
+        fsm->window_done = true;
     set_match_enabled(fsm, true);
     hint_clear(fsm);                    /* 提示条只在流程内有效,回普通即收 */
     goto_page(fsm, "home");
@@ -237,6 +242,10 @@ static void on_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now_ms)
     if (fsm->state == ST_ADMIN_AUTH) {
         if (!m->matched)
             return;                     /* 未命中不打断管理员等待 */
+        /* 同一非管理员的重复上报只弹一次(1:N 每 300ms 重报);换人(如
+         * 管理员上前)仍立即处理——spec §3「停留本模式继续尝试」 */
+        if (fsm->admin_rejected && !strcmp(fsm->cur_uid, m->user_id))
+            return;
         snprintf(fsm->cur_uid, sizeof(fsm->cur_uid), "%s", m->user_id);
         snprintf(fsm->cur_name, sizeof(fsm->cur_name), "%s", m->user_name);
         if (m->role == DG_ROLE_ADMIN) {
@@ -247,6 +256,7 @@ static void on_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now_ms)
             DG_LOGI(TAG, "管理员通过进菜单");
         } else {
             /* 非管理员:红弹窗,停留本模式继续尝试(spec §3) */
+            fsm->admin_rejected = true;
             popup_fail_reason(fsm, DG_REASON_STRANGER);
             write_log(fsm, m->user_id, m->user_name, DG_METHOD_FACE_1N,
                       DG_RESULT_REJECT, DG_REASON_STRANGER, now_ms);
@@ -255,8 +265,12 @@ static void on_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now_ms)
         return;
     }
 
-    /* ST_NORMAL:match_enabled 且命中才判定;黑名单任何路径都失败(spec §2.4) */
-    if (fsm->state != ST_NORMAL || !fsm->match_enabled || !m->matched)
+    /* ST_NORMAL:match_enabled 且命中才判定;黑名单任何路径都失败(spec §2.4)。
+     * window_done:本在场已判过(命中或 1.5s 未命中)就不再判——"一次在场
+     * 一次判定"由 FSM 独家收口(视觉后端不再设闸),结果弹窗关掉后人还
+     * 站着时,1:N 的重复上报不得再开门/再弹失败 */
+    if (fsm->state != ST_NORMAL || !fsm->match_enabled || !m->matched ||
+        fsm->window_done)
         return;
 
     snprintf(fsm->cur_uid, sizeof(fsm->cur_uid), "%s", m->user_id);
@@ -311,6 +325,17 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
     switch (ev) {
     case FSM_EV_TOUCH:
         wake_up(fsm);
+        /* 5s 计时全是"无操作"语义(spec §3/§4):任何触摸——含弹窗屏幕键盘
+         * 的每次敲击——都重开 5s。按"整步共 5s"实现时,输一个用户 ID 的
+         * 时间都不够,验证按钮的名存实亡;timer_active 判断保证不复活已取消
+         * 的定时器 */
+        if (fsm->state == ST_ADMIN_AUTH) {
+            if (fsm->timer_active[FSM_TMR_ADMIN_5S])
+                set_timer(fsm, FSM_TMR_ADMIN_5S, 5000);
+        } else if (fsm->state == ST_VERIFY) {
+            if (fsm->timer_active[FSM_TMR_STEP_5S])
+                set_timer(fsm, FSM_TMR_STEP_5S, 5000);
+        }
         return;
 
     case FSM_EV_TICK:
@@ -335,6 +360,7 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
 
     case FSM_EV_FACE_DETECTED:
         wake_up(fsm);
+        fsm->face_present = true;       /* 在场跟踪:回普通模式不补判用(spec §2.5) */
         /* 检测画框与匹配独立(spec §1):除待机外框照常跟随 */
         if (fsm->state != ST_STANDBY) {
             fsm_action_data_t d;
@@ -356,6 +382,8 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
          * 作废——下次到场重新判定。RESULT 期间到 LOST 也要复位,否则在场
          * 闸卡死,同一个人第二次到场不再判定 */
         fsm->window_done = false;
+        fsm->admin_rejected = false;
+        fsm->face_present = false;
         if (fsm->state == ST_NORMAL || fsm->state == ST_RESULT) {
             cancel_timer(fsm, FSM_TMR_MATCH_WINDOW);
             if (fsm->state == ST_NORMAL)
@@ -442,6 +470,7 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
         }
 
         fsm->state = ST_ADMIN_AUTH;
+        fsm->admin_rejected = false;        /* 新一轮管理员认证:在场拒绝闸复位 */
         set_match_enabled(fsm, false);
         hint_text(fsm, DG_HINT_ADMIN_AUTH);
         set_timer(fsm, FSM_TMR_ADMIN_5S, 5000);
