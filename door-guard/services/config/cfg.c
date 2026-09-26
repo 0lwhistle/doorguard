@@ -601,6 +601,29 @@ int cfg_set_int(const char *key, int value)
     flush_schedule();
     return DG_OK;
 }
+int cfg_set_dbl(const char *key, double value)
+{
+    const cfg_meta_t *m = meta_find(key);
+    if (!m || m->kind != CK_DBL)
+        return DG_ERR_PARAM;
+    if (value < m->lo || value > m->hi) {
+        DG_LOGW(TAG, "cfg_set %s=%.3f 越界[%.2f,%.2f],拒绝", key, value,
+                m->lo, m->hi);
+        return DG_ERR_PARAM;
+    }
+
+    pthread_mutex_lock(&s_mu);
+    bool ok = json_set_num(s_cur_root, m->json_path, value);
+    if (ok) {
+        s_dirty = true;
+        snapshot_rebuild();
+    }
+    pthread_mutex_unlock(&s_mu);
+    if (!ok)
+        return DG_ERR_NO_MEMORY;
+    flush_schedule();
+    return DG_OK;
+}
 
 int cfg_set_str(const char *key, const char *value)
 {

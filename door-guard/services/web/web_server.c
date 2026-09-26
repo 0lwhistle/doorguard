@@ -43,6 +43,7 @@
 #include "events.h"
 #include "cfg.h"
 #include "storage.h"
+#include "valid.h"
 
 #include <cJSON.h>
 #include <pthread.h>
@@ -843,6 +844,534 @@ static void handle_ws(struct mg_connection *c, struct mg_http_message *hm)
     mg_ws_upgrade(c, hm, NULL);
 }
 
+/* ===== 新增 handler(插在 route_t 定义之前)===== */
+
+/* ---- 用户管理(业务语义与设备端用户编辑页一致:同一 storage 权威) ---- */
+
+/* 错误码 → 文案(与设备端 page_user_edit 的 err_text 同语义映射) */
+static const char *user_err_text(int rc)
+{
+    switch (rc) {
+    case DG_ERR_NO_PASSWORD: return "请先设置密码";
+    case DG_ERR_DUP_UID:     return "该用户ID已存在";
+    case DG_ERR_DUP_IC:      return "该卡已绑定其他用户";
+    case DG_ERR_DUP_FACE:    return "该人脸已绑定其他用户";
+    case DG_ERR_DUP_FINGER:  return "该指纹已绑定其他用户";
+    case DG_ERR_USER_LIMIT:  return "用户数已达上限";
+    case DG_ERR_NOT_FOUND:   return "用户不存在";
+    case DG_ERR_BAD_NAME:    return dg_valid_hint(DG_ERR_BAD_NAME);
+    case DG_ERR_BAD_PWD:     return dg_valid_hint(DG_ERR_BAD_PWD);
+    case DG_ERR_BAD_UID:     return dg_valid_hint(DG_ERR_BAD_UID);
+    default:                 return "操作失败";
+    }
+}
+
+/* 请求体解析:整个 body 一次读入 + cJSON 解析 */
+static cJSON *body_json(struct mg_http_message *hm)
+{
+    char buf[1024];
+    if (!body_copy(hm, buf, sizeof(buf)))
+        return NULL;
+    cJSON *body = cJSON_Parse(buf);
+    return body;                        /* 失败返回 NULL,调用方回 400 */
+}
+
+static bool jstr(const cJSON *body, const char *key, char *out, size_t cap)
+{
+    const cJSON *it = cJSON_GetObjectItemCaseSensitive(body, key);
+    if (!cJSON_IsString(it) || it->valuestring == NULL)
+        return false;
+    if (strlen(it->valuestring) >= cap)
+        return false;
+    memcpy(out, it->valuestring, strlen(it->valuestring) + 1);
+    return true;
+}
+
+static bool jrole(const cJSON *body, int32_t *out)
+{
+    const cJSON *it = cJSON_GetObjectItemCaseSensitive(body, "role");
+    if (cJSON_IsNumber(it)) {
+        if (it->valuedouble < 0 || it->valuedouble > 2)
+            return false;
+        *out = (int32_t)it->valuedouble;
+    }
+    return true;                        /* 缺省 = 不改(添加时默认普通) */
+}
+
+static bool jflags(const cJSON *body, uint32_t *out)
+{
+    const cJSON *it = cJSON_GetObjectItemCaseSensitive(body, "auth_flags");
+    if (cJSON_IsNumber(it)) {
+        double d = it->valuedouble;
+        if (d < 1 || d > (double)DG_AUTH_ALL || d != (double)(uint32_t)d)
+            return false;
+        *out = (uint32_t)d;
+        if (*out & ~(uint32_t)DG_AUTH_ALL)
+            return false;
+    }
+    return true;
+}
+
+static void reply_user_err(struct mg_connection *c, int rc)
+{
+    json_msg(c, rc == DG_ERR_NOT_FOUND ? 404 : 400, user_err_text(rc));
+}
+
+static void handle_users_list(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    uint32_t page = 1, page_size = 20;
+    char v[16];
+    if (mg_http_get_var(&hm->query, "page", v, sizeof(v)) > 0 && v[0]) {
+        int pg = atoi(v);
+        if (pg < 1) {
+            json_msg(c, 400, "坏参数:page");
+            return;
+        }
+        page = (uint32_t)pg;
+    }
+    if (mg_http_get_var(&hm->query, "page_size", v, sizeof(v)) > 0 && v[0]) {
+        int ps = atoi(v);
+        if (ps < 1 || ps > 200) {
+            json_msg(c, 400, "坏参数:page_size(1~200)");
+            return;
+        }
+        page_size = (uint32_t)ps;
+    }
+
+    /* 字典序全量 ID 再内存分页(loop 线程独占,静态避免 64KB 栈) */
+    static char ids[DG_USER_MAX][DG_UID_LEN];
+    uint32_t n = 0;
+    if (db_user_list_ids(ids, DG_USER_MAX, &n) != DG_OK) {
+        json_msg(c, 500, "枚举用户失败");
+        return;
+    }
+    uint32_t pages = (n + page_size - 1) / page_size;
+    if (pages == 0)
+        pages = 1;
+    uint32_t start = (page - 1) * page_size;
+    uint32_t end = start + page_size;
+    if (end > n)
+        end = n;
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "page", (double)page);
+    cJSON_AddNumberToObject(root, "pages", (double)pages);
+    cJSON_AddNumberToObject(root, "total", (double)n);
+    cJSON *arr = cJSON_AddArrayToObject(root, "users");
+    for (uint32_t i = start; i < end; i++) {
+        user_rec_t rec;
+        memset(&rec, 0, sizeof(rec));
+        if (db_user_get(ids[i], &rec) != DG_OK)
+            continue;                   /* 列表与库竞态(他处刚删):跳过自愈 */
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "uid", rec.user_id);
+        cJSON_AddStringToObject(o, "name", rec.user_name);
+        cJSON_AddNumberToObject(o, "role", (double)rec.role);
+        cJSON_AddNumberToObject(o, "auth_flags", (double)rec.auth_flags);
+        cJSON_AddBoolToObject(o, "has_face", rec.face_vec_len > 0);
+        cJSON_AddBoolToObject(o, "has_finger", rec.finger_vec_len > 0);
+        cJSON_AddNumberToObject(o, "created_at", (double)rec.created_at);
+        cJSON_AddNumberToObject(o, "updated_at", (double)rec.updated_at);
+        cJSON_AddItemToArray(arr, o);
+    }
+    json_reply(c, 200, root);
+    cJSON_Delete(root);
+}
+
+static void handle_users_add(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    cJSON *body = body_json(hm);
+    if (!body) {
+        json_msg(c, 400, "坏请求体");
+        return;
+    }
+
+    char uid[DG_UID_LEN], name[DG_NAME_LEN], pwd[DG_PWD_MAX_LEN];
+    int32_t role = DG_ROLE_NORMAL;
+    uint32_t flags = DG_AUTH_FACE | DG_AUTH_PWD;   /* 与设备端新建默认一致 */
+
+    bool ok = jstr(body, "uid", uid, sizeof(uid)) &&
+              jstr(body, "name", name, sizeof(name)) &&
+              jstr(body, "pwd", pwd, sizeof(pwd)) &&
+              jrole(body, &role) && jflags(body, &flags);
+    cJSON_Delete(body);
+    if (!ok) {
+        json_msg(c, 400, "缺少必填字段或取值非法(uid/name/pwd 必填)");
+        return;
+    }
+
+    /* 与 UI 弹窗同源的即时校验(dg_valid_* 是唯一权威,这里先给友好错误,
+     * db_user_add 内还有同规则兜底) */
+    int vrc = dg_valid_uid(uid);
+    if (vrc != DG_OK) {
+        json_msg(c, 400, dg_valid_hint(vrc));
+        return;
+    }
+    vrc = dg_valid_name(name);
+    if (vrc != DG_OK) {
+        json_msg(c, 400, dg_valid_hint(vrc));
+        return;
+    }
+    vrc = dg_valid_pwd(pwd);
+    if (vrc != DG_OK) {
+        json_msg(c, 400, dg_valid_hint(vrc));
+        return;
+    }
+
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    snprintf(rec.user_id, sizeof(rec.user_id), "%s", uid);
+    snprintf(rec.user_name, sizeof(rec.user_name), "%s", name);
+    rec.role = role;
+    rec.auth_flags = flags;
+    int rc = db_user_set_password(&rec, pwd);
+    if (rc == DG_OK)
+        rc = db_user_add(&rec);
+    memset(pwd, 0, sizeof(pwd));
+    if (rc != DG_OK) {
+        reply_user_err(c, rc);
+        return;
+    }
+    DG_LOGI(TAG, "web 添加用户 %s(%s)", uid, name);
+    json_msg(c, 200, "已添加");
+}
+
+static void handle_users_update(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    cJSON *body = body_json(hm);
+    if (!body) {
+        json_msg(c, 400, "坏请求体");
+        return;
+    }
+    char uid[DG_UID_LEN], name[DG_NAME_LEN];
+    int32_t role = -1;
+    uint32_t flags = 0;
+    bool has_name = jstr(body, "name", name, sizeof(name));
+    bool has_role = false, has_flags = false;
+    const cJSON *rit = cJSON_GetObjectItemCaseSensitive(body, "role");
+    if (cJSON_IsNumber(rit)) {
+        has_role = true;
+        role = (int32_t)rit->valuedouble;
+    }
+    const cJSON *fit = cJSON_GetObjectItemCaseSensitive(body, "auth_flags");
+    if (cJSON_IsNumber(fit)) {
+        has_flags = true;
+        flags = (uint32_t)fit->valuedouble;
+    }
+    bool has_uid = jstr(body, "uid", uid, sizeof(uid));
+    cJSON_Delete(body);
+
+    if (!has_uid || (!has_name && !has_role && !has_flags)) {
+        json_msg(c, 400, "需要 uid 与至少一个待改字段");
+        return;
+    }
+    if (has_role && (role < 0 || role > 2)) {
+        json_msg(c, 400, "role 取值 0 普通/1 管理员/2 黑名单");
+        return;
+    }
+    if (has_flags &&
+        (flags == 0 || flags > (uint32_t)DG_AUTH_ALL)) {
+        json_msg(c, 400, "auth_flags 必须是 1~15 的验证方式组合");
+        return;
+    }
+
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    int rc = db_user_get(uid, &rec);
+    if (rc != DG_OK) {
+        reply_user_err(c, rc);
+        return;
+    }
+    if (has_name) {
+        rc = dg_valid_name(name);
+        if (rc != DG_OK) {
+            json_msg(c, 400, dg_valid_hint(rc));
+            return;
+        }
+        snprintf(rec.user_name, sizeof(rec.user_name), "%s", name);
+    }
+    if (has_role)
+        rec.role = role;
+    if (has_flags)
+        rec.auth_flags = flags;
+    rc = db_user_update(&rec);
+    if (rc != DG_OK) {
+        reply_user_err(c, rc);
+        return;
+    }
+    DG_LOGI(TAG, "web 编辑用户 %s", uid);
+    json_msg(c, 200, "已保存");
+}
+
+static void handle_users_pwd(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    cJSON *body = body_json(hm);
+    if (!body) {
+        json_msg(c, 400, "坏请求体");
+        return;
+    }
+    char uid[DG_UID_LEN], pwd[DG_PWD_MAX_LEN];
+    bool ok = jstr(body, "uid", uid, sizeof(uid)) &&
+              jstr(body, "pwd", pwd, sizeof(pwd));
+    cJSON_Delete(body);
+    if (!ok) {
+        json_msg(c, 400, "需要 uid 与 pwd");
+        return;
+    }
+    int rc = dg_valid_pwd(pwd);
+    if (rc != DG_OK) {
+        json_msg(c, 400, dg_valid_hint(rc));
+        return;
+    }
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    rc = db_user_get(uid, &rec);
+    if (rc == DG_OK) {
+        rc = db_user_set_password(&rec, pwd);
+        if (rc == DG_OK)
+            rc = db_user_update(&rec);   /* set_password 只算哈希,落库要 update */
+    }
+    memset(pwd, 0, sizeof(pwd));
+    if (rc != DG_OK) {
+        reply_user_err(c, rc);
+        return;
+    }
+    DG_LOGI(TAG, "web 重置用户密码 %s", uid);
+    json_msg(c, 200, "密码已更新");
+}
+
+/* 删除/清人脸经 enroll 服务事件(与设备端同一契约:DB+特征库+头像一起动) */
+static void handle_users_delete(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    cJSON *body = body_json(hm);
+    if (!body) {
+        json_msg(c, 400, "坏请求体");
+        return;
+    }
+    char uid[DG_UID_LEN];
+    bool ok = jstr(body, "uid", uid, sizeof(uid));
+    cJSON_Delete(body);
+    if (!ok) {
+        json_msg(c, 400, "需要 uid");
+        return;
+    }
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    int rc = db_user_get(uid, &rec);
+    if (rc != DG_OK) {
+        reply_user_err(c, rc);
+        return;
+    }
+    ev_enroll_request_t ev;
+    memset(&ev, 0, sizeof(ev));
+    snprintf(ev.user_id, sizeof(ev.user_id), "%s", uid);
+    ev.kind = DG_ENROLL_DELETE;
+    ev.seq = (uint32_t)time(NULL);
+    EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
+    DG_LOGI(TAG, "web 删除用户 %s(经 enroll 服务)", uid);
+    json_msg(c, 202, "删除请求已受理");
+}
+
+static void handle_users_face_clear(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    cJSON *body = body_json(hm);
+    if (!body) {
+        json_msg(c, 400, "坏请求体");
+        return;
+    }
+    char uid[DG_UID_LEN];
+    bool ok = jstr(body, "uid", uid, sizeof(uid));
+    cJSON_Delete(body);
+    if (!ok) {
+        json_msg(c, 400, "需要 uid");
+        return;
+    }
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    int rc = db_user_get(uid, &rec);
+    if (rc != DG_OK) {
+        reply_user_err(c, rc);
+        return;
+    }
+    ev_enroll_request_t ev;
+    memset(&ev, 0, sizeof(ev));
+    snprintf(ev.user_id, sizeof(ev.user_id), "%s", uid);
+    ev.kind = DG_ENROLL_FACE_CLEAR;
+    ev.seq = (uint32_t)time(NULL);
+    EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
+    DG_LOGI(TAG, "web 清除人脸 %s(经 enroll 服务)", uid);
+    json_msg(c, 202, "清除请求已受理");
+}
+
+/* ---- 门禁/系统设置(meta 表权威范围;写走 cfg_set_* 同一入口) ---- */
+
+typedef struct {
+    const char *key;
+    const char *label;
+    const char *unit;
+    bool is_dbl;
+    double lo, hi, step;
+    int def_i;                          /* int 项默认展示(仅提示用) */
+} web_set_item_t;
+
+static const web_set_item_t s_set_items[] = {
+    /* 键           标签              单位   dbl   lo     hi     step */
+    { "door_open_ms",      "开门时长",        "ms", false, 1000, 10000, 500,  3000 },
+    { "pwd_fail_lock_n",   "密码连错锁定次数", "次", false,    1,    10,   1,     5 },
+    { "pwd_fail_lock_s",   "锁定时长",        "s",  false,   10,  3600,  10,    60 },
+    { "standby_timeout_s", "待机超时",        "s",  false,   15,    60,   5,    30 },
+    { "menu_timeout_s",    "菜单超时",        "s",  false,    5,   120,   5,    15 },
+    { "lost_hold_ms",      "脸框消失滞回",    "ms", false,    0,  2000,  50,   200 },
+    { "min_face_px",       "识别最小人脸",    "px", false,   40,   400,  10,    80 },
+    { "liveness_enable",   "活体检测开关",    "",   false,    0,     1,   1,     0 },
+    { "match_threshold",   "1:N 识别阈值",    "",   true,  0.30,  1.00, 0.01,  0 },
+    { "det_threshold",     "检测出框阈值",    "",   true,  0.30,  0.95, 0.01,  0 },
+    { "det_score_min",     "检测分下限",      "",   true,  0.30,  1.00, 0.01,  0 },
+    { "blur_min",          "清晰度下限",      "",   true,  0.0, 50000,  5,     0 },
+};
+
+static bool cfg_value_of(const dg_cfg_t *c, const char *key, double *out)
+{
+    if (!strcmp(key, "door_open_ms"))            *out = c->door_open_ms;
+    else if (!strcmp(key, "pwd_fail_lock_n"))    *out = c->pwd_fail_lock_n;
+    else if (!strcmp(key, "pwd_fail_lock_s"))    *out = c->pwd_fail_lock_s;
+    else if (!strcmp(key, "standby_timeout_s"))  *out = c->standby_timeout_s;
+    else if (!strcmp(key, "menu_timeout_s"))     *out = c->menu_timeout_s;
+    else if (!strcmp(key, "lost_hold_ms"))       *out = c->face_lost_hold_ms;
+    else if (!strcmp(key, "min_face_px"))        *out = c->face_min_px;
+    else if (!strcmp(key, "liveness_enable"))    *out = c->liveness_enable;
+    else if (!strcmp(key, "match_threshold"))    *out = c->face_match_threshold;
+    else if (!strcmp(key, "det_threshold"))      *out = c->face_det_threshold;
+    else if (!strcmp(key, "det_score_min"))      *out = c->face_det_score_min;
+    else if (!strcmp(key, "blur_min"))           *out = c->face_blur_min;
+    else return false;
+    return true;
+}
+
+static const web_set_item_t *set_item_find(const char *key)
+{
+    for (size_t i = 0; i < sizeof(s_set_items) / sizeof(s_set_items[0]); i++)
+        if (!strcmp(s_set_items[i].key, key))
+            return &s_set_items[i];
+    return NULL;
+}
+
+static void handle_access_set_get(struct mg_connection *c, struct mg_http_message *hm)
+{
+    (void)hm;
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    const dg_cfg_t *cfg = cfg_get();
+    cJSON *root = cJSON_CreateObject();
+    cJSON *arr = cJSON_AddArrayToObject(root, "items");
+    for (size_t i = 0; i < sizeof(s_set_items) / sizeof(s_set_items[0]); i++) {
+        const web_set_item_t *it = &s_set_items[i];
+        double val;
+        if (!cfg_value_of(cfg, it->key, &val))
+            continue;
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "key", it->key);
+        cJSON_AddStringToObject(o, "label", it->label);
+        cJSON_AddStringToObject(o, "unit", it->unit);
+        cJSON_AddBoolToObject(o, "is_dbl", it->is_dbl);
+        cJSON_AddNumberToObject(o, "value", val);
+        cJSON_AddNumberToObject(o, "min", it->lo);
+        cJSON_AddNumberToObject(o, "max", it->hi);
+        cJSON_AddNumberToObject(o, "step", it->step);
+        cJSON_AddItemToArray(arr, o);
+    }
+    json_reply(c, 200, root);
+    cJSON_Delete(root);
+}
+
+static void handle_access_set_post(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    char buf[1024];
+    if (!body_copy(hm, buf, sizeof(buf))) {
+        json_msg(c, 400, "坏请求体");
+        return;
+    }
+    cJSON *body = cJSON_Parse(buf);
+    if (!body || !cJSON_IsObject(body)) {
+        cJSON_Delete(body);
+        json_msg(c, 400, "坏请求体(需要对象)");
+        return;
+    }
+
+    /* 先整批校验(范围/类型),再统一应用:不给"改一半"的状态 */
+    const cJSON *it;
+    cJSON_ArrayForEach(it, body) {
+        const web_set_item_t *m = set_item_find(it->string);
+        if (!m) {
+            json_msg(c, 400, "未知设置项");
+            cJSON_Delete(body);
+            return;
+        }
+        if (!cJSON_IsNumber(it)) {
+            json_msg(c, 400, "设置项必须是数值");
+            cJSON_Delete(body);
+            return;
+        }
+        if (it->valuedouble < m->lo || it->valuedouble > m->hi) {
+            char msg[128];
+            snprintf(msg, sizeof(msg), "%s 需在 %g~%g %s内",
+                     m->label, m->lo, m->hi, m->unit);
+            json_msg(c, 400, msg);
+            cJSON_Delete(body);
+            return;
+        }
+    }
+    cJSON_ArrayForEach(it, body) {
+        const web_set_item_t *m = set_item_find(it->string);
+        int rc;
+        if (m->is_dbl)
+            rc = cfg_set_dbl(m->key, it->valuedouble);
+        else
+            rc = cfg_set_int(m->key, (int)(it->valuedouble < 0 ? it->valuedouble - 0.5
+                                                               : it->valuedouble + 0.5));
+        if (rc != DG_OK) {
+            char msg[128];
+            snprintf(msg, sizeof(msg), "%s 应用失败(%d)", m->label, rc);
+            json_msg(c, 500, msg);
+            cJSON_Delete(body);
+            return;
+        }
+    }
+    cJSON_Delete(body);
+    DG_LOGI(TAG, "web 更新门禁设置");
+    json_msg(c, 200, "已保存");
+}
+
 typedef struct {
     const char *method;
     const char *uri;
@@ -857,6 +1386,14 @@ static const route_t s_routes[] = {
     { "GET",  "/api/logs",    "日志查询只接受 GET",    handle_logs },
     { "POST", "/api/ntp",     "时间校正只接受 POST",   handle_ntp },
     { "POST", "/api/account", "账号修改只接受 POST",   handle_account },
+    { "GET",  "/api/users",            "用户列表只接受 GET",    handle_users_list },
+    { "POST", "/api/users/add",        "添加用户只接受 POST",   handle_users_add },
+    { "POST", "/api/users/update",     "编辑用户只接受 POST",   handle_users_update },
+    { "POST", "/api/users/pwd",        "改密码只接受 POST",     handle_users_pwd },
+    { "POST", "/api/users/delete",     "删除用户只接受 POST",   handle_users_delete },
+    { "POST", "/api/users/face_clear", "清除人脸只接受 POST",   handle_users_face_clear },
+    { "GET",  "/api/access_set",       "门禁设置只接受 GET",    handle_access_set_get },
+    { "POST", "/api/access_set",       "门禁设置只接受 POST",   handle_access_set_post },
 };
 
 /* 分派次序:精确路由 → /api/ws 升级 → 未知 /api/ 回 JSON 404 →

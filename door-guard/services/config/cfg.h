@@ -77,6 +77,7 @@ const dg_cfg_t *cfg_get(void);
 
 /** 设置并持久化(防抖落盘);key 为业务键名(同 DB 迁移键,见 test_cfg.c) */
 int cfg_set_int(const char *key, int value);
+int cfg_set_dbl(const char *key, double value);
 int cfg_set_str(const char *key, const char *value);
 
 /** 按项恢复默认:从 cur 删除该键(加载序回落 default);未知键 DG_ERR_PARAM */
