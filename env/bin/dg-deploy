@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
-# 推送 door-guard 到板子。用法: dg-deploy [-r] [板子IP]
-#   -r   推送后立即在板上运行(串口/SSH 均可看到输出)
+# dg-deploy — 推送 door-guard 到板子(**走板上 OTA A/B 链路**,2026-09-26 起)
+# 用法: dg-deploy [-r] [板子IP]
+#   -r   部署后跟踪应用日志(tail -f;Ctrl-C 退出,不影响板上服务)
 #   IP   缺省用 $DOORGUARD_IP(env.sh 里 export)
+#
+# 部署 = 把新二进制放进板上 OTA 暂存区(/var/lib/door-guard/ota_staged.bin
+# + .sha256 + .ver),由 S60doorguard 的 ota_watch 消费:2s 大小稳定判定 →
+# sha256 二次复核 → 装**非活动槽** → symlink 原子切换 → 重启进程;新包连续
+# 3 次秒退(<15s)自动回滚旧槽。开发推板与生产 OTA 从此走同一条路:
+# 坏包部署也受 A/B 防护(旧流程 scp 沿 symlink 直写活动槽,回滚形同虚设,已废)。
+# 暂存不触碰正在运行的旧槽二进制,故全程无 ETXTBSY、切槽前服务零停机。
 set -euo pipefail
 
 : "${DOORGUARD_ROOT:?请先 source env/env.sh}"
 
-run=0
+follow=0
 if [ "${1:-}" = "-r" ]; then
-    run=1
+    follow=1
     shift
 fi
 ip="${1:-${DOORGUARD_IP:-}}"
@@ -17,25 +25,80 @@ ip="${1:-${DOORGUARD_IP:-}}"
 bin="$DOORGUARD_ROOT/door-guard/build/door-guard"
 [ -x "$bin" ] || { echo "没有编译产物,先执行 dg-build"; exit 1; }
 
-# 应用走 A/B 槽位(/root/door-guard 是指向活动槽的符号链接):
-# 先停服务再推(否则 ETXTBSY),非 -r 时推完自动拉起新版本
-ssh "root@$ip" '/etc/init.d/S60doorguard stop >/dev/null 2>&1' || true
+sshx() { ssh "root@$ip" "$@"; }
 
-scp "$bin" "root@$ip:/root/door-guard"
-
-# 语言包(i18n 依赖 /root/ui/lang;CWD=/root 才能找到)与自启脚本(幂等)
-ssh "root@$ip" 'mkdir -p /root/ui/lang'
-scp "$DOORGUARD_ROOT"/door-guard/ui/lang/*.json "root@$ip:/root/ui/lang/" 2>/dev/null || true
+echo "==> 资源直推(语言包/自启脚本;资源文件不走槽位)"
+# S60 必须先于"监听检查"上板:旧版脚本的 stop 有自毁 bug,restart/stop+start
+# 都靠它;先换新脚本,后面的服务重建才可靠
+sshx 'mkdir -p /root/ui/lang'
+scp -q "$DOORGUARD_ROOT"/door-guard/ui/lang/*.json "root@$ip:/root/ui/lang/" 2>/dev/null || true
 if [ -f "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" ]; then
     scp -q "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" "root@$ip:/etc/init.d/S60doorguard"
-    ssh "root@$ip" 'chmod +x /etc/init.d/S60doorguard'
+    sshx 'chmod +x /etc/init.d/S60doorguard'
 fi
 
-if [ "$run" = 1 ]; then
-    # 前台跑,便于串口/ssh 看输出;Ctrl-C 后 /etc/init.d/S60doorguard start 恢复
-    ssh "root@$ip" 'cd /root && /root/door-guard'
-else
-    ssh "root@$ip" '/etc/init.d/S60doorguard start'
-    slot=$(ssh "root@$ip" 'basename $(readlink /root/door-guard)' 2>/dev/null)
-    echo "已推送并重启服务(活动槽 $slot)"
+echo "==> 板上 OTA 监听检查"
+cur_slot=$(sshx 'basename "$(readlink /root/door-guard 2>/dev/null)" 2>/dev/null' || true)
+if ! sshx 'kill -0 "$(cat /var/run/door-guard-ota.pid 2>/dev/null)" 2>/dev/null'; then
+    # ota_watch 不在(服务未启动/只前台跑过/看门狗被杀):stop+start 重建监督
+    # 与监听两个循环(幂等;前台挂着的实例会被 stop 收掉,由监督循环接管)
+    echo "    ota_watch 未运行 → 重启板上服务(stop + start)"
+    sshx '/etc/init.d/S60doorguard stop' || true
+    # start 阻塞在 aiq_restart(等 rkaiq 起来,最长 ~10s)之后才拉起监听循环:
+    # 必须轮询等待,固定 sleep 会误判"监听仍不在"
+    sshx '/etc/init.d/S60doorguard start' || true
+    watch_ok=0
+    for _ in $(seq 1 10); do
+        sleep 2
+        if sshx 'kill -0 "$(cat /var/run/door-guard-ota.pid 2>/dev/null)" 2>/dev/null'; then
+            watch_ok=1
+            break
+        fi
+    done
+    [ "$watch_ok" = 1 ] || {
+        echo "OTA 监听循环仍不在,放弃(线索看板上 /var/log/door-guard.log)"; exit 1; }
+    cur_slot=$(sshx 'basename "$(readlink /root/door-guard)"')
 fi
+echo "    当前活动槽 $cur_slot"
+
+echo "==> 暂存 OTA 包"
+sshx 'mkdir -p /var/lib/door-guard'
+scp -q "$bin" "root@$ip:/var/lib/door-guard/ota_staged.bin"
+sha=$(sha256sum "$bin" | cut -d' ' -f1)
+printf '%s  ota_staged.bin\n' "$sha" | sshx 'cat > /var/lib/door-guard/ota_staged.bin.sha256'
+ver=$(git -C "$DOORGUARD_ROOT" describe --always --dirty 2>/dev/null || date +%F-%H%M%S)
+printf '%s\n' "$ver" | sshx 'cat > /var/lib/door-guard/ota_staged.ver'
+
+echo "==> 等待 OTA 切槽(ota_watch 轮询 + 复核 + 原子切换)"
+new_slot=""
+for _ in $(seq 1 20); do
+    sleep 2
+    new_slot=$(sshx 'basename "$(readlink /root/door-guard 2>/dev/null)" 2>/dev/null' || true)
+    [ -n "$new_slot" ] && [ "$new_slot" != "$cur_slot" ] && break
+    new_slot=""
+done
+[ -n "$new_slot" ] || { echo "超时:槽位未切换(暂存包没被消费?看 /var/log/door-guard.log)"; exit 1; }
+echo "    已切槽 $cur_slot → $new_slot(版本 $ver)"
+
+echo "==> 等待新槽进程拉起"
+up=0
+for _ in $(seq 1 10); do
+    sleep 1
+    if sshx 'pidof door-guard >/dev/null 2>&1'; then up=1; break; fi
+done
+[ "$up" = 1 ] || echo "警告:进程尚未拉起(监督循环 3s 内会拉;若秒退 3 次会自动回滚旧槽)"
+
+echo "==> md5 核对(本地产物 vs 板上新槽)"
+local_md5=$(md5sum "$bin" | cut -d' ' -f1)
+board_md5=$(sshx "md5sum /root/$new_slot" | cut -d' ' -f1)
+if [ "$local_md5" != "$board_md5" ]; then
+    echo "md5 不一致!本地 $local_md5 板上 $board_md5 —— 传输损坏,请重推"
+    exit 1
+fi
+echo "    md5 一致 $local_md5"
+
+if [ "$follow" = 1 ]; then
+    echo "==> 跟踪日志(Ctrl-C 退出,不影响板上服务)"
+    sshx 'tail -n 40 -f /var/log/door-guard.log'
+fi
+echo "部署完成(槽 $new_slot,版本 $ver)"

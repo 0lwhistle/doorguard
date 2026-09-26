@@ -6,7 +6,9 @@
 #       本脚本的监听循环做二次复核 → 装入非活动槽 → 符号链接原子切换 →
 #       重启进程。连续 3 次秒退(<15s)自动回滚到另一槽。
 # 槽位:/root/dg_app.A 与 /root/dg_app.B;/root/door-guard 是指向当前槽的
-#       符号链接(开发流 dg-deploy 推 /root/door-guard 即写活动槽,不变)。
+#       符号链接。开发流(dg-deploy 暂存)与生产 OTA(web 上传)同走
+#       /var/lib/door-guard/ota_staged.bin,由 ota_watch 统一消费——任何
+#       路径装的都是非活动槽,坏包秒退 3 次自动回滚,推板升级同一套防护。
 DAEMON=/root/door-guard
 SLOT_A=/root/dg_app.A
 SLOT_B=/root/dg_app.B
@@ -86,7 +88,8 @@ ota_swap() {
 }
 
 ota_watch() {
-    echo $$ >"$WATCH_PID"
+    # pidfile 由 start 上下文以 $! 写(见 start 分支注释);函数内 $$ 会取到
+    # start 主进程 pid,写进来就是失准的
     while :; do
         [ -f "$STAGED" ] && ota_swap
         sleep 2
@@ -94,7 +97,6 @@ ota_watch() {
 }
 
 supervise() {
-    echo $$ >"$SUP_PID"                 # 后台子 shell 自己记录真实 pid
     fail=0
     while :; do
         t0=$(date +%s)
@@ -139,18 +141,26 @@ case "$1" in
     slot_migrate
     aiq_restart
     # ⚠️ 必须完全脱离会话:继承 ssh 的 stdout/stderr 时,会话一断,
-    # 子 shell 往死管道写即被卡死(实测监督循环因此假死、回滚失灵)
+    # 子 shell 往死管道写即被卡死(实测监督循环因此假死、回滚失灵)。
+    # pidfile 用 $! 记后台子壳真实 pid:函数内 $$ 在 ash 里恒等于 start
+    # 主进程 pid,主进程一退 pidfile 全指向死进程(stop 杀空气、start 的
+    # "已在运行"守卫失效、部署脚本把活监听误判为死——2026-09-26 实测)
     supervise >/dev/null 2>&1 &
+    echo $! >"$SUP_PID"
     ota_watch >/dev/null 2>&1 &
+    echo $! >"$WATCH_PID"
     echo "door-guard 已启动(活动槽 $(slot_current),日志 $LOG)"
     ;;
   stop)
+    # 忽略 TERM:下面 killall S60doorguard 的兜底会命中本进程自身
+    # (busybox 按脚本名匹配),不忽略则 restart 路径的 start 永远执行不到
+    trap '' TERM
     [ -f "$SUP_PID" ] && kill "$(cat "$SUP_PID")" 2>/dev/null
     [ -f "$WATCH_PID" ] && kill "$(cat "$WATCH_PID")" 2>/dev/null
     killall door-guard 2>/dev/null
-    killall S60doorguard 2>/dev/null    # pidfile 失准的兜底(本进程随后即退,无碍)
     killall rkaiq_3A_server 2>/dev/null
     rm -f "$SUP_PID" "$WATCH_PID" /tmp/.rkaiq_3A /tmp/aiq2.lock
+    killall S60doorguard 2>/dev/null    # 兜底必须最后:上一行先清干净 pidfile
     echo "door-guard 已停止"
     ;;
   restart)

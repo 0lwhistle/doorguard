@@ -29,7 +29,7 @@ description: RK3576 K7 人脸识别门禁项目(door-guard)开发技能,含完�
 ```bash
 source env/env.sh     # 仓库任意位置;dg-* 脚本进 PATH,自动探测工具链
 dg-build              # 交叉编译 door-guard(-c 全新配置)
-dg-deploy -r <IP>     # scp 推板并运行(export DOORGUARD_IP=<IP> 后免 IP)
+dg-deploy [-r] <IP>   # OTA 暂存推板:装非活动槽+原子切换+坏包自动回滚;-r 跟踪日志
 dg-serial             # 串口控制台(1500000 8N1,不是 115200)
 ```
 

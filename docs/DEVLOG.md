@@ -4,6 +4,42 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-26(深夜)用户五项反馈集中修 + 推板改走 OTA A/B(31/31 绿,零告警,OTA 上板实测)
+
+**五项反馈**:
+1. **识别成功瞬间 UI 卡一下**:开门脉冲在 event_bus 唯一分发线程里
+   usleep(3s),脸框/触摸/弹窗/定时器全排队。改独立分离线程执行,总线只
+   投递;"脉冲进行中"标志防重叠。
+2. **管理员人脸验证过不了**:vision 的 s_granted_presence"一次在场只放行
+   一次"闸把站在镜头前点菜单的人挡死(普通模式早已放行过这一场,管理员
+   模式永远等不到命中)。闸删,去重归 FSM:普通模式 window_done、管理员
+   模式 admin_rejected(按 user_id 去重,换人立判=spec §3"继续尝试"),
+   FACE_LOST 复位;test_auth_fsm 补 F14(195 断言)。
+3. **脸框慢半秒消失**:600ms LOST 滞回是防闪设计非 bug;提为配置
+   face.lost_hold_ms(用户定 200ms 出厂)。
+4. **验证按钮输 ID 必败**:5s 计时实现成"整步共 5s"而非规格"5s 无操作",
+   弹窗键盘输 ID 根本来不及。触摸(含键盘敲击)重开 STEP_5S/ADMIN_5S。
+5. **输密码时"验证失败"弹个不停**:④误超时弹回普通后 1:N 对同一场补判;
+   FSM 加 face_present,回普通时人还在镜头前就置 window_done 不补判。
+
+**推板改走 OTA A/B**(用户要求完善并用 OTA):
+- dg-deploy 重写:暂存 ota_staged.bin(+sha256+git 版本)→ ota_watch 消费
+  (复核→装非活动槽→原子切换→重启),开发与生产同一套防护+坏包回滚;
+  自动等切槽 + md5 核对。旧"沿 symlink 直写活动槽"作废(回滚形同虚设)。
+- **S60 两处真 bug**:①ash 后台子壳里 $$ 恒为 start 主进程 pid,pidfile
+  全失准(原作者"pidfile 失准的兜底"注释即此坑)——改父上下文 $! 写;
+  ②stop 的 killall S60doorguard 兜底会把 restart 父进程杀掉,start 永不
+  执行——trap '' TERM + rm 前移。dev 流程从此与生产 OTA 同路径。
+- 踩坑:板子重启后 dropbear 主机钥变,ssh 全卡交互确认(清 known_hosts
+  恢复);板上清进程勿用 /proc 扫描 kill(命令文本自匹配自杀),
+  killall 按 comm 安全。主机钥持久化进固件待办。
+- 板端验收:日志"OTA 安装 dg_app.A(v=31d78fd-dirty)",md5 一致,
+  watch 存活,预览 30fps。
+
+**下一步**:板上真人对镜头逐条过(管理员认证/输 ID 密码/卡顿观感/脸框
+200ms 观感);dropbear 主机钥持久化;PROJECT_PLAN 快照待下次会话对齐。
+
+---
 ## 2026-09-26(晚)生产主页无预览修复 + 模块开发指南落档
 
 - **问题(用户现场发现)**:S60 生产启动后主页看不到拍摄画面。
