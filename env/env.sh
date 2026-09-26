@@ -28,7 +28,7 @@ if [ -z "${DG_TC_ROOT:-}" ]; then
     done
 fi
 # 板子 IP:dg-deploy 可省参数;换 IP 时 export DOORGUARD_IP=新IP 或改这里
-export DOORGUARD_IP="${DOORGUARD_IP:-192.168.2.95}"
+export DOORGUARD_IP="${DOORGUARD_IP:-192.168.137.100}"
 
 echo "door-guard env 就绪"
 echo "  DOORGUARD_ROOT = $DOORGUARD_ROOT"
