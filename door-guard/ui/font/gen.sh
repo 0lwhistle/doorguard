@@ -17,11 +17,15 @@ out = "".join(sorted(c for c in chars if ord(c) > 0x7f))
 sys.stdout.write(out)
 PY
 
-# 双字体:Latin 取 DejaVu(CJK 后备字体通常无 ASCII 字形),汉字取 Droid CJK
-npx --yes lv_font_conv --no-compress --bpp 4 --size 16 \
-  --font "${DG_FONT_LATIN:-/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf}" -r 0x20-0x7f \
-  --font "$FONT_SRC" \
-  --symbols " $(cat /tmp/dg_font_symbols.txt)" \
-  --format lvgl --lv-include lvgl.h \
-  --no-prefilter -o font/dg_font_cn_16.c
-echo "生成 ui/font/dg_font_cn_16.c"
+# 双字体:Latin 取 DejaVu(CJK 后备字体通常无 ASCII 字形),汉字取 Droid CJK。
+# 多档字号:XS 16(密排预留)/SUB 26(次要提示)/CN 30(正文·列表·按钮)/
+# TITLE 40(页面标题)——720×1280 屏的舒适观感下限(2026-09-27 字体调优)。
+for size in 16 26 30 40; do
+  npx --yes lv_font_conv --no-compress --bpp 4 --size "$size" \
+    --font "${DG_FONT_LATIN:-/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf}" -r 0x20-0x7f \
+    --font "$FONT_SRC" \
+    --symbols " $(cat /tmp/dg_font_symbols.txt)" \
+    --format lvgl --lv-include lvgl.h \
+    --no-prefilter -o "font/dg_font_cn_${size}.c"
+  echo "生成 ui/font/dg_font_cn_${size}.c"
+done

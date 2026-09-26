@@ -88,7 +88,7 @@ void page_menu_create(lv_obj_t *parent)
 
     lv_obj_t *title = lv_label_create(parent);
     lv_label_set_text(title, _("菜单"));
-    lv_obj_set_style_text_font(title, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(title, DG_FONT_TITLE, 0);
     lv_obj_set_style_text_color(title, DG_COL_TEXT(), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 32);
 

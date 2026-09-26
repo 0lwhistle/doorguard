@@ -134,7 +134,7 @@ void page_device_create(lv_obj_t *parent)
 
     lv_obj_t *title = lv_label_create(parent);
     lv_label_set_text(title, _("设备管理"));
-    lv_obj_set_style_text_font(title, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(title, DG_FONT_TITLE, 0);
     lv_obj_set_style_text_color(title, DG_COL_TEXT(), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 24);
 
@@ -184,11 +184,11 @@ void page_device_create(lv_obj_t *parent)
     /* 按钮内追加「当前值」label(与门禁设置页同款手法:btn>row>label) */
     lv_obj_t *row1 = lv_obj_get_child(standby, 0);
     s_lb_standby = lv_label_create(row1);
-    lv_obj_set_style_text_font(s_lb_standby, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(s_lb_standby, DG_FONT_SUB, 0);
     lv_obj_set_style_text_color(s_lb_standby, DG_COL_BG(), 0);
     lv_obj_t *row2 = lv_obj_get_child(menuto, 0);
     s_lb_menu = lv_label_create(row2);
-    lv_obj_set_style_text_font(s_lb_menu, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(s_lb_menu, DG_FONT_SUB, 0);
     lv_obj_set_style_text_color(s_lb_menu, DG_COL_BG(), 0);
     refresh_rows(NULL);
 

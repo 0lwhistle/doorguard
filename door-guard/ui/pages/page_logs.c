@@ -156,7 +156,7 @@ void page_logs_create(lv_obj_t *parent)
     s_q.descending = true;                  /* 默认倒序(最新在上) */
 
     s_title = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_title, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(s_title, DG_FONT_TITLE, 0);
     lv_obj_set_style_text_color(s_title, DG_COL_TEXT(), 0);
     lv_obj_align(s_title, LV_ALIGN_TOP_MID, 0, 20);
 

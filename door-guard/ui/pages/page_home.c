@@ -110,7 +110,7 @@ void page_home_create(lv_obj_t *parent)
 
     /* 提示条:黑色半透明衬底 chip(直接叠在推流上,白字/黄字才可读) */
     s_hint = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_hint, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(s_hint, DG_FONT_SUB, 0);
     lv_obj_set_style_text_color(s_hint, DG_COL_BG(), 0);
     lv_obj_set_style_bg_color(s_hint, DG_COL_SCRIM(), 0);
     lv_obj_set_style_bg_opa(s_hint, DG_OPA_SCRIM, 0);

@@ -88,7 +88,7 @@ static lv_obj_t *row_create_h(lv_obj_t *parent, const char *title,
 
     lv_obj_t *lbl = lv_label_create(row);
     lv_label_set_text(lbl, title);
-    lv_obj_set_style_text_font(lbl, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(lbl, DG_FONT_SUB, 0);
     lv_obj_set_style_text_color(lbl, DG_COL_TEXT(), 0);
     lv_obj_set_style_text_opa(lbl, DG_OPA_TEXT_DIM, 0);
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 16, 0);
@@ -424,7 +424,7 @@ static lv_obj_t *page_create_(lv_obj_t *parent, const char *title)
 {
     lv_obj_t *lbl = lv_label_create(parent);
     lv_label_set_text(lbl, title);
-    lv_obj_set_style_text_font(lbl, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(lbl, DG_FONT_TITLE, 0);
     lv_obj_set_style_text_color(lbl, DG_COL_TEXT(), 0);
     lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, 20);
     return lbl;

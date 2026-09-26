@@ -47,9 +47,17 @@ extern "C" {
 #define DG_RADIUS     12
 #define DG_PAD        16
 
-/** 中文界面字体(由 ui/font 生成,覆盖 lang 目录 json 全部字符) */
+/** 中文界面字体(由 ui/font/gen.sh 生成,覆盖 lang 目录 json 全部字符)。
+ * 四档:XS 密排预留 / SUB 次要提示 / CN 正文·列表·按钮 / TITLE 页面标题
+ * ——720×1280 屏按观感下限标定(2026-09-27 字体调优,原全局仅 16px) */
 LV_FONT_DECLARE(dg_font_cn_16);
-#define DG_FONT_CN &dg_font_cn_16
+LV_FONT_DECLARE(dg_font_cn_26);
+LV_FONT_DECLARE(dg_font_cn_30);
+LV_FONT_DECLARE(dg_font_cn_40);
+#define DG_FONT_XS    &dg_font_cn_16
+#define DG_FONT_SUB   &dg_font_cn_26
+#define DG_FONT_CN    &dg_font_cn_30
+#define DG_FONT_TITLE &dg_font_cn_40
 
 #ifdef __cplusplus
 }

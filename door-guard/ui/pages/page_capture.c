@@ -271,12 +271,12 @@ void page_capture_create(lv_obj_t *parent)
 
     lv_obj_t *title = lv_label_create(parent);
     lv_label_set_text(title, _("人脸录入"));
-    lv_obj_set_style_text_font(title, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(title, DG_FONT_TITLE, 0);
     lv_obj_set_style_text_color(title, DG_COL_TEXT(), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
 
     s_hint = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_hint, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(s_hint, DG_FONT_SUB, 0);
     /* 质量提示同样衬在预览画面上:黑底 chip(颜色按判定切换) */
     lv_obj_set_style_bg_color(s_hint, DG_COL_SCRIM(), 0);
     lv_obj_set_style_bg_opa(s_hint, DG_OPA_SCRIM, 0);

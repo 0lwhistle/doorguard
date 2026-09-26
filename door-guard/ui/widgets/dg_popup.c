@@ -256,7 +256,7 @@ void dg_popup_input(const dg_popup_input_cfg_t *cfg)
     /* 合法性提示行:默认隐藏,校验失败时红字显示(spec-ui §6) */
     s_input.err = lv_label_create(card);
     lv_label_set_text(s_input.err, "");
-    lv_obj_set_style_text_font(s_input.err, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(s_input.err, DG_FONT_SUB, 0);
     lv_obj_set_style_text_color(s_input.err, DG_COL_ERR(), 0);
     lv_obj_set_width(s_input.err, LV_PCT(100));
     lv_label_set_long_mode(s_input.err, LV_LABEL_LONG_WRAP);

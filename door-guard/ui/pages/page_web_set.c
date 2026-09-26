@@ -146,7 +146,7 @@ static lv_obj_t *make_line(lv_obj_t *parent, const char *prefix, int y)
 {
     lv_obj_t *l = lv_label_create(parent);
     lv_label_set_text(l, prefix);
-    lv_obj_set_style_text_font(l, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(l, DG_FONT_SUB, 0);
     lv_obj_set_style_text_color(l, DG_COL_TEXT(), 0);
     lv_obj_set_width(l, DG_SCREEN_W - 2 * DG_PAD);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
@@ -163,7 +163,7 @@ void page_web_set_create(lv_obj_t *parent)
 
     lv_obj_t *title = lv_label_create(parent);
     lv_label_set_text(title, _("Web 管理"));
-    lv_obj_set_style_text_font(title, DG_FONT_CN, 0);
+    lv_obj_set_style_text_font(title, DG_FONT_TITLE, 0);
     lv_obj_set_style_text_color(title, DG_COL_TEXT(), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 24);
 

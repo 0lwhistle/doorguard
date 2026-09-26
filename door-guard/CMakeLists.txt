@@ -174,6 +174,9 @@ add_library(dg_ui STATIC
     ui/presenters/presenter_web_set.c
     ui/ui_events.c
     ui/font/dg_font_cn_16.c
+    ui/font/dg_font_cn_26.c
+    ui/font/dg_font_cn_30.c
+    ui/font/dg_font_cn_40.c
     ${DG_WIDGET_SRCS}
 )
 target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DIR}/services/access)
