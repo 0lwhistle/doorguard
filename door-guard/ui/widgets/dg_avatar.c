@@ -48,6 +48,17 @@ static int s_full_pos, s_thumb_pos;
 static uint8_t s_jpeg[DG_AVATAR_JPEG_MAX];
 static uint8_t s_rgb[FULL_MAX * FULL_MAX * AV_BPP];
 
+/* libjpeg 输出内存序 R,G,B;LVGL 的 RGB888 按字节序是 B,G,R(低字节=blue)。
+ * 拷贝时交换 R/B——2026-09-27 首版修复直接 memcpy 导致红蓝互换(肤色发蓝)。 */
+static void rgb_to_lv888(const uint8_t *rgb, int n, uint8_t *out)
+{
+    for (int i = 0; i < n; i++) {
+        out[i * 3 + 0] = rgb[i * 3 + 2];    /* B */
+        out[i * 3 + 1] = rgb[i * 3 + 1];    /* G */
+        out[i * 3 + 2] = rgb[i * 3 + 0];    /* R */
+    }
+}
+
 static slot_t *pool_pick(dg_avatar_size_t size)
 {
     if (size == DG_AVATAR_FULL) {
@@ -90,7 +101,7 @@ static const lv_image_dsc_t *load_into(slot_t *s, const char *uid)
         memset(&s->dsc, 0, sizeof(s->dsc));
         return NULL;
     }
-    memcpy(s->px, s_rgb, (size_t)w * h * AV_BPP);
+    rgb_to_lv888(s_rgb, w * h, s->px);
 
     memset(&s->dsc, 0, sizeof(s->dsc));
     s->dsc.header.magic = LV_IMAGE_HEADER_MAGIC;  /* v9:set_src 靠 magic 识别内存位图 */
