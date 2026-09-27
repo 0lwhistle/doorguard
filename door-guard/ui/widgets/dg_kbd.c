@@ -18,6 +18,7 @@
 
 typedef struct {
     dg_kbd_ops_t ops;
+    lv_obj_t *root;               /* 键盘根(toggle 事件经它找回 k) */
     lv_obj_t *num_page;
     lv_obj_t *alpha_page;
     lv_obj_t *toggle;             /* 页脚 ABC/123 */
@@ -115,7 +116,9 @@ bool dg_kbd_is_alpha(lv_obj_t *kbd)
 static void on_toggle(lv_event_t *e)
 {
     dg_kbd_t *k = lv_event_get_user_data(e);
-    dg_kbd_toggle_layout(lv_obj_get_user_data(k->num_page));
+    /* 修复史:旧实现传 num_page 的 user_data(从未设置,恒 NULL),
+     * 切换按钮点了没反应——「字母页切不到数字」的根因 */
+    dg_kbd_toggle_layout(k ? k->root : NULL);
 }
 
 /* ---- 键构造 ---- */
@@ -133,7 +136,8 @@ static lv_obj_t *add_key(lv_obj_t *parent, dg_kbd_t *k, const char *label,
 }
 
 /* 字母键:键值 = 小写单字符(堆上,键盘随弹窗销毁时不回收:一次性小对象,
- * 生命周期与页面同;要严格回收可在键盘根对象上挂 LV_EVENT_DELETE) */
+ * 生命周期与页面同;要严格回收可在键盘根对象上挂 LV_EVENT_DELETE)。
+ * 宽 9%:每行 10 键 + 9 个 6px 间距要压进 100%,10% 会把行尾键挤出屏幕 */
 static lv_obj_t *add_letter_key(lv_obj_t *parent, dg_kbd_t *k, char lc)
 {
     char *sym = malloc(2);
@@ -142,7 +146,7 @@ static lv_obj_t *add_letter_key(lv_obj_t *parent, dg_kbd_t *k, char lc)
     sym[0] = lc;
     sym[1] = '\0';
     lv_obj_t *b = dg_btn_create_light(parent, NULL, sym);
-    lv_obj_set_width(b, LV_PCT(10));
+    lv_obj_set_width(b, LV_PCT(9));
     lv_obj_set_height(b, 62);
     lv_obj_set_user_data(b, sym);
     lv_obj_add_event_cb(b, emit_key, LV_EVENT_CLICKED, k);
@@ -179,6 +183,7 @@ lv_obj_t *dg_kbd_create(lv_obj_t *parent, bool start_alpha, const dg_kbd_ops_t *
     lv_obj_set_style_pad_row(root, 6, 0);
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_user_data(root, k);
+    k->root = root;
 
     const int32_t KEY_H = 62;
 
@@ -220,7 +225,7 @@ lv_obj_t *dg_kbd_create(lv_obj_t *parent, bool start_alpha, const dg_kbd_ops_t *
     lv_obj_t *r2 = add_row(k->alpha_page, KEY_H);
     for (int i = 0; rows_abc[1][i]; i++)
         add_letter_key(r2, k, rows_abc[1][i]);
-    add_key(r2, k, _("删除"), 10, KEY_H, true, emit_backspace);
+    add_key(r2, k, _("删除"), 9, KEY_H, true, emit_backspace);
 
     lv_obj_t *r3 = add_row(k->alpha_page, KEY_H);
     add_key(r3, k, "Aa", 15, KEY_H, true, on_shift);              /* 大小写(纯 ASCII,必有字形) */
@@ -228,9 +233,12 @@ lv_obj_t *dg_kbd_create(lv_obj_t *parent, bool start_alpha, const dg_kbd_ops_t *
         add_letter_key(r3, k, rows_abc[2][i]);
 
     lv_obj_t *r4 = add_row(k->alpha_page, KEY_H);
-    add_key(r4, k, " ", 60, KEY_H, true, emit_key);               /* 空格(姓名) */
+    /* 空格键:键值是 " "(单空格),label 单独给文字——原实现 label 也是
+     * 空格,屏上就是一个看不出用途的空白按钮 */
+    lv_obj_t *space = add_key(r4, k, _("空格"), 58, KEY_H, true, emit_key);
+    lv_obj_set_user_data(space, (void *)" ");
     {
-        lv_obj_t *ok = add_key(r4, k, _("确认"), 40, KEY_H, false, emit_ok);
+        lv_obj_t *ok = add_key(r4, k, _("确认"), 38, KEY_H, false, emit_ok);
         lv_obj_set_style_bg_color(ok, DG_COL_OK(), 0);
     }
 
