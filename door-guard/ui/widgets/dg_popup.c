@@ -313,6 +313,13 @@ void dg_popup_choice(const char *title, const char *const *options, int cnt,
                      void (*on_pick)(void *ud, int idx),
                      void (*on_cancel)(void *ud), void *ud)
 {
+    dg_popup_choice_ex(title, options, cnt, 0, on_pick, on_cancel, ud);
+}
+
+void dg_popup_choice_ex(const char *title, const char *const *options, int cnt,
+                        uint32_t red_mask, void (*on_pick)(void *ud, int idx),
+                        void (*on_cancel)(void *ud), void *ud)
+{
     lv_obj_t *card = base_create(DG_COLOR_PRIM());
     msg_create(card, title);
     s_choice.on_pick = on_pick;
@@ -320,7 +327,9 @@ void dg_popup_choice(const char *title, const char *const *options, int cnt,
     s_choice.ud = ud;
 
     for (int i = 0; i < cnt; i++) {
-        lv_obj_t *btn = dg_btn_create(card, NULL, options[i]);
+        /* red_mask 置位的选项 = 破坏性动作(删除/清除),红底白字标示 */
+        lv_obj_t *btn = (red_mask & (1u << i)) ? dg_btn_create_danger(card, NULL, options[i])
+                                               : dg_btn_create(card, NULL, options[i]);
         lv_obj_set_user_data(btn, (void *)(intptr_t)i);
         lv_obj_add_event_cb(btn, choice_pick, LV_EVENT_CLICKED, NULL);
     }
@@ -329,5 +338,5 @@ void dg_popup_choice(const char *title, const char *const *options, int cnt,
     lv_obj_t *cancel = dg_btn_create_light(card, NULL, _("取消"));
     lv_obj_add_event_cb(cancel, choice_cancel_click, LV_EVENT_CLICKED,
                         s_choice.on_cancel);
-    DG_LOGI("[POPUP]", "choice: %s (%d 项)", title, cnt);
+    DG_LOGI("[POPUP]", "choice: %s (%d 项, red=%#x)", title, cnt, red_mask);
 }

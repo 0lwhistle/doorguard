@@ -70,11 +70,15 @@ static lv_obj_t *cell_create(lv_obj_t *parent, const char *icon, const char *lab
     lv_label_set_text(sym, icon);
     lv_obj_set_style_text_font(sym, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(sym, DG_COLOR_PRIM(), 0);
+    /* 按下整卡变主蓝:图标原是主蓝会隐入底色,与文字一起转白(同 dg_btn
+     * 浅色按钮的按下态对比度规范) */
+    lv_obj_set_style_text_color(sym, DG_COL_BG(), LV_STATE_PRESSED);
 
     lv_obj_t *txt = lv_label_create(col);
     lv_label_set_text(txt, label);
     lv_obj_set_style_text_font(txt, DG_FONT_CN, 0);
     lv_obj_set_style_text_color(txt, DG_COL_TEXT(), 0);
+    lv_obj_set_style_text_color(txt, DG_COL_BG(), LV_STATE_PRESSED);
 
     lv_obj_add_event_cb(cell, open, LV_EVENT_CLICKED, NULL);
     return cell;

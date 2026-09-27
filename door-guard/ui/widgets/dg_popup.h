@@ -43,6 +43,12 @@ void dg_popup_choice(const char *title, const char *const *options, int cnt,
                      void (*on_pick)(void *ud, int idx),
                      void (*on_cancel)(void *ud), void *ud);
 
+/** 选择弹窗扩展:red_mask 置位的选项以红底(破坏性动作)呈现,
+ *  bit n = 第 n 个选项红色;其余行为同 dg_popup_choice */
+void dg_popup_choice_ex(const char *title, const char *const *options, int cnt,
+                        uint32_t red_mask, void (*on_pick)(void *ud, int idx),
+                        void (*on_cancel)(void *ud), void *ud);
+
 /** 关闭当前弹窗(若在) */
 void dg_popup_close(void);
 

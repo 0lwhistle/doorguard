@@ -16,8 +16,12 @@ extern "C" {
  */
 lv_obj_t *dg_btn_create(lv_obj_t *parent, const char *icon, const char *label);
 
-/** 蓝白反色变体(次级操作:浅蓝底深色字) */
+/** 蓝白反色变体(次级操作:浅蓝底深色字,按下变主蓝白字) */
 lv_obj_t *dg_btn_create_light(lv_obj_t *parent, const char *icon, const char *label);
+
+/** 破坏性操作变体(删除/清除:红底白字,按下加深;2026-09-27 用户规范:
+ * 删除相关的操作一律红色) */
+lv_obj_t *dg_btn_create_danger(lv_obj_t *parent, const char *icon, const char *label);
 
 /** 改按钮文字(字母键盘大小写切换、页脚 ABC↔123 用;图标不动) */
 void dg_btn_set_label(lv_obj_t *btn, const char *label);
