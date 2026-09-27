@@ -110,6 +110,8 @@ static void show_method_picker(uint32_t flags)
 static void home_on_evt(const ui_evt_t *evt)
 {
     switch (evt->kind) {
+    case UI_EVT_NET_CFG_RESULT:
+        break;              /* 网络配置回执由 net_set 页弹窗,主页显式忽略 */
     case UI_EVT_FACE_BOX:
         page_home_set_facebox(evt->box.state, evt->box.x, evt->box.y,
                               evt->box.w, evt->box.h);
