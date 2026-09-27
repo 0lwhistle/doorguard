@@ -34,34 +34,46 @@
    不能录完两次才发现重复。
 2. **模板存模块内**,不是全存主控(§3,推荐决策 A):验证 1:N 在模组内完成,
    主控 DB 存加密副本做备份/迁移。这与 spec-database 的 `finger_vec` 列并存不冲突。
-3. **模块库容量是硬上限**(典型 1000 枚,待手册核对)< 用户上限 2000:第 1001 枚
-   指纹录入必须显式失败(新错误码,§6),提示"指纹库已满",而不是静默失败。
+3. **模块库容量是硬上限**(典型 1000 枚,待手册核对)< 用户上限 2000:**已拍板
+   (2026-09-27,决策 A 附议)**——个人项目不担心容量,满了显式提示"指纹库已满"
+   即可,不做复杂处置。
 
-## 3. 关键架构决策(请拍板)
+## 3. 关键架构决策(**已拍板,2026-09-27**)
 
-### 决策 A:模板存储位置 —— 推荐 **模块内为主 + DB 加密副本**
+### 决策 A:模板存储位置 —— **模组内为主 + DB 加密副本**【已确认】
 
-| | A:模块内 PageID + DB 副本(推荐) | B:纯主控(特征全存 SQLite) |
-|---|---|---|
-| 1:N 验证 | 模组 Search,模组内比对,单次 <1s(待实测) | 需主控实现指纹比对算法或逐枚下载 Match,2000 人不可行 |
-| 查重 | 录入时 Search 命中检测,天然 O(库) | 同左,须算法在主控 |
-| 换模组/恢复 | DB 副本 DownChar 回灌,可迁移 | 天然可迁移 |
-| 与 2000 上限 | 受模组容量约束(§2.3) | 无约束但验证路径不可行 |
+1:N 验证走模组 Search(纯主控路线 2000 人不可行);DB 副本用于备份/换模组回灌。
+容量上限不做复杂处置,满了提示即可(§2.3)。
 
-A 的代价(容量上限 + PageID 映射)是可管理的,B 的 1:N 验证是**不可行**的,故选 A。
-`finger_vec` 列语义微调:由"验证数据源"变为"副本(备份/换模组回灌)",加密策略不变。
+### 决策 B:**每用户最多 3 枚指纹**【已确认,2026-09-27 用户提出】——DB 模型变更
 
-### 决策 B:PageID 分配 —— 推荐 **递增分配 + users 表映射列**
+原方案 users 表单列 `finger_page_id` 不再成立,改为**独立指纹表**:
 
-`users` 表幂等迁移加列 `finger_page_id INTEGER`(NULL=未录指纹;先例:avatar 加列)。
-分配取当前最小空闲号,删除用户时 `DeletChar` 释放并置 NULL。DB 是映射唯一事实源,
-模组库只是缓存——boot 时可对账(ValidTempleteNum 与 DB 计数不符 → 日志告警,
-不自动重建,人工介入)。
+```sql
+CREATE TABLE fingerprints (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT    NOT NULL,           -- 逻辑外键(users.user_id)
+    page_id     INTEGER NOT NULL UNIQUE,    -- 模组库全局页号(DB 是映射唯一事实源)
+    finger_vec  BLOB,                       -- 512B 特征副本,AES-256-CTR(同 finger_vec 原策略)
+    created_at  INTEGER NOT NULL
+);
+-- 业务约束:每 user_id 最多 3 行(应用层预检 + 触发器/写入路径兜底)
+```
 
-### 决策 C:新增错误码 —— `DG_ERR_FINGER_FULL = -36`(指纹模组库容量已满)
+- **users 表原 `finger_vec` 列废弃**:幂等迁移(建表 → 现有数据搬入 fingerprints →
+  users 列置 NULL 保留占位,同 avatar 加列先例);spec-database §1/§3 同步修订在
+  实现时一并做(本节为事实源,迁移落地前 spec 以本节为准)。
+- **上限检查**:录入前 `COUNT(*) WHERE user_id=?` ≥3 → `DG_ERR_FINGER_LIMIT = -37`
+  「该用户指纹已达上限(3 枚)」;模组库满 → `DG_ERR_FINGER_FULL = -36`「指纹库已满」。
+- **PageID 分配**:全局最小空闲号,删除单枚/删用户释放。1:N Search 命中 PageID →
+  fingerprints 反查 user_id → FSM 业务过滤(role/auth_flags),与原方案一致。
+- **编辑页 UI 适配**:指纹区显示「已录 n/3」,支持逐枚删除(DeletChar+删行)、
+  未满时显示录入按钮——原"修改/录入"单按钮布局不适用,实现时一并改。
 
-现 err.h 有 DUP_FINGER(-24)查重、MISMATCH(-35)1:1 不匹配,独缺容量满。
-同时 UI 文案表与 web 错误映射同步加一条。
+### 决策 C:新增错误码【已确认,并按决策 B 扩为两个】
+
+`DG_ERR_FINGER_FULL = -36`(模组库容量满)、`DG_ERR_FINGER_LIMIT = -37`(单用户超 3 枚);
+UI 文案表与 web 错误映射同步。查重拒绝仍用既有 `DG_ERR_DUP_FINGER = -24`。
 
 ## 4. 分层落点(五层栈)
 
@@ -92,27 +104,36 @@ WAK 按下沿(消抖 30ms)→ EV_FINGER_STATUS(PRESSED)
 
 ### 5.2 验证按钮 1:1(v_finger 子步)
 
-用户已选定(uid)→ 提示"请按指纹" → 等下一次按压 → 采集 → LoadChar(该用户
-PageID→Buf1)与本次特征 Match(或等价单页 Search,协议冻结时定)→ ok → 成功开门/
-不匹配 → 失败(`DG_ERR_MISMATCH`,reason=4)。**5s 无 WAK 按下沿 → 取消回普通模式**
+用户已选定(uid)→ 提示"请按指纹" → 等下一次按压 → 采集 → **对该用户全部指纹
+(≤3 枚)逐一 LoadChar→Match**(PageID 取自 fingerprints 表;具体"逐一 Match"还是
+"多枚下载连续比对"在协议冻结时按模组能力定,业务语义不变)→ 任一枚 ok → 成功开门/
+全部不匹配 → 失败(`DG_ERR_MISMATCH`,reason=4)。**5s 无 WAK 按下沿 → 取消回普通模式**
 (spec §4.4);期间敲弹窗触摸续期规则与人脸一致。
 
-### 5.3 录入(enroll,mode=FINGER)
+### 5.3 录入(enroll,mode=FINGER)—— 两次按压 + 同指校验 + 双向查重【决策 B 定稿】
 
 ```
-EV_ENROLL_REQUEST(FINGER) → 置录指纹态
-  按压① → GenImg+Img2Tz(Buf1) → Search(全库) 查重
-      命中 PageID 映射 ≠ 本用户 → EV_ENROLL_RESULT(DG_ERR_DUP_FINGER)「指纹重复」
-      模组库满 → EV_ENROLL_RESULT(DG_ERR_FINGER_FULL)「指纹库已满」
-      通过 → EV_ENROLL_PROGRESS(1/2,提示"再次按压")
-  按压② → GenImg+Img2Tz(Buf2) → RegModel(合成) → Store(分配 PageID)
-      → UpChar 读出特征 512B → AES-256-CTR 加密落 DB(finger_vec + finger_page_id)
-      → EV_ENROLL_RESULT(OK) → UI 成功提示
-页面退出/取消 → 撤销录入态(已 Store 的模板 DeletChar 回滚,不留孤儿模板)
+前置检查:COUNT(fingerprints WHERE user_id) ≥3 → FINGER_LIMIT;
+          模组库满(ValidTempleteNum) → FINGER_FULL —— 都不进采集
+按压① → GenImg+Img2Tz(Buf1) → Search(全库) 查重
+      命中 PageID 反查 user_id:≠本用户 或 ==本用户(与自己已有枚重复) 
+          → EV_ENROLL_RESULT(DG_ERR_DUP_FINGER)「指纹重复,录入失败」
+      通过 → EV_ENROLL_PROGRESS(1/2,提示"请再次按压同一手指")
+按压② → GenImg+Img2Tz(Buf2) → **Match(Buf1 vs Buf2) 同指校验**
+      不一致 → 提示「两次按压指纹不一致,请用同一手指」,进度回 1/2 重采
+               (主动校验给明确文案;RegModel 对差异过大的特征也会报合成失败,作兜底)
+      一致 → RegModel(合成) → Store(分配 PageID)
+      → UpChar 读出特征 512B → AES-256-CTR 加密 → INSERT fingerprints(含 finger_vec)
+      → EV_ENROLL_RESULT(OK) → UI 成功提示(已录 n/3)
+页面退出/取消 → 撤销录入态;已 Store 的模板 DeletChar 回滚 + 删行,不留孤儿模板
 ```
 
-删除用户 → `DeletChar(PageID)` + 清列(模组通信失败时仍删 DB 行,模组留孤儿模板
-由对账机制暴露,不阻塞删用户)。清空接口(恢复出厂)→ `Empty` + 全列清 NULL。
+查重时点固定在**按压①后**:尽早失败省一次按压;此后到 Store 之间 enroll 单飞无并发,
+无需二次查重(用户要求的"录入后检查"由此覆盖——与自己的旧枚、与他人的枚同一判定,
+文案统一「指纹重复,录入失败」)。
+
+删除:编辑页**逐枚删除**(DeletChar+删行);删除用户 → 删其全部模板与行(模组通信
+失败仍删 DB 行,孤儿由对账暴露,不阻塞删用户)。清空(恢复出厂)→ Empty + 全表清。
 
 ### 5.4 降级(同 IC 卡 §7.3)
 
@@ -125,20 +146,26 @@ reason=9 同款;退避重试,恢复上报 READY。模组上电到可响应有稳
 - WAK 抖动:驱动侧消抖 30ms;PRESSED..RELEASED 之间单次判定
 - 手指按住不放:只判一次,RELEASED 后才允许新流程(防按住连环开门)
 - 干手指/按压不实(采集失败确认码):普通模式静默复位等待;录入模式提示重按,不占进度
+- **两次按压不同手指**:Match 同指校验(§5.3)明确提示重采;RegModel 合成失败兜底
+- **与自己已有枚重复**(同一用户把同一根手指录第二遍):Search 命中反查 ==自己
+  → 同样 DUP_FINGER 拒绝,文案与他人重复一致
 - 录入中途拔手/超时(单次采集 5s):取消本次,进度回 0
 - 模组无响应/串口错:连续 3 次 → 降级;回复后自动恢复
 - 查重 Search 与 Store 之间的竞态(录入时他人同时录):enroll 单飞(录入态互斥),无并发
-- 容量:录入前查 ValidTempleteNum(待手册核对指令名),满 → FINGER_FULL,不进采集
+- 容量:录入前查 ValidTempleteNum(待手册核对指令名),满 → FINGER_FULL,不进采集;
+  单用户第 4 枚 → FINGER_LIMIT,两者文案区分
 - 掉电:Store 成功但 UpChar/落库前掉电 → 模组有模板、DB 无映射 = 孤儿,boot 对账暴露
-- 2000 用户 vs 模组容量:提示语义明确到"指纹库已满"而非"添加失败",区分于 USER_LIMIT
+- 上限 2000 vs 模组容量:满各自显式提示(FULL/LIMIT/USER_LIMIT 三者语义不同,不混用)
 
 ## 7. 测试与 mock(完成的定义)
 
 - `uart_hal` 自带 mock 回环:框架级已有,直接用
 - `fp_as608` 协议层纯函数单测 `test_fp_proto`:组包/校验和/分帧粘包/应答码解析
   (码值表冻结后写死断言)
-- provider 注入层 mock(替代真模组):`test_fp_enroll`(两次按压进度/查重/回滚/容量满)、
-  `test_fsm_finger`(命中/黑名单/未开/陌生四路 reason、v_finger、按住只判一次)
+- provider 注入层 mock(替代真模组):`test_fp_enroll`(两次按压进度/同指校验不一致
+  重采/查重含与己重复/取消回滚/FULL/LIMIT/第 4 枚拒绝/逐枚删除)、
+  `test_fsm_finger`(命中/黑名单/未开/陌生四路 reason、v_finger 对 3 枚逐一、按住只判一次)
+- DB 迁移测试:users.finger_vec → fingerprints 表幂等迁移(有数据/空库两态)
 - 板上验收:真指 1:N 开门、1:1、录入重复指被拒、按住不开两门、拔模组降级提示、
   Search 实测耗时(1000 枚库,<1s 期望,超了要记录再议)
 
@@ -150,11 +177,19 @@ reason=9 同款;退避重试,恢复上报 READY。模组上电到可响应有稳
 | `fp.baud` | `57600` | 待手册核对 |
 | `fp.wak_gpio` | `0`(占位) | WAK 引脚号,同 `access.relay_gpio_line` 先例,待硬件确认 |
 
-## 9. 待你确认的决策点(回复后冻结协议文档)
+## 9. 决策记录与剩余开放项
 
-1. **决策 A**(模板:模块内+DB 副本)是否通过 —— 决定 `finger_vec` 列语义微调与
-   spec-database 的一句话修订;
-2. **决策 B**(users 表加 `finger_page_id` 列,幂等迁移)是否通过;
-3. **决策 C**(新错误码 `DG_ERR_FINGER_FULL=-36` + UI/web 文案)是否通过;
-4. AS608 随机手册(指令码值/应答码表/容量/波特率/WAK 极性)提供后,协议文档
-   `FINGERPRINT_PROTOCOL.md` 按本文框架逐条冻结,复刻 ICCARD_PROTOCOL 的精度。
+**已拍板(2026-09-27)**:决策 A(模组内+DB 副本,容量满提示即可)、决策 B
+(**每用户最多 3 枚** → fingerprints 独立表 + users.finger_vec 幂等迁移废弃 +
+编辑页 n/3 UI)、决策 C(DG_ERR_FINGER_FULL=-36 / DG_ERR_FINGER_LIMIT=-37)。
+录入两注意点落法:①不同手指 → 按压②后 Match(Buf1,Buf2) 同指校验,明确文案重采;
+②查重含与自己重复 → Search 命中反查 user_id,==自己/≠自己 同判 DUP_FINGER
+「指纹重复,录入失败」,时点在按压①后。
+
+**剩余开放项(不阻塞 DB/业务层先行开发)**:
+
+1. AS608 随机手册(指令码值/应答码表/容量/波特率/WAK 极性)到位后,协议文档
+   `FINGERPRINT_PROTOCOL.md` 按本文框架逐条冻结,复刻 ICCARD_PROTOCOL 的精度;
+   1:1 的"≤3 枚逐一 Match"实现取法(逐枚 LoadChar+Match 或多枚下载连续比对)在
+   冻结时按模组能力定。
+2. WAK 引脚号与串口节点(§8 占位,硬件接线后确认)。

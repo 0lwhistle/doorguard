@@ -4,6 +4,21 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-27(续九)指纹决策拍板:每用户最多 3 枚 → DB 模型变更定稿(仅文档)
+
+**做了什么**:用户确认决策 A(模组内+DB 副本,容量满提示即可)并提出决策 B 变更:
+**每用户最多 3 枚指纹**。FINGERPRINT_AS608.md 更新为定案版:users 表单列方案作废,
+改**独立 fingerprints 表**(user_id/page_id UNIQUE/finger_vec 副本/created_at),
+users.finger_vec 幂等迁移废弃;新错误码拆两个 = FINGER_FULL(-36 模组满)/
+**FINGER_LIMIT(-37 单用户超 3 枚)**;录入两注意点落法:①不同手指 → 按压②后
+Match(Buf1,Buf2) **同指校验**,明确文案「两次按压指纹不一致」重采(RegModel 失败
+兜底);②查重**含与自己重复** → Search 命中反查 user_id,==自己/≠自己 同判
+DUP_FINGER「指纹重复,录入失败」,时点固定按压①后;1:1 改对该用户 ≤3 枚逐一 Match;
+编辑页指纹区「已录 n/3」+逐枚删除;边界/测试补齐(迁移两态、第 4 枚拒绝、FULL/LIMIT
+文案区分)。**结论**:两注意点均可行;spec-database 修订随实现一并做(落地前以本文
+§3 为准)。**下一步**:手册到位冻结 FINGERPRINT_PROTOCOL.md;IC 驱动用户实现中。
+
+---
 ## 2026-09-27(续八)IC 引脚定案 + AS608 指纹模组方案设计(仅文档)
 
 **做了什么**:①ICCARD_PROTOCOL 按 IC 模组实际引脚(SDA/SCK/MOSI/MISO/RQ/RST)定案:
