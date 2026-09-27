@@ -378,6 +378,12 @@ static void watchdog_once(void)
 
 int main(int argc, char *argv[])
 {
+    /* 时区:SNTP 同步的是 UTC,展示走 localtime;rootfs /etc/localtime 默认
+     * UTC(=显示比北京时间慢 8 小时,2026-09-27 用户反馈"NTP 不准"的根因)。
+     * POSIX TZ "CST-8" = UTC+8 无夏令时,glibc 内建解析不依赖 tzdata 文件;
+     * 必须先于一切 localtime 调用(UI 时钟/web 时间/日志/UI 时间戳) */
+    setenv("TZ", "CST-8", 1);
+
     /* 装配参数:相机节点(sim=图片目录)/ 语言表 / 配置双文件 */
 #ifdef DG_SIM
     s_def_path = "configs/default.json";
