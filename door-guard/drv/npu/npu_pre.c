@@ -115,10 +115,12 @@ int npu_pre_nv12_crop_rgb(const uint8_t *nv12, int stride,
         return DG_ERR_PARAM;
     if (src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0)
         return DG_ERR_PARAM;
-    /* 越界/奇数坐标直接拒:YUV420 裁剪奇数偏移会拿到错色度,静默出错图 */
+    /* 越界/奇数坐标直接拒:YUV420 裁剪奇数偏移会拿到错色度,静默出错图。
+     * dst_w 另须 4 对齐:librga 对 RGB888 目标宽度 stride 有硬约束,
+     * 非对齐在 improcess 里才报错(板上实测),这里提前拦掉好排查 */
     if (rx < 0 || ry < 0 || rw <= 0 || rh <= 0 ||
         rx + rw > src_w || ry + rh > src_h ||
-        (rx & 1) || (ry & 1) || (rw & 1) || (rh & 1))
+        (rx & 1) || (ry & 1) || (rw & 1) || (rh & 1) || (dst_w & 3))
         return DG_ERR_PARAM;
     if (stride < src_w)
         stride = src_w;

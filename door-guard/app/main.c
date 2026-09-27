@@ -398,12 +398,16 @@ int main(int argc, char *argv[])
     s_def_path = "configs/default.json";
     s_cur_path = "sim/data/cur_config.json";
     s_camera_dir = (argc > 1) ? argv[1] : "sim/media";
+    s_ui_args.lang_dir = "ui/lang";         /* sim 工作目录=仓库根,相对路径成立 */
 #else
     s_def_path = "/etc/door-guard/default.json";
     s_cur_path = "/userdata/doorguard/cur_config.json";
     s_camera_dir = (argc > 1) ? argv[1] : "/dev/video0";
+    /* 板上进程 cwd=/(S60 直起),相对 "ui/lang" 会解析到 /ui/lang——语言表
+     * 从未加载成功(2026-09-28 板上日志实锤:WARN 不存在+中英切换静默无效;
+     * 中文恰是回退原文才无人察觉)。资源由 dg-deploy 直推 /root/ui/lang */
+    s_ui_args.lang_dir = "/root/ui/lang";
 #endif
-    s_ui_args.lang_dir = "ui/lang";
     s_ui_args.camera_dir = s_camera_dir;
 
     if (holder_init() != HOLDER_OK) {

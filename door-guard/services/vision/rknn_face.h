@@ -131,8 +131,12 @@ void rknn_align_warp_ex(const uint8_t *src, int sw, int sh, const float m[6],
 /** 原地 L2 归一化(零向量保持不变) */
 void rknn_l2_normalize(float *v, int n);
 
-/** 余弦相似度(0~1 视用途;未归一化也正确,已归一化则退化为点积) */
+/** 余弦相似度(0~1 视用途;未归一化也正确,已归一化则退化为点积)。
+ *  aarch64 走 NEON(1:N 检索热内核),其他平台标量 */
 float rknn_cosine(const float *a, const float *b, int n);
+
+/** 标量实现:NEON 版的正确性基准与性能对比参照(tools/rknn_rec_test bench) */
+float rknn_cosine_scalar(const float *a, const float *b, int n);
 
 /**
  * RGB888 → ArcFace 输入:逐像素 (x-127.5)/127.5 写入 float32。

@@ -7,6 +7,10 @@
  */
 #include "rknn_face.h"
 
+#if defined(__aarch64__) || defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 #include <math.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -409,7 +413,8 @@ void rknn_l2_normalize(float *v, int n)
         v[i] *= inv;
 }
 
-float rknn_cosine(const float *a, const float *b, int n)
+/* 标量余弦(正确性基准/NEON 不可用时的回退;bench 对比也用它) */
+float rknn_cosine_scalar(const float *a, const float *b, int n)
 {
     if (!a || !b || n <= 0)
         return 0.0f;
@@ -421,6 +426,40 @@ float rknn_cosine(const float *a, const float *b, int n)
     }
     const float d = sqrtf(na) * sqrtf(nb);
     return d > 0.0f ? dot / d : 0.0f;
+}
+
+float rknn_cosine(const float *a, const float *b, int n)
+{
+#if defined(__aarch64__) || defined(__ARM_NEON)
+    /* NEON 路径(2026-09-28):1:N 检索对库里每条特征调一次本函数,
+     * 2000 用户上限 × 512 维是纯 CPU 热点;4 路 FMA 累加,尾段标量补。
+     * 累加顺序与标量版不同,末位 ulp 有差(阈值判断在 0.3~1.0,无影响) */
+    if (!a || !b || n <= 0)
+        return 0.0f;
+    float32x4_t vd = vdupq_n_f32(0.0f);
+    float32x4_t vna = vdupq_n_f32(0.0f);
+    float32x4_t vnb = vdupq_n_f32(0.0f);
+    int i = 0;
+    for (; i + 4 <= n; i += 4) {
+        const float32x4_t x = vld1q_f32(a + i);
+        const float32x4_t y = vld1q_f32(b + i);
+        vd = vfmaq_f32(vd, x, y);
+        vna = vfmaq_f32(vna, x, x);
+        vnb = vfmaq_f32(vnb, y, y);
+    }
+    float dot = vaddvq_f32(vd);
+    float na = vaddvq_f32(vna);
+    float nb = vaddvq_f32(vnb);
+    for (; i < n; i++) {
+        dot += a[i] * b[i];
+        na += a[i] * a[i];
+        nb += b[i] * b[i];
+    }
+    const float d = sqrtf(na) * sqrtf(nb);
+    return d > 0.0f ? dot / d : 0.0f;
+#else
+    return rknn_cosine_scalar(a, b, n);
+#endif
 }
 
 void rknn_rgb_norm_f32(const uint8_t *rgb, int n_pixels, float *out)

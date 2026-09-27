@@ -463,7 +463,10 @@ static bool recognize(const uint8_t *nv12, int w, int h,
     if (side < 32)
         return false;
 
-    const int dw = side < RKNN_ROI_MAX ? side : RKNN_ROI_MAX;
+    /* RGB888 目标宽度须 4 对齐(RGA 硬约束,librga 对 246/242 这类
+     * side≡2(mod 4) 会拒:该帧识别被整体跳过 = 间歇性识别失败,
+     * 2026-09-28 板上 ERROR 实锤)。side≥64,向下对齐仍 ≥64 */
+    const int dw = (side < RKNN_ROI_MAX ? side : RKNN_ROI_MAX) & ~3;
     if (npu_pre_nv12_crop_rgb(nv12, w, w, h, rx, ry, side, side, s_roi, dw, dw) != DG_OK)
         return false;
 
