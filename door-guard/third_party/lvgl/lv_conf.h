@@ -396,7 +396,9 @@
 /*Enable handling large font and/or fonts with a lot of characters.
  *The limit depends on the font size, font face and bpp.
  *Compiler error will be triggered if a font needs it.*/
-#define LV_FONT_FMT_TXT_LARGE 0
+/* 2026-09-27:16/26/30px 字体并入 GB2312 全集(6763 字)后位图超 1MB,
+ * 20 位 bitmap_index 溢出,必须开 LARGE(索引升 32 位) */
+#define LV_FONT_FMT_TXT_LARGE 1
 
 /*Enables/disables support for compressed fonts.*/
 #define LV_USE_FONT_COMPRESSED 0
