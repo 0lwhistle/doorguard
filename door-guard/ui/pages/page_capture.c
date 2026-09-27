@@ -3,18 +3,20 @@
  *
  * 用户在编辑页点「人脸·录入」进本页:实时预览 + 质量实时提示 +
  * [拍摄][取消]。只有质量合格(清晰/够大/检测分够)才允许拍;
- * 拍下后回看刚入库的照片,可 [重拍] 或 [完成] 返回编辑页。
+ * 拍下后回看照片(草稿,保存才落库),可 [重拍] 或 [完成] 返回编辑页。
  *
  * 分层(pages 层,纯视图 + 页内小状态机):
  *   预览    dg_preview 控件(plane 直通/软渲染双模,20ms 泵,与主页同款)
  *   质量    UI_EVT_QUALITY(verdict → 具体文案/颜色,控制拍摄使能)
  *   拍摄    EV_ENROLL_REQUEST(DG_ENROLL_FACE)→ 等 EV_ENROLL_RESULT(5s 超时)
- *   回看    dg_avatar_get(FULL)——照片已同帧入库,从库里读回来最可信
+ *   回看    enroll 服务人脸**草稿**(2026-09-27 起采集不落库,保存才落)
+ *           → dg_avatar_decode 内存解码;「保存后生效」文案明示草稿语义
  * 质量判定枚举来自 services/vision/face_quality.h(只读契约:纯枚举,
  * 与事件的 verdict 字段同源,不引入业务调用)。
  */
 #include "dg_log.h"
 #include "err.h"
+#include "enroll_service.h"
 #include "event_bus.h"
 #include "events.h"
 #include "face_quality.h"
@@ -151,10 +153,15 @@ static void set_state_review(void)
         lv_obj_clear_flag(s_btn_retake, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(s_btn_done, LV_OBJ_FLAG_HIDDEN);
     }
-    hint_set(_("已拍摄"), DG_COL_OK());
+    hint_set(_("已拍摄，保存后生效"), DG_COL_OK());
 
-    /* 刚入库的照片从 DB 读回(dg_avatar 缓存已失效,必定是新图) */
-    const lv_image_dsc_t *dsc = dg_avatar_get(s_uid, DG_AVATAR_FULL);
+    /* 回看 = enroll 服务草稿(未落库),内存解码;取不到说明草稿异常,
+     * 回看窗隐藏(不阻塞流程,编辑页会再以 DB 现值兜底显示) */
+    const uint8_t *jpeg = NULL;
+    size_t jlen = 0;
+    const lv_image_dsc_t *dsc = NULL;
+    if (enroll_service_draft_avatar(s_uid, &jpeg, &jlen))
+        dsc = dg_avatar_decode(jpeg, jlen, DG_AVATAR_FULL);
     if (dsc && s_photo) {
         lv_image_set_src(s_photo, dsc);
         lv_obj_clear_flag(s_photo, LV_OBJ_FLAG_HIDDEN);
@@ -230,7 +237,7 @@ static void on_evt(const ui_evt_t *evt)
             break;
         wait_cancel();
         if (evt->enroll.err == DG_OK) {
-            dg_avatar_invalidate(s_uid); /* 新照片,缓存作废 */
+            /* OK = 草稿就绪(未落库);回看经 set_state_review 读草稿 */
             set_state_review();
         } else {
             dg_popup_fail(_("录入失败,请重拍"), 2000, NULL, NULL);

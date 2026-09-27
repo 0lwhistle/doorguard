@@ -34,6 +34,14 @@ typedef enum {
  */
 const lv_image_dsc_t *dg_avatar_get(const char *uid, dg_avatar_size_t size);
 
+/**
+ * 从内存 JPEG 直接解码(不入 uid 缓存;2026-09-27 人脸草稿预览用):
+ * 拍摄回看/编辑页在「已拍未保存」阶段显示的图像来自 enroll 服务草稿
+ * 而非 DB。每次调用重解码,单槽——下次调用即覆盖。
+ */
+const lv_image_dsc_t *dg_avatar_decode(const uint8_t *jpeg, size_t len,
+                                       dg_avatar_size_t size);
+
 /** 头像数据变化后失效缓存(录入成功 / 清除人脸 / 删除用户;NULL = 全部) */
 void dg_avatar_invalidate(const char *uid);
 

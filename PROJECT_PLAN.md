@@ -76,7 +76,19 @@ tap-highlight 透明、.btn/.card hover 包 @media (hover: hover)。顺修 devic
 WSL 宿主 sim:web_test.sh 67 项(静态/鉴权/405/日志分页/NTP+WS/账号/OTA/mDNS
 报文级/登录风控)+ api_test.sh 28 项(用户 CRUD/门禁设置校验)+ vitest 45 +
 frontend_check + ctest 32。**坑**:root 跑 sim 绑 80 不回退,须先给
-sim/data/cur_config.json 种 network.web_port=8080。 |
+sim/data/cur_config.json 种 network.web_port=8080。⑩ **2026-09-27(续十三:UI
+色彩规范+编辑全字段草稿化,33/33 绿,交叉编译零告警)**:**色彩**(用户反馈
+「字体要黑色不然看不清/删除相关用红色」):浅底控件按下变主蓝时文字/图标
+同步转白(dg_btn 浅色变体+菜单宫格卡);DG_OPA_TEXT_DIM 50→70;**删除类一律
+红色**(dg_btn_create_danger 红底白字/DG_COLOR_ERR_DARK/dg_popup_choice_ex
+red_mask 红色选项——删除用户行、删除确认与清除人脸选项)。**全字段草稿化**
+(用户反馈「编辑不要立即落盘,预览,点保存才落盘」):enroll 服务改两段式
+——采集回执 OK=草稿就绪不落库(特征+头像暂存服务内单槽);UI 保存=
+commit_draft(查重落库一次完成,DUP_FACE 保存时报草稿保留),直接退出=
+discard_draft 安全擦除;清除人脸改草稿标志同步清;dirty 全覆盖(字段/ADD
+待建/人脸草稿/清除标志);编辑页「已拍摄,未保存」「待清除,未保存」+
+内存头像预览(dg_avatar_decode);测试改写(test_enroll_flow 7 段、e2e commit
+语义);直调登记 proposal §1。 |
 
 ---
 

@@ -182,7 +182,8 @@ add_library(dg_ui STATIC
     ui/font/dg_font_cn_40.c
     ${DG_WIDGET_SRCS}
 )
-target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DIR}/services/access)
+target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DIR}/services/access
+                                        ${CMAKE_SOURCE_DIR}/services/enroll)
 target_link_libraries(dg_ui PUBLIC lvgl dg_config dg_access dg_storage dg_jpeg
                                    dg_net_info)
 

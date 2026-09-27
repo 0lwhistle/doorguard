@@ -30,6 +30,8 @@ static void on_exit_pick(void *ud, int idx)
             exit_now();
         return;
     }
+    if (s_ops && s_ops->discard)
+        s_ops->discard();                    /* 直接退出:先丢页面级草稿 */
     exit_now();                              /* 直接退出(放弃修改) */
 }
 

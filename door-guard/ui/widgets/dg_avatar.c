@@ -43,6 +43,10 @@ typedef struct {
 static slot_t s_full[FULL_SLOTS];
 static slot_t s_thumb[THUMB_SLOTS];
 static int s_full_pos, s_thumb_pos;
+/* 草稿单槽:数据来自 enroll 服务内存草稿(未落库),不进轮转池。
+ * key 用哨兵前缀,真实 uid 永不命中它;invalidate 时一并清 */
+static slot_t s_draft;
+#define DRAFT_KEY "\x01#draft"
 
 /* 解码暂存(仅 LVGL 线程使用):JPEG 明文 + RGB888 中转,避免逐槽扩栈 */
 static uint8_t s_jpeg[DG_AVATAR_JPEG_MAX];
@@ -71,15 +75,14 @@ static slot_t *pool_pick(dg_avatar_size_t size)
     return s;
 }
 
-static const lv_image_dsc_t *load_into(slot_t *s, const char *uid)
+static const lv_image_dsc_t *decode_fill(slot_t *s, const char *key,
+                                         const uint8_t *jpeg, size_t jlen)
 {
-    size_t jlen = 0;
     const int denom = (s->dsc.header.w == THUMB_MAX) ? 4 : 1;
     int w = 0, h = 0;
     const bool ok =
-        db_user_get_avatar(uid, s_jpeg, sizeof(s_jpeg), &jlen) == DG_OK &&
         jlen > 0 &&
-        dg_jpeg_decode_rgb(s_jpeg, jlen, denom, s_rgb, sizeof(s_rgb), &w, &h)
+        dg_jpeg_decode_rgb(jpeg, jlen, denom, s_rgb, sizeof(s_rgb), &w, &h)
             == DG_OK && w > 0 && h > 0;
 
     if (!ok) {
@@ -111,9 +114,18 @@ static const lv_image_dsc_t *load_into(slot_t *s, const char *uid)
     s->dsc.data_size = (uint32_t)((size_t)w * h * AV_BPP);
     s->dsc.header.cf = LV_COLOR_FORMAT_RGB888;    /* 与 3B 缓冲一致(见文件头 ⚠️) */
     s->dsc.data = s->px;
-    snprintf(s->uid, sizeof(s->uid), "%s", uid);
+    snprintf(s->uid, sizeof(s->uid), "%s", key);
     s->used = true;
     return &s->dsc;
+}
+
+static const lv_image_dsc_t *load_into(slot_t *s, const char *uid)
+{
+    size_t jlen = 0;
+    const bool ok = db_user_get_avatar(uid, s_jpeg, sizeof(s_jpeg), &jlen) == DG_OK;
+    if (!ok)
+        return decode_fill(s, uid, NULL, 0);
+    return decode_fill(s, uid, s_jpeg, jlen);
 }
 
 const lv_image_dsc_t *dg_avatar_get(const char *uid, dg_avatar_size_t size)
@@ -128,17 +140,27 @@ const lv_image_dsc_t *dg_avatar_get(const char *uid, dg_avatar_size_t size)
             return &pool[i].dsc;        /* 命中:近期查询过的 uid 不重解码 */
     }
     slot_t *s = pool_pick(size);
-    /* 目标尺寸经 dsc.header.w 传给 load_into 选缩放倍率:先填假头再装载 */
+    /* 目标尺寸经 dsc.header.w 传给 decode_fill 选缩放倍率:先填假头再装载 */
     s->dsc.header.w = (size == DG_AVATAR_FULL) ? FULL_MAX : THUMB_MAX;
     return load_into(s, uid);
+}
+
+const lv_image_dsc_t *dg_avatar_decode(const uint8_t *jpeg, size_t len,
+                                       dg_avatar_size_t size)
+{
+    if (!jpeg || len == 0)
+        return NULL;
+    s_draft.dsc.header.w = (size == DG_AVATAR_FULL) ? FULL_MAX : THUMB_MAX;
+    /* 草稿每次采集都变,不做 uid 缓存命中,直接重解码 */
+    return decode_fill(&s_draft, DRAFT_KEY, jpeg, len);
 }
 
 void dg_avatar_invalidate(const char *uid)
 {
     const size_t len = (uid && uid[0]) ? strlen(uid) : 0;
-    for (int p = 0; p < 2; p++) {
-        slot_t *pool = p ? s_thumb : s_full;
-        const int n = p ? THUMB_SLOTS : FULL_SLOTS;
+    for (int p = 0; p < 3; p++) {
+        slot_t *pool = (p == 0) ? s_full : (p == 1) ? s_thumb : &s_draft;
+        const int n = (p == 2) ? 1 : (p == 0) ? FULL_SLOTS : THUMB_SLOTS;
         for (int i = 0; i < n; i++) {
             if (!pool[i].used)
                 continue;

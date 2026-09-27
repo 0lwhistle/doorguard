@@ -1,11 +1,12 @@
 /*
  * page_user_edit.c — 用户编辑页(添加/编辑同一模板,2026-09-21 用户反馈重做)
  *
- * 2026-09-27 编辑模式统一(spec-ui 反馈):返回左上 / 保存右上;EDIT 的
- * 姓名/权限/密码改为**草稿**——右上「保存」才落库,有未保存修改时返回
- * 弹「保存退出/直接退出」确认(dg_edit_nav);特征(人脸/指纹/IC)录入
- * 动作本身即落库,不计入 dirty。特征按钮按状态显示「修改/录入」。
- * 「删除用户」移到编辑列表最下,作为一个选项。
+ * 2026-09-27 全字段草稿化(用户反馈「编辑不要立即落盘,保存才保存」):
+ * 姓名/权限/密码与此前一样攒页内草稿;**特征(人脸)草稿在 enroll 服务**
+ * ——拍摄回执 OK = 草稿就绪(未落库),本页「保存」经 commit_draft 落库,
+ * 返回「直接退出」经 discard_draft 丢弃;「清除人脸」也改为草稿标志,
+ * 保存时同步清。任何未保存修改(含 ADD 待建用户的姓名/密码)在返回时
+ * 弹「保存退出/直接退出」确认(dg_edit_nav)。
  *
  * 两种模式:
  *   EDIT:行点击进入(带 uid),字段改动攒草稿,「保存」提交;
@@ -17,6 +18,7 @@
 #include "err.h"
 #include "event_bus.h"
 #include "events.h"
+#include "enroll_service.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
 #include "presenters/presenter_capture.h"
@@ -42,7 +44,8 @@ static char  s_pending_pwd[DG_PWD_MAX_LEN];
 static char  s_draft_name[DG_NAME_LEN];
 static int32_t s_draft_role;
 static char  s_draft_pwd[DG_PWD_MAX_LEN];   /* 空 = 不修改密码 */
-static bool  s_dirty;
+static bool  s_dirty;                        /* 姓名/权限/密码有无改动 */
+static bool  s_face_clear_pending;           /* 保存时清除人脸(草稿语义) */
 
 static lv_obj_t *s_title;
 static lv_obj_t *s_val_name, *s_val_role, *s_val_pwd, *s_val_face,
@@ -193,17 +196,36 @@ static void refresh(void)
     val_set(s_val_name, s_draft_name[0] ? s_draft_name : _("无"));
     val_set(s_val_role, role_name(s_draft_role));
     val_set(s_val_pwd, s_draft_pwd[0] ? _("已修改") : _("已设置"));
-    /* 特征按钮:已录入=「修改」,未录入=「录入」 */
-    val_set(s_val_face, rec.face_vec_len > 0 ? _("已录入") : _("无"));
-    dg_btn_set_label(s_btn_face, rec.face_vec_len > 0 ? _("修改") : _("录入"));
+
+    /* 人脸行三态草稿显示:服务内草稿(已拍未保存)> 清除标志(待清除)>
+     * DB 现值。按钮一律「修改」;弹窗内提供 重录/清除 */
+    const bool face_draft = enroll_service_draft_active(s_uid);
+    if (face_draft)
+        val_set(s_val_face, _("已拍摄，未保存"));
+    else if (s_face_clear_pending)
+        val_set(s_val_face, _("待清除，未保存"));
+    else
+        val_set(s_val_face, rec.face_vec_len > 0 ? _("已录入") : _("无"));
+    dg_btn_set_label(s_btn_face, _("修改"));
+
     val_set(s_val_finger, rec.finger_vec_len > 0 ? _("已录入") : _("无"));
     dg_btn_set_label(s_btn_finger, rec.finger_vec_len > 0 ? _("修改") : _("录入"));
     val_set(s_val_ic, rec.ic_card[0] ? _("已录入") : _("无"));
     dg_btn_set_label(s_btn_ic, rec.ic_card[0] ? _("修改") : _("录入"));
-    /* 头像预览:有人脸才有头像(同一生命周期);人脸行加高到 128,预览 96×96 */
+
+    /* 头像预览:草稿期用内存图(dg_avatar_decode),已落库才走 DB 缓存。
+     * 人脸行加高到 128,预览 96×96 */
     if (s_img_face) {
-        const lv_image_dsc_t *av = dg_avatar_get(s_uid, DG_AVATAR_FULL);
-        if (av && rec.face_vec_len > 0) {
+        const lv_image_dsc_t *av = NULL;
+        if (face_draft) {
+            const uint8_t *jpeg = NULL;
+            size_t jlen = 0;
+            if (enroll_service_draft_avatar(s_uid, &jpeg, &jlen))
+                av = dg_avatar_decode(jpeg, jlen, DG_AVATAR_FULL);
+        } else if (rec.face_vec_len > 0) {
+            av = dg_avatar_get(s_uid, DG_AVATAR_FULL);
+        }
+        if (av) {
             lv_image_set_src(s_img_face, av);
             lv_obj_clear_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
         } else {
@@ -300,10 +322,11 @@ static void on_face(lv_event_t *e)
     user_rec_t rec;
     if (db_user_get(s_uid, &rec) != DG_OK)
         return;
-    if (rec.face_vec_len > 0) {
-        /* 已录入:给“重录 / 清除”两个选项(弹窗带取消);重录走拍摄页 */
+    if (rec.face_vec_len > 0 || enroll_service_draft_active(s_uid)) {
+        /* 已有(库内或草稿):重录 / 清除(清除=红色,弹窗带取消) */
         const char *const opts[] = { _("重录"), _("清除") };
-        dg_popup_choice(_("人脸"), opts, 2, apply_face_pick, NULL, NULL);
+        dg_popup_choice_ex(_("人脸"), opts, 2, 1u << 1, apply_face_pick,
+                           NULL, NULL);
         return;
     }
     goto_capture();
@@ -313,16 +336,19 @@ static void apply_face_pick(void *ud, int idx)
 {
     (void)ud;
     if (idx == 0) {
-        goto_capture();
+        goto_capture();                  /* 重录:新草稿覆盖旧草稿 */
         return;
     }
-    /* 清除人脸(头像随行消失:db_user_clear_face 连带清 avatar) */
-    ev_enroll_request_t ev;
-    memset(&ev, 0, sizeof(ev));
-    snprintf(ev.user_id, sizeof(ev.user_id), "%s", s_uid);
-    ev.kind = DG_ENROLL_FACE_CLEAR;
-    ev.seq = (uint32_t)time(NULL);
-    EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
+    /* 清除 = 草稿语义:先丢服务内草稿(若有),再挂清除标志;保存才生效。
+     * DB 本就无人脸且无草稿时无事可做 */
+    enroll_service_discard_draft(s_uid);
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    if (db_user_get(s_uid, &rec) == DG_OK && rec.face_vec_len > 0) {
+        s_face_clear_pending = true;
+        s_dirty = true;
+    }
+    refresh();
 }
 
 static void on_finger(lv_event_t *e)
@@ -367,7 +393,7 @@ static bool save(void)
         return true;
     }
 
-    /* EDIT:草稿校验 → 新取库值(只覆写字段,特征不动)→ 落库 */
+    /* EDIT:草稿校验 → 新取库值(只覆写字段)→ 落库 → 特征草稿提交 */
     if (dg_ui_valid_name(s_draft_name)) {
         dg_popup_fail(_("姓名不合法"), 1500, NULL, NULL);
         return false;
@@ -392,7 +418,28 @@ static bool save(void)
         return false;
     }
     s_draft_pwd[0] = '\0';
-    s_dirty = false;
+    s_dirty = false;                    /* 字段部分已保存;dirty 只剩特征草稿 */
+
+    /* 特征草稿:有人脸草稿 = commit(草稿覆盖清除语义);否则清除标志生效 */
+    if (enroll_service_draft_active(s_uid)) {
+        rc = enroll_service_commit_draft(s_uid);
+        if (rc != DG_OK) {
+            /* 查重冲突等:草稿保留,可重拍覆盖或返回时放弃 */
+            dg_popup_fail(err_text(rc), 2000, NULL, NULL);
+            refresh();
+            return false;
+        }
+        dg_avatar_invalidate(s_uid);    /* DB 头像已换,缓存作废重解码 */
+    } else if (s_face_clear_pending) {
+        rc = enroll_service_clear_face(s_uid);
+        if (rc != DG_OK) {
+            dg_popup_fail(err_text(rc), 2000, NULL, NULL);
+            refresh();
+            return false;
+        }
+        dg_avatar_invalidate(s_uid);
+    }
+    s_face_clear_pending = false;
     dg_popup_success(_("已保存"), 800, NULL, NULL);
     refresh();
     return true;
@@ -417,19 +464,40 @@ static void on_del(lv_event_t *e)
 {
     (void)e;
     const char *const opts[] = { _("删除") };
-    dg_popup_choice(_("确认删除该用户"), opts, 1, apply_del, NULL, NULL);
+    dg_popup_choice_ex(_("确认删除该用户"), opts, 1, 1u << 0, apply_del,
+                       NULL, NULL);      /* 删除=红色选项(破坏性) */
 }
 
-/* ---- 统一编辑导航(左上返回 + 右上保存 + 未保存退出确认) ---- */
+/* ---- 统一编辑导航(左上返回 + 右上保存 + 未保存退出确认) ----
+ * dirty 全覆盖(2026-09-27):字段草稿、ADD 待建内容的姓名/密码、
+ * 服务内人脸草稿、人脸清除标志——任何一种存在,返回都询问 */
 
 static bool nav_is_dirty(void)
 {
-    return s_dirty;
+    if (s_dirty)
+        return true;
+    if (s_add_mode && (s_pending_name[0] || s_pending_has_pwd))
+        return true;                     /* ADD:填了东西还没建用户 */
+    if (enroll_service_draft_active(s_uid))
+        return true;                     /* 人脸已拍未保存 */
+    return s_face_clear_pending;
+}
+
+/* 「直接退出」:丢弃全部未保存草稿(字段草稿随页面静态清零) */
+static void nav_discard(void)
+{
+    enroll_service_discard_draft(s_uid);
+    s_face_clear_pending = false;
+    s_dirty = false;
+    s_pending_name[0] = '\0';
+    s_pending_has_pwd = false;
+    memset(s_pending_pwd, 0, sizeof(s_pending_pwd));
 }
 
 static const dg_edit_nav_ops_t s_nav_ops = {
     .is_dirty = nav_is_dirty,
     .save = save,
+    .discard = nav_discard,
 };
 
 /* ---- 录入结果回执(桥转发,UI 线程;人脸录入的回执由拍摄页处理,这里只管清除/删除) ---- */
@@ -517,8 +585,8 @@ void page_user_edit_create(lv_obj_t *parent)
     row = row_create(col, _("IC卡"), &s_val_ic, NULL);
     s_btn_ic = row_action_btn_label(row, _("录入"), on_ic);
 
-    /* 删除用户:编辑列表最下一项(仅 EDIT;ADD 无此选项) */
-    s_row_del = dg_btn_create_light(col, LV_SYMBOL_TRASH, _("删除用户"));
+    /* 删除用户:编辑列表最下一项(仅 EDIT;ADD 无此选项)。删除类操作=红 */
+    s_row_del = dg_btn_create_danger(col, LV_SYMBOL_TRASH, _("删除用户"));
     lv_obj_set_size(s_row_del, DG_SCREEN_W - 2 * DG_PAD, 88);
     lv_obj_add_event_cb(s_row_del, on_del, LV_EVENT_CLICKED, NULL);
 
@@ -540,9 +608,15 @@ void page_user_edit_destroy(void)
 
 void page_user_edit_open(const char *uid)
 {
+    /* 换编辑对象:上一位用户的遗留人脸草稿永远等不到保存,当场作废
+     * (同 uid 重进则保留草稿,预览与「保存」依然可用) */
+    if (s_uid[0] && (!uid || strcmp(uid, s_uid) != 0))
+        enroll_service_discard_draft(s_uid);
+
     s_pending_name[0] = '\0';
     s_pending_has_pwd = false;
     memset(s_pending_pwd, 0, sizeof(s_pending_pwd));
+    s_face_clear_pending = false;
 
     /* 按“用户是否存在”自判模式:存在 = 编辑;不存在 = 添加(ID 为待创建)。
      * 列表页因此不需要知道模式语义——传入 ID 进来就是同一个入口。 */

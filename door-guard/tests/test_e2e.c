@@ -141,7 +141,8 @@ int main(void)
     DG_CHECK(db_user_set_password(&u, "1234") == DG_OK);
     DG_CHECK(db_user_add(&u) == DG_OK);
 
-    /* ---- E2E-1 录入:请求 → 抓取 → 查重入库 → 回执 ok → 库内可查 ---- */
+    /* ---- E2E-1 录入:请求 → 抓取 → **草稿就绪(不落库)** → commit → 库内可查
+     *     (2026-09-27 两段式草稿:回执 OK 只代表特征已采集,保存才落库) ---- */
     ev_enroll_request_t req;
     memset(&req, 0, sizeof(req));
     snprintf(req.user_id, sizeof(req.user_id), "10001");
@@ -157,6 +158,9 @@ int main(void)
     DG_CHECK(atomic_load(&s_enroll_err) == DG_OK);
 
     user_rec_t got;
+    DG_CHECK(db_user_get("10001", &got) == DG_OK);
+    DG_CHECK(got.face_vec_len == 0);            /* 草稿语义:DB 未变 */
+    DG_CHECK(enroll_service_commit_draft("10001") == DG_OK);   /* UI「保存」 */
     DG_CHECK(db_user_get("10001", &got) == DG_OK);
     DG_CHECK(got.face_vec_len > 0);             /* 特征已入库(密文) */
 

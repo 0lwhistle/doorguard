@@ -21,6 +21,8 @@ typedef struct {
     /** 保存动作(与右上保存按钮同一动作);返回 true=成功,dg_edit_nav
      *  随即执行返回;false=留在页面(校验失败等)。「保存退出」复用它 */
     bool (*save)(void);
+    /** 「直接退出」时丢弃未保存草稿(可选;页面级内存草稿在此清) */
+    void (*discard)(void);
 } dg_edit_nav_ops_t;
 
 /**

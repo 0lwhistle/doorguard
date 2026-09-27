@@ -83,7 +83,11 @@ drv 做总线级薄封装;holder 管 modules / registry 管 services 的双注�
     (KB 级 BLOB 独立于认证热路径,经专用接口,不入 user_rec_t;2026-09-21);
   - 视觉/编辑页 → `modules/jpeg` 编解码(拍摄时一次编码 / 显示时解码,几 ms);
   - `page_home` → `net_info_primary_ipv4`(主页网络图标 1s 轮询,纯 getifaddrs
-    无阻塞;外网探测的阻塞版 is_online 不得在 UI 线程调;2026-09-21)。
+    无阻塞;外网探测的阻塞版 is_online 不得在 UI 线程调;2026-09-21);
+  - `page_user_edit` → `enroll_service` 人脸草稿读写(draft_active/draft_avatar/
+    commit_draft/discard_draft/clear_face;2026-09-27 两段式草稿:保存动作在
+    UI 同步路径里完成反馈,事件往返会把「保存退出」拆成两段交互;单槽 +
+    mutex,拍/提交不同时在飞的使用约定见 enroll_service.h)。
 
 ---
 
