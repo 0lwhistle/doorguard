@@ -48,10 +48,10 @@ int net_cfg_mask_plen(const char *mask)
     if (v == 0)
         return DG_ERR_PARAM;                 /* 0.0.0.0 不是合法掩码 */
     if (v == 0xFFFFFFFFu)
-        return 32;                           /* 全 1:v+1 会回绕,提前短路 */
-    /* 连续性:v = 1..10..0 ⟺ v & ~(v+1) == 0——v+1 只把最低的 0 变 1,
-     * 取反后恰是"尾部 0 之外"的位;若 v 中段还有 0 之外的模式必然残留 */
-    if ((v & ~(v + 1)) != 0)
+        return 32;                           /* 全 1:popcount 循环全跑,提前短路 */
+    /* 连续性:高 1 低 0 ⟺ v + 最低置位位回绕到 0(掩码即 -2^k 的补码);
+     * 反例 0xFF00FF00:加最低位 0x100 得 0xFF010000 ≠ 0 → 拒 */
+    if ((uint32_t)(v + (v & (~v + 1u))) != 0)
         return DG_ERR_PARAM;
     int n = 0;
     while (v) {
