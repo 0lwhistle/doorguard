@@ -3,6 +3,7 @@
 | 文件 | 职责 |
 |---|---|
 | `net_info.c/h` | 网口只读信息:主网口 IPv4/接口名/在线状态;UI 网络图标与 web 共用 |
+| `net_cfg.c/h` | **网络配置应用**(2026-09-27):静态 IP/掩码/网关 + DHCP 切换,与 dhcpcd 协调;开机按 device_config net_* 恢复静态 |
 | `netcore.c/h` | **统一网络事件循环**(mongoose 7.23 胶水层,零业务) |
 
 ## netcore 是什么
@@ -27,6 +28,18 @@ web 上位机(HTTP+WS+OTA 收包)、mDNS(UDP)、NTP(SNTP)的全部网络 I/O
 ## 接口
 
 ```c
+/* net_info:地址/在线状态(只读;未拿到地址统一 "0.0.0.0" + have_ip=false) */
+int net_info_primary_ipv4(char *out, size_t cap);
+int net_info_primary_ifname(char *out, size_t cap);
+int net_info_read(net_info_addr_t *out);   // ip/mask/gw 一次读齐(gw 读 /proc/net/route)
+
+/* net_cfg:静态/DHCP 配置应用(阻塞 system 与 dhcpcd 协调;UI 线程禁调) */
+int net_cfg_mask_plen(const char *mask);            // 点分掩码→前缀,纯函数可测
+int net_cfg_validate(const net_cfg_req_t *r);       // 请求合法性
+int net_cfg_apply(const net_cfg_req_t *r, net_info_addr_t *out);  // 独立线程调用
+int net_cfg_apply_saved(void);                      // 开机装配(cfg=static 才应用)
+
+/* netcore */
 int netcore_start(void);      // main.c holder 表装配(先于网络服务族)
 void netcore_stop(void);
 bool netcore_running(void);
@@ -40,7 +53,7 @@ struct mg_mgr *netcore_mgr(void);                   // 仅 loop 线程
 ```c
 static void setup(void *arg) {
     struct mg_connection *c =
-        mg_http_listen(netcore_mgr(), "http://0.0.0.0:8080", my_handler, NULL);
+        mg_http_listen(netcore_mgr(), "http://0.0.0.0:80", my_handler, NULL);
     mg_timer_add(netcore_mgr(), 200, MG_TIMER_REPEAT, my_tick, NULL);
 }
 int my_service_start(void) {

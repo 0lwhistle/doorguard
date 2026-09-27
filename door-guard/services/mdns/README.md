@@ -1,7 +1,8 @@
 # mDNS 应答器(doorguard.local + _http._tcp 服务发现)
 
-目的:局域网里**不用查 IP**——浏览器直接开 `http://doorguard.local:8080`,
-手机/电脑的服务发现也能看到这台设备。
+目的:局域网里**不用查 IP**——浏览器直接开 `http://doorguard.local`(默认 80,
+URL 免端口;`mdns_set_port()` 可在绑定回退时同步),手机/电脑的服务发现也能
+看到这台设备。
 
 为什么自实现:avahi 不在 B4 rootfs(spec-network §1),而门禁需要的只是
 "能按名字找到设备";完整服务发现栈(缓存/代理/冲突重命名循环)属过度设计。
@@ -27,7 +28,7 @@ RFC 1035 §4.1 的字节布局写断言(`tests/test_mdns_wire.c`,69 项)。
 |---|---|---|
 | `<host>.local` | A | 本机 IPv4(TTL 120s) |
 | `_http._tcp.local` | PTR | 服务发现入口(手机 / `avahi-browse -at` 靠它) |
-| `<host>._http._tcp.local` | SRV | 端口取 `web_port`(默认 8080) |
+| `<host>._http._tcp.local` | SRV | 端口取 `web_port`(默认 80,URL 里省略) |
 | `<host>._http._tcp.local` | TXT | `txtvers=1`、`path=/` |
 
 应答策略:
@@ -60,7 +61,7 @@ TTL=0 goodbye 形态、小缓冲不越界。
 
 ```bash
 # 报文级(必跑,不依赖组播/avahi,WSL2 也可):QU 单播查询 → 验 A/PTR/SRV/additional
-python3 tests/web/mdns_query_test.py 127.0.0.1 5353 doorguard 8080
+python3 tests/web/mdns_query_test.py 127.0.0.1 5353 doorguard 80
 ./tests/web/mdns_test.sh          # 同上 + 有 avahi 时顺带看一眼真实解析结果
 
 ctest --test-dir build-tests -R test_mdns_wire   # 纯逻辑单测
@@ -71,5 +72,5 @@ ctest --test-dir build-tests -R test_mdns_wire   # 纯逻辑单测
 WSL2 是 NAT 网络,**组播从 WSL 到 LAN 常不可达**,`avahi-resolve` 可能拿不到结果
 ——这不能说明应答器有问题(报文级测试才是判据)。验收建议:
 - 板上或同网段 Linux:`avahi-browse -at | grep -i doorguard` 应能看到 `_http._tcp` 服务;
-- Windows 10+ 原生支持 mDNS,直接在浏览器开 `http://doorguard.local:8080`;
+- Windows 10+ 原生支持 mDNS,直接在浏览器开 `http://doorguard.local`(80 端口免写);
 - WSL 兜底:在 `/etc/hosts` 加 `<板IP> doorguard.local`。

@@ -55,7 +55,18 @@ show 属性 id 缓存(每帧 16+ ioctl→0)。阶段 C 七页走查✓(排查插
 「user_edit 打开必死」经 8 轮对照系**当晚手工改库**所致——恢复原库+应用同款
 storage 路径重建用户后全过,与 9.5/plane/ARGB 无关;手册
 docs/superpowers/specs/2026-09-26-useredit-crash-debug.md);走查工具入库
-tools/board-walk/。 |
+tools/board-walk/。⑧ **2026-09-27(网络配置+NTP+键盘+实时刷新,32/32 绿,板上
+baseline-59+)**:**网络配置功能**(web GET/POST /api/network + 设备端 net_set 页,
+双入口统一 network_request:持久化 cur_config net_* 四键 + 后台线程应用;
+modules/net/net_cfg 与 dhcpcd 协调,开机 net_cfg 服务按 cfg=static 自动恢复;
+0.0.0.0 兜底统一展示);**EV_NET_ADDR 事件**(5s loop 监视地址变化 → WS `net`
+推送/NTP 补同步);**NTP 完善**(开机 30s 重试+地址变化补同步;TZ=CST-8 修显示
+慢 8 小时);**主页 IP 显示**;**运行时长 WS 实时推送**(5s);**编辑页统一导航**
+(返回左上/保存右上/dirty 退出确认/删除行最下/特征按钮修改录入文案);**键盘三修**
+(切换失效/删除键溢出/空格无字);**web 默认端口 80**(doorguard.local 免端口直达,
+非 root 回退 8080);**GB2312 全集字体**(16/26/30px,web 录中文名设备端可显示,
+应用 5.1→10.6MB);**CRLF 推板坑三重防护**(.gitattributes/dg-deploy tr -d/
+Windows 侧推板方法入手册 §7.1)。 |
 
 ---
 

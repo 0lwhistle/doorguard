@@ -201,6 +201,31 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 
 ---
 
+
+### 7.1 Windows 侧推板(WSL 到板网络不通时的备用路径,2026-09-27 实测)
+
+- 前提:WSL 的 ssh 私钥已拷到 Windows ~/.ssh/(git bash 可直连 root@192.168.137.100)
+- 产物:/home/olwhistle/doorguard/door-guard/build/door-guard 拷到 Windows 真实路径
+  (/mnt/c/...);git bash 的 chmod 对 NTFS 无效,拷贝后缀改 .exe 即可过 dg-deploy
+  的可执行检查,export DOORGUARD_BIN=C:/...(dg-new.exe)
+- CRLF 大坑(实测致 reboot 后应用起不来):Windows 工作区 core.autocrlf=true,
+  shell 脚本 checkout 即 CRLF,scp 上板后 shebang 带  无法执行(报 required file
+  not found,且 /var/log/door-guard.log 都不会生成)。已三重防护:.gitattributes
+  强制 board/rootfs-overlay、env/bin、*.sh 为 LF;dg-deploy 上传 S60 前强制
+  tr -d '';手工推文件一律先 tr -d ''。推板后务必重启一次验证 S60 可执行
+- git bash 的 /tmp 与 WSL 的 /tmp 是两个目录;跨侧中转文件放 /mnt/c 真实路径
+- dg-build 链接失败时 build/door-guard 保持旧产物,推板前核对版本串/md5
+
+### 7.2 局域网访问(2026-09-27 定版)
+
+- web 上位机:http://doorguard.local(默认 80,mDNS 实测 Windows 解析可达;IP 直连
+  http://192.168.137.100 等价)。非 root 回退 8080 时为 http://doorguard.local:8080
+- 板网络是纯静态环境(无 DHCP 服务器):/etc/network/interfaces(用户维护)为系统
+  保底;应用层 cur_config.json 的 net_mode/net_ip/net_mask/net_gw 开机由 net_cfg
+  服务应用(启动最晚,实际生效)。任何切回 DHCP 的操作都会让地址释放且拿不回 =
+  失联,只能串口/人工恢复;web 端与设备端做 DHCP 切换前须二次确认
+
+
 ## 8. 已知问题与待办
 
 | 问题 | 状态 | 计划 |

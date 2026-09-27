@@ -5,7 +5,9 @@
 ## 1. web 上位机(HTTP + WebSocket)
 
 - 板上起内嵌 HTTP 服务(mongoose 7.23,跑在 `modules/net/netcore` 统一事件循环,
-  2026-09-22 起 civetweb 退役;端口默认 **8080**,进 device_config `web_port`,
+  2026-09-22 起 civetweb 退役;端口默认 **80**(2026-09-27:URL 免带端口,root 绑定
+  无权限问题;非 root 环境(PC 模拟器)绑定失败自动回退 **8080** 并经 `mdns_set_port()`
+  同步通告),进 device_config `web_port`,
   OTA 上传端点同端口)。前端是 **Vue 3 单页应用**(`services/web/frontend/`,Vite 构建),
   产物同步到 `pages/` 再经 `gen_pages.sh` 生成资源表 `web_pages.c`,**两者都入库**:
   固件构建机不需要 node,只有改前端时才要 `./build_frontend.sh`
@@ -28,11 +30,12 @@
   | POST | `/api/ntp` | token | 异步触发(202),结果经 WebSocket 回 |
   | POST | `/api/account` | token + 旧口令 | 改账号/口令,成功后**吊销全部会话** |
   | POST | `/api/ota/upload` | token | 流式收包 + sha256 校验(§2) |
-  | GET | `/api/ws` | `?token=` | WebSocket 推送 |
+  | GET | `/api/ws` | `?token=` | WebSocket 推送四类消息:`auth`(验证事件)/ `ntp`(校时结果)/ `net`(地址变化,web 轮询与 5s 监视触发)/ `uptime`(运行时长,5s 周期,概览实时显示) |
 
-- **实时门禁状态**:WebSocket 推送每次验证事件(时间/ID/姓名/方式/结果,与 access_logs 字段一致)
-  与 NTP 结果。总线回调入队 + netcore_post,由 loop 线程排空并逐连接
-  `mg_ws_send`——**不依赖客户端轮询**,且连接只在 loop 线程被碰(连接表无锁)
+- **实时门禁状态**:WebSocket 推送每次验证事件(时间/ID/姓名/方式/结果,与 access_logs 字段一致)、
+  NTP 结果、网络地址变化、运行时长(5s)。总线回调入队 + netcore_post,由 loop 线程排空并逐连接
+  `mg_ws_send`——**不依赖客户端轮询**,且连接只在 loop 线程被碰(连接表无锁)。
+  周期推送在无 WS 客户端时跳过,不占推送队列
 - **单会话策略(2026-09-22)**:web 管理页同一时刻只允许一个管理员在线——
   登录成功即吊销其余全部会话(新登录必胜,崩溃浏览器不占坑);被踢方下一个
   请求 / WS 重连得 401,由前端路由守卫送回登录页
@@ -70,7 +73,7 @@
 ```
 主机脚本 dg-ota-upload <板IP> <升级包>
   → POST /api/ota/upload 流式上传(与 web 上位机同一 mongoose 监听、同一
-    端口 8080;MG_EV_HTTP_HDRS + MG_EV_READ 增量喂入,按 ota_can_accept()
+    端口同 web;MG_EV_HTTP_HDRS + MG_EV_READ 增量喂入,按 ota_can_accept()
     限流,64MB 包不进内存;落盘暂存 /tmp/ota_staging.bin,支持断点续传)
   → manifest 字段走 HTTP 请求头:X-OTA-Version / X-OTA-Size / X-OTA-SHA256
     (大小预检超 MAX 拒收;sha256 流式校验;不符即弃并报错)
@@ -80,7 +83,7 @@
 ```
 
 - 监听在 door-guard 应用内(不是独立守护)。`ota_port` 独立端口方案已废弃
-  (2026-09-22:配置字段删除,OTA 复用 web_port 8080)——实现里从未起过 9000
+  (2026-09-22:配置字段删除,OTA 复用 web 端口)——实现里从未起过 9000
   监听,属文档先行、实现收窄
 - 极端慢盘时收包缓冲顶到 mongoose `MG_MAX_RECV_SIZE`(3MB)会显式断连,
   客户端以 X-OTA-Offset 续传重试(有界失败 + 可恢复,不阻塞事件循环)
@@ -130,6 +133,11 @@ chrony 是持续 slew,SNTP 是一次步进,门禁场景接受步进(时间回拨
 - 展示兜底:**任何一项取不到统一显示 `0.0.0.0`**(web /api/device、/api/network、
   主页状态栏、设备管理页弹窗)。主接口无地址时 `net_info_read` 返回 DG_OK 且
   `have_ip=false`,各展示层直接渲染不再各自兜底
+- **双入口**(2026-09-27 起设备端屏幕也可设置):web `POST /api/network` 与设备端
+  网络配置页(`EV_NET_CFG_SET` 总线事件,UI 不直调 net_cfg)统一汇入 web_server 的
+  `network_request()`:持久化 → 后台线程应用 → 应用结果回执(设备端 `EV_NET_CFG_RESULT`
+  弹窗 / web 走 `EV_NET_ADDR` → WS)。静态环境(无 DHCP 服务器)严禁切 DHCP——地址
+  释放后拿不回,只能人工恢复
 - 实时性:web loop 内 5s 定时(net_watch)对比地址快照,变化才发布 EV_NET_ADDR →
   WebSocket `net` 事件(前端立即重取快照)+ NTP 补同步 + UI 设备页;应用静态配置的
   结果由 apply 线程直接发布同一事件(web apply_worker)。地址没变不推送(续租不刷屏)
