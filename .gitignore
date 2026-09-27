@@ -22,3 +22,5 @@ door-guard/services/web/web_pages.c.tmp
 door-guard/models/*.rknn
 door-guard/models/*.data
 door-guard/third_party/Silent-Face-Anti-Spoofing-master.zip
+__pycache__/
+*.pyc
