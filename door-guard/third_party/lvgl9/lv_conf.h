@@ -78,6 +78,10 @@
 #define LV_FONT_CUSTOM_DECLARE extern const lv_font_t dg_font_cn_16;
 #define LV_FONT_DEFAULT &dg_font_cn_16
 
+/* 2026-09-27:16/26/30px 字体并入 GB2312 全集(6763 字)后位图超 1MB,
+ * 默认 20 位 bitmap_index 溢出(编译期 #error),开 LARGE 升 32 位索引 */
+#define LV_FONT_FMT_TXT_LARGE 1
+
 /*==================
    WIDGETS / THEMES / LAYOUTS
  *==================*/
