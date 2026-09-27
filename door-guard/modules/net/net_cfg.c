@@ -47,8 +47,11 @@ int net_cfg_mask_plen(const char *mask)
     uint32_t v = ntohl(a.s_addr);
     if (v == 0)
         return DG_ERR_PARAM;                 /* 0.0.0.0 不是合法掩码 */
-    /* 连续性:形如 1..1 0..0(1 的个数在前);(v+1) 是把尾部 0 全变 1 */
-    if ((v | (v + 1)) != 0xFFFFFFFFu)
+    if (v == 0xFFFFFFFFu)
+        return 32;                           /* 全 1:v+1 会回绕,提前短路 */
+    /* 连续性:v = 1..10..0 ⟺ v & ~(v+1) == 0——v+1 只把最低的 0 变 1,
+     * 取反后恰是"尾部 0 之外"的位;若 v 中段还有 0 之外的模式必然残留 */
+    if ((v & ~(v + 1)) != 0)
         return DG_ERR_PARAM;
     int n = 0;
     while (v) {
