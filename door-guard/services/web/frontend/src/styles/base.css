@@ -9,6 +9,12 @@ body {
   margin: 0;
   padding: 0;
 }
+html {
+  /* 触摸端:禁双击缩放与点按高亮(按下"变大"的观感来自浏览器缩放,不是 CSS) */
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
 body {
   font-family: var(--font);
   background: var(--bg);

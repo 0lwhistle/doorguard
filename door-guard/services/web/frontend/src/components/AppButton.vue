@@ -86,9 +86,15 @@ function onClick(e) {
 .btn--block {
   width: 100%;
 }
-.btn:hover:not(:disabled) {
-  box-shadow: var(--shadow-hover);
-  filter: brightness(1.04);
+/* hover 抬升/提亮只在真鼠标设备生效——触摸端 tap 会把 hover 态残留住 */
+@media (hover: hover) {
+  .btn:hover:not(:disabled) {
+    box-shadow: var(--shadow-hover);
+    filter: brightness(1.04);
+  }
+  .btn--ghost:hover:not(:disabled) {
+    background: var(--primary-light);
+  }
 }
 .btn:active:not(:disabled) {
   transform: translateY(1px) scale(0.99);
@@ -102,9 +108,6 @@ function onClick(e) {
   background: transparent;
   color: var(--primary-dark);
   border: 1px solid var(--line);
-}
-.btn--ghost:hover:not(:disabled) {
-  background: var(--primary-light);
 }
 .btn--warn {
   background: linear-gradient(180deg, #ffb300, #f57f17);

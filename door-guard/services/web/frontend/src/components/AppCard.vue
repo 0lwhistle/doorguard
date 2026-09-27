@@ -37,9 +37,12 @@ const style = { '--i': props.index }
     box-shadow 0.25s,
     transform 0.25s;
 }
-.card:hover {
-  box-shadow: var(--shadow-hover);
-  transform: translateY(-2px);
+/* 抬升效果只在真鼠标设备生效,触摸端 tap 后 hover 态不会退场 */
+@media (hover: hover) {
+  .card:hover {
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-2px);
+  }
 }
 .card--span2 {
   grid-column: span 2;
