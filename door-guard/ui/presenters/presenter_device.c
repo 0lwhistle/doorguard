@@ -16,11 +16,11 @@ static void device_on_evt(const ui_evt_t *evt)
     if (evt->kind != UI_EVT_NTP_RESULT)
         return;
     if (evt->ntp.ok)
-        dg_popup_success(_("NTP同步成功"), 1500, NULL, NULL);
+        dg_popup_success(_("校时成功"), 1500, NULL, NULL);
     else if (evt->ntp.err == DG_ERR_NETWORK)
         dg_popup_fail(_("设备未联网"), 2000, NULL, NULL);
     else
-        dg_popup_fail(_("NTP同步失败"), 2000, NULL, NULL);
+        dg_popup_fail(_("校时失败"), 2000, NULL, NULL);
 }
 
 void presenter_device_register(void)

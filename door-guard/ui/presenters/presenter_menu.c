@@ -18,7 +18,7 @@ extern void page_menu_destroy(void);
 static void menu_on_evt(const ui_evt_t *evt)
 {
     if (evt->kind == UI_EVT_HINT && evt->hint.method == DG_HINT_NO_ADMIN)
-        dg_popup_fail(_("未设置管理员,请先添加管理员"), 3000, NULL, NULL);
+        dg_popup_fail(_("未设管理员,请先添加"), 3000, NULL, NULL);
 }
 
 void presenter_menu_register(void)

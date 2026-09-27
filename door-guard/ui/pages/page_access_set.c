@@ -32,9 +32,9 @@ static const int locks_opts[] = { 30, 60, 120, 300 };
         (void)ud;                                                        \
         int v = OPTS[idx];                                               \
         if (cfg_set_int(KEY, v) == DG_OK)                                \
-            dg_popup_success(_("验证成功"), 600, NULL, NULL);            \
+            dg_popup_success(_("已保存"), 600, NULL, NULL);            \
         else                                                             \
-            dg_popup_fail(_("验证失败"), 1000, NULL, NULL);              \
+            dg_popup_fail(_("保存失败"), 1000, NULL, NULL);              \
     }                                                                    \
     static void name##_click(lv_event_t *e)                              \
     {                                                                    \

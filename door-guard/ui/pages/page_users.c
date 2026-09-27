@@ -70,7 +70,7 @@ static void refresh_list(void)
         /* 编辑入口必须「看得见」:行点击=编辑是无形交互,用户找不到怎么改
          * (2026-09-22 反馈「看不到编辑选项」)。行右侧常驻提示,整行可点 */
         lv_obj_t *hint = lv_label_create(row);
-        lv_label_set_text(hint, _("编辑 >"));
+        lv_label_set_text(hint, _("编辑"));
         lv_obj_set_style_text_font(hint, DG_FONT_SUB, 0);
         lv_obj_set_style_text_color(hint, DG_COL_TEXT(), 0);
         lv_obj_set_style_text_opa(hint, LV_OPA_70, 0);

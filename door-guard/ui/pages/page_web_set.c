@@ -225,5 +225,5 @@ void page_web_set_show(bool running, const char *url, const char *user,
         lv_label_set_text(s_user, buf);
     }
     if (s_warn)
-        lv_label_set_text(s_warn, pwd_default ? _("默认口令，请尽快修改") : "");
+        lv_label_set_text(s_warn, pwd_default ? _("默认密码,请尽快修改") : "");
 }

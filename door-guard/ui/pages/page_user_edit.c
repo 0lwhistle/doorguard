@@ -54,7 +54,7 @@ static const char *err_text(int rc)
     case DG_ERR_BAD_NAME:     return _("姓名不合法");
     case DG_ERR_BAD_PWD:      return _("密码不合法");
     case DG_ERR_BAD_UID:      return _("用户ID不合法");
-    default:                  return _("操作失败");
+    default:                  return _("操作失败,请重试");
     }
 }
 
@@ -332,13 +332,13 @@ static void apply_face_pick(void *ud, int idx)
 static void on_finger(lv_event_t *e)
 {
     (void)e;
-    dg_popup_fail(_("硬件未接入"), 1500, NULL, NULL);
+    dg_popup_fail(_("指纹模块未接入"), 1500, NULL, NULL);
 }
 
 static void on_ic(lv_event_t *e)
 {
     (void)e;
-    dg_popup_fail(_("硬件未接入"), 1500, NULL, NULL);
+    dg_popup_fail(_("读卡器未接入"), 1500, NULL, NULL);
 }
 
 static void on_save(lv_event_t *e)

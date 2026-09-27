@@ -74,7 +74,7 @@ static void quality_apply(int verdict)
     else if (verdict == FQ_ERR_SMALL)
         hint_set(_("请靠近一些"), DG_COL_WARN());
     else if (verdict == FQ_ERR_BLURRY)
-        hint_set(_("太模糊,请保持不动"), DG_COL_WARN());
+        hint_set(_("画面模糊,请保持不动"), DG_COL_WARN());
     else                                 /* LOW_SCORE:侧脸/遮挡多半也是这个 */
         hint_set(_("请正对摄像头"), DG_COL_WARN());
 
@@ -225,7 +225,7 @@ static void on_evt(const ui_evt_t *evt)
             dg_avatar_invalidate(s_uid); /* 新照片,缓存作废 */
             set_state_review();
         } else {
-            dg_popup_fail(_("操作失败"), 2000, NULL, NULL);
+            dg_popup_fail(_("录入失败,请重拍"), 2000, NULL, NULL);
             set_state_live();
         }
         break;

@@ -45,7 +45,7 @@ static void on_ntp(lv_event_t *e)
      * 不再弹输入框——服务器地址属设备配置,不该让门禁面板上的人现填 */
     ev_ntp_trigger_t ev = { .manual = true };
     EVENT_BUS_PUBLISH(EV_NET_NTP_TRIGGER, &ev);
-    dg_popup_success(_("NTP 校正中…"), 1000, NULL, NULL);
+    dg_popup_success(_("NTP 校时中…"), 1000, NULL, NULL);
 }
 
 static void on_net(lv_event_t *e)
@@ -83,7 +83,7 @@ static void standby_pick(void *ud, int idx)
     if (cfg_set_int("standby_timeout_s", standby_opts[idx]) == DG_OK)
         dg_popup_success(_("已保存"), 600, refresh_rows, NULL);
     else
-        dg_popup_fail(_("操作失败"), 1000, NULL, NULL);
+        dg_popup_fail(_("保存失败"), 1000, NULL, NULL);
 }
 
 static void menu_pick(void *ud, int idx)
@@ -92,7 +92,7 @@ static void menu_pick(void *ud, int idx)
     if (cfg_set_int("menu_timeout_s", menu_opts[idx]) == DG_OK)
         dg_popup_success(_("已保存"), 600, refresh_rows, NULL);
     else
-        dg_popup_fail(_("操作失败"), 1000, NULL, NULL);
+        dg_popup_fail(_("保存失败"), 1000, NULL, NULL);
 }
 
 static void on_standby(lv_event_t *e)
@@ -155,7 +155,7 @@ void page_device_create(lv_obj_t *parent)
     lv_obj_align(lang, LV_ALIGN_TOP_MID, 0, 180);
     lv_obj_add_event_cb(lang, on_lang, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *ntp = dg_btn_create(parent, LV_SYMBOL_UP, _("NTP时间矫正"));
+    lv_obj_t *ntp = dg_btn_create(parent, LV_SYMBOL_UP, _("NTP 校时"));
     lv_obj_set_size(ntp, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
     lv_obj_align(ntp, LV_ALIGN_TOP_MID, 0, 180 + DG_BTN_H + DG_PAD);
     lv_obj_add_event_cb(ntp, on_ntp, LV_EVENT_CLICKED, NULL);
