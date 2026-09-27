@@ -4,7 +4,7 @@
  * 交互:行点击弹屏幕键盘编辑(预填当前期望值),右上「应用」经总线发给
  * 网络族落地(net_cfg 持久化 + 后台应用);应用是异步的,按钮置「应用中…」,
  * 结果回执弹窗。状态行实时显示实际生效地址(1s 轮询,与配置区分展示——
- * "期望配置"与"实际地址"不一致时用户一眼能看出还没应用/没生效)。
+ * 期望配置与实际地址不一致时,用户一眼能看出还没应用或没生效。
  *
  * 注意:本环境可能没有 DHCP 服务器(纯静态网线直连),切回 DHCP 会拿不到
  * 地址导致失联——选择静态/DHCP 时不立即应用,攒到「应用」一次下发。
@@ -246,7 +246,7 @@ void page_net_set_set_addr(const char *ifname, const char *ip,
         return;
     char buf[128];
     if (have_ip)
-        snprintf(buf, sizeof(buf), "%s: %s · IP: %s · %s: %s",
+        snprintf(buf, sizeof(buf), "%s: %s | IP: %s | %s: %s",
                  _("接口"), ifname, ip, _("网关"), gw);
     else
         snprintf(buf, sizeof(buf), "%s", _("当前无网络地址"));

@@ -161,5 +161,6 @@
   "已修改": "Modified",
   "删除用户": "Delete User",
   "当前无网络地址": "No Network Address",
-  "静态地址应用后,上位机请改用新地址访问": "After applying static IP, use the new address to reach the web UI"
+  "静态地址应用后,上位机请改用新地址访问": "After applying static IP, use the new address to reach the web UI",
+  "默认网关": "Default Gateway"
 }
