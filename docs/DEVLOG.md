@@ -4,6 +4,31 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-27(续十二)单帧反欺骗上板 + 多模态二次验证(两层活体;板上 A 槽 ca8dc3b)
+
+用户拍板两层方案:①MiniFASNet 单帧反欺骗;②命中疑似假体→多模态二次验证
+(动作活体搁置:阈值鲁棒性需大量真人标定,降级方案下误拒只多验一道,压力小)。
+1. **模型转换(tools/convert_antispoof/,WSL rknn-toolkit2 2.3.2)**:
+   pth→onnx(softmax 进图)→rk3576 F16×2(无标定集,量化留后续)。
+   **两个对拍抓出的规格坑**:①取景=检测框×scale(2.7/4.0)中心缩放+平移夹回,
+   不是关键点相似变换;②官方 to_tensor 把 div(255) 注释掉了——输入是 BGR
+   **原域 [0,255]**,按常规喂 [0,1] 分数全废且无报错。三方对拍:torch/onnx/
+   官方 test.py 一致(T1 real=0.9936 vs 官方 0.99;F1 label=2,官方只认
+   label==1 为真脸,其余全按假体计)。
+2. **算法件 face_antispoof(纯 C 宿主可测)**:scale_box(官方 _get_new_box
+   复刻+NV12 偶对齐收缩;修掉一个三路取小被分步覆盖的 bug)/RGB→BGR/
+   5 帧中位数平滑;test_antispoof 213 断言(期望值由官方 python 生成冻结)。
+3. **装配 vision_rknn**:启动即加载(失败降级一次 ERROR 不阻断;antispoof_enable
+   运行时可改即生效);识别节流内 DETECT_1N 才跑;命中按平滑分+阈值置
+   ev_match_t.spoof_challenge;LOST 清平滑窗;2s 节流 real 分数日志(标定依据)。
+4. **二次验证(auth_fsm,commit f55e6e4)**:challenge_start 跳过 ID 输入,
+   方式选择排除人脸;只开人脸的极端用户明确失败;超时/取消/成功复用 ST_VERIFY。
+5. **验证**:宿主 33/33 绿;dg-build 零告警;板上对拍 real 真 0.9937/假 0.0729
+   (与 WSL 偏差 <0.001);OTA 切 A 槽稳定,模型已在板,antispoof_enable=true
+   已写入 cur_config。**真人验收待用户**:真脸直开/照片手机屏挑战/二次验证
+   分支/按日志调阈值。
+
+---
 ## 2026-09-27(续十一)录入单脸保障 + 拍摄页取景框恢复(32/32 绿,板上 B 槽 890ecb4)
 
 用户三个反馈:两个修复、一个评估(不改码)。

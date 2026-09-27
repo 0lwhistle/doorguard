@@ -47,6 +47,14 @@ cd <SDK>/rockiva_data_rk3576 && sha256sum *.data > sha256sums.txt
 | `RetinaFace.rknn` | 人脸检测(备选检测器) | RetinaFace | 18 MB |
 | `det_10g.rknn` | 人脸检测(SCRFD-10G) | InsightFace model zoo | 9.4 MB |
 | `w600k_r50.rknn` | 人脸特征提取(ArcFace-R50,w600k) | InsightFace model zoo | 84 MB |
+| `2.7_80x80_MiniFASNetV2.rknn` | 单帧反欺骗(scale 2.7) | Silent-Face-Anti-Spoofing(third_party vendored) | 1.3 MB(F16) |
+| `4_0_0_80x80_MiniFASNetV1SE.rknn` | 单帧反欺骗(scale 4.0) | 同上 | 1.5 MB(F16) |
+
+反欺骗两个模型 2026-09-27 上板:转换/输入域/对拍基准见
+`tools/convert_antispoof/README.md`(头号坑:官方 to_tensor 无 /255,
+输入是 BGR 原域);运行时接入见 `services/vision/README.md` 反欺骗段。
+板上三方对拍:真脸样例 real=0.9937、假脸样例 real=0.0729,与 WSL
+onnxruntime 偏差 <0.001。
 
 校验:`sha256sums.txt`(二进制在本目录,已被 .gitignore 挡住不入库)。
 用途:vision_backend 可插拔契约的**自组后端**(SCRFD/ArcFace)

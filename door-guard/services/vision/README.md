@@ -206,6 +206,25 @@ rknn 后端的模型路径走 **env**(沿用 ROCKIVA 那套"现场诊断"惯例;
 | `DG_RKNN_MODEL_DIR` | 模型目录 | `/userdata/doorguard/models` |
 | `DG_RKNN_FACE_MODEL` | 检测模型文件名 | `RetinaFace_rk3576_i8.rknn` |
 | `DG_RKNN_REC_MODEL` | 识别模型文件名 | `w600k_r50.rknn` |
+| `DG_RKNN_SPOOF_MODEL_A` | 反欺骗模型 A(scale 2.7) | `2.7_80x80_MiniFASNetV2.rknn` |
+| `DG_RKNN_SPOOF_MODEL_B` | 反欺骗模型 B(scale 4.0) | `4_0_0_80x80_MiniFASNetV1SE.rknn` |
+
+## 单帧反欺骗(MiniFASNet×2,2026-09-27 上板)
+
+两层活体的**第一层**(第二层=多模态二次验证,在 access FSM):对检测框按
+scale 2.7/4.0 两次取景 → 双 80×80 MiniFASNet 推理 → real 概率相加平均 →
+5 帧中位数平滑 → 低于 `face.antispoof_threshold` 即判"疑似假体"。
+1:N 命中发布带 `spoof_challenge`,由 FSM 发起二次验证(不再开门);
+录入(DETECT_ONLY)与 1:1 子步不跑反欺骗。
+
+- **输入域头号坑**:官方 to_tensor 不做 /255——输入是 **BGR 原域 [0,255]**,
+  板上喂 uint8 BGR(RGA 产 RGB 需转通道),rknn config 不设归一化;
+- 模型加载失败只降级一次 ERROR(spoof_ready=false,行为同未启用),
+  识别主链路不受影响;加载在启动即做,`antispoof_enable` 运行时可改即生效;
+- 对拍基准(T1 真 0.9937 / F1 假 0.0729)与转换链路:
+  `tools/convert_antispoof/README.md`;
+- 阈值标定:看 2s 节流日志「反欺骗 real=」,用真人+打印照片+手机屏幕
+  三类样本实测后调 `face.antispoof_threshold`。
 
 ## 已知缺口 / 下一步
 
