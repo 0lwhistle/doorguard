@@ -145,6 +145,14 @@ int ntp_service_trigger(void)
 {
     if (!atomic_load(&s_running))
         return DG_ERR_NOT_INIT;
+    if (!netcore_running()) {
+        /* netcore 未起(装配失败/已停)时 netcore_post 会静默丢任务:不拦,
+         * 按钮就成了"NTP 校时中…"之后永无下文(2026-09-28)。is_online 查
+         * 的是网卡地址,netcore 挂着网卡也可能有地址,两查都要 */
+        DG_LOGW(TAG, "netcore 未运行,NTP 校正失败");
+        publish(false, DG_ERR_NOT_INIT, 0);
+        return DG_ERR_NOT_INIT;
+    }
     if (!net_info_is_online()) {
         DG_LOGW(TAG, "设备未联网,NTP 校正失败");
         publish(false, DG_ERR_NETWORK, 0);

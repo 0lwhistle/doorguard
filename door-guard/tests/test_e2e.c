@@ -14,6 +14,7 @@
 #include "events.h"
 #include "storage.h"
 #include "tasker.h"
+#include "vision_backend.h"
 #include "vision_service.h"
 
 #include <stdatomic.h>
@@ -130,6 +131,12 @@ int main(void)
     DG_CHECK(access_service_start() == DG_OK);
     DG_CHECK(enroll_service_start() == DG_OK);
     DG_CHECK(vision_service_start() == DG_OK);
+    /* 注册 sim 后端并启动(与 main.c 装配同构):commit 语义要求特征能落
+     * 内存特征库——无后端时 library_add=NOT_INIT,commit 必须报错而不是
+     * 静默"DB 有/内存无"(2026-09-28 事务化后) */
+    extern const vision_backend_ops_t vision_backend_sim;
+    DG_CHECK(vision_backend_register(&vision_backend_sim) == DG_OK);
+    DG_CHECK(vision_backend_start(true) == DG_OK);
 
     /* ---- 预置用户 10001(密码 1234,无特征) ---- */
     user_rec_t u;

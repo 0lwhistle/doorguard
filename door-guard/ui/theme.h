@@ -7,6 +7,7 @@
 #define DG_THEME_H
 
 #include "lvgl.h"
+#include "types.h"   /* DG_SCREEN_W/H(版式尺寸,2026-09-28 上移至 proto) */
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,9 +45,8 @@ extern "C" {
 #define DG_OPA_CARD_LINE    LV_OPA_60  /**< 卡片白边透明度 */
 #define DG_OPA_TEXT_DIM     LV_OPA_70  /**< 次要文字透明度 */
 
-/* ---- 版式(720×1280 竖屏) ---- */
-#define DG_SCREEN_W   720
-#define DG_SCREEN_H   1280
+/* ---- 版式(720×1280 竖屏;DG_SCREEN_W/H 已上移 proto/types.h,
+ * display 模块要用,不该反向依赖本头) ---- */
 #define DG_BTN_H      96   /**< 主按钮高度(触摸友好) */
 #define DG_RADIUS     12
 #define DG_PAD        16

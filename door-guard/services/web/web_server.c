@@ -78,7 +78,10 @@ static int s_sub_cnt = 0;
 static time_t s_started_at = 0;
 static int s_port = 8080;
 
-/* 最近一次 NTP 结果(设备信息里显示"已同步/未同步 + 时间") */
+/* 最近一次 NTP 结果(设备信息里显示"已同步/未同步 + 时间")。
+ * 总线线程写(on_ntp_result)、loop 线程读(设备信息 JSON):并到
+ * s_ntp_mtx 里保护——bool+ts 成对更新,不锁会出现 ok=true 配旧 ts */
+static pthread_mutex_t s_ntp_mtx = PTHREAD_MUTEX_INITIALIZER;
 static bool s_ntp_ok = false;
 static int64_t s_ntp_ts = 0;
 
@@ -448,10 +451,14 @@ static void handle_device(struct mg_connection *c, struct mg_http_message *hm)
     cJSON_AddNumberToObject(root, "disk_free_bytes", (double)disk_free);
 
     cJSON *ntp = cJSON_AddObjectToObject(root, "ntp");
-    cJSON_AddBoolToObject(ntp, "ok", s_ntp_ok);
+    pthread_mutex_lock(&s_ntp_mtx);
+    const bool ntp_ok = s_ntp_ok;
+    const int64_t ntp_ts = s_ntp_ts;
+    pthread_mutex_unlock(&s_ntp_mtx);
+    cJSON_AddBoolToObject(ntp, "ok", ntp_ok);
     char ntpbuf[32] = "";
-    if (s_ntp_ts > 0) {
-        time_t ts = (time_t)s_ntp_ts;
+    if (ntp_ts > 0) {
+        time_t ts = (time_t)ntp_ts;
         struct tm tmv;
         localtime_r(&ts, &tmv);
         strftime(ntpbuf, sizeof(ntpbuf), "%Y-%m-%d %H:%M:%S", &tmv);
@@ -581,7 +588,6 @@ static void handle_logs(struct mg_connection *c, struct mg_http_message *hm)
 
 /* ---- NTP(异步:SNTP 在 netcore loop 内执行,这里只受理 + 去重) ---- */
 
-static pthread_mutex_t s_ntp_mtx = PTHREAD_MUTEX_INITIALIZER;
 static bool s_ntp_running = false;
 
 static void handle_ntp(struct mg_connection *c, struct mg_http_message *hm)
@@ -698,7 +704,9 @@ static void *apply_worker(void *arg)
 }
 
 /* 公共入口:持久化 + 起应用线程。HTTP 与设备端事件两路共用。
- * 返回 DG_OK = 已受理(异步应用);DG_ERR_PARAM = 地址不合法 */
+ * 返回 DG_OK = 已受理(异步应用);DG_ERR_PARAM = 地址不合法;
+ * DG_ERR_IO = 持久化失败(不应用——应用了但存不下来,重启即回旧配置,
+ * 与用户所见不符;原实现忽略 cfg_set/flush 返回值,落盘失败无人知晓) */
 static int network_request(const net_cfg_req_t *r, bool notify_ui)
 {
     if (net_cfg_validate(r) != DG_OK)
@@ -706,13 +714,26 @@ static int network_request(const net_cfg_req_t *r, bool notify_ui)
 
     /* 先持久化再应用:应用失败(接口暂不可用)配置仍在,重启/插线后由
      * 开机装配或再次手动应用接管 */
-    cfg_set_str("net_mode", r->is_static ? "static" : "dhcp");
-    if (r->is_static) {
-        cfg_set_str("net_ip", r->ip);
-        cfg_set_str("net_mask", r->mask);
-        cfg_set_str("net_gw", r->gw);
+    int rc = cfg_set_str("net_mode", r->is_static ? "static" : "dhcp");
+    if (rc == DG_OK && r->is_static) {
+        if ((rc = cfg_set_str("net_ip", r->ip)) == DG_OK)
+            rc = cfg_set_str("net_mask", r->mask);
+        if (rc == DG_OK)
+            rc = cfg_set_str("net_gw", r->gw);
     }
-    cfg_flush();
+    if (rc == DG_OK)
+        rc = cfg_flush();
+    if (rc != DG_OK) {
+        DG_LOGE(TAG, "网络配置持久化失败(%d):不应用,配置维持原状", rc);
+        if (notify_ui) {
+            ev_net_cfg_result_t res;
+            memset(&res, 0, sizeof(res));
+            res.ok = false;
+            res.err = rc;
+            EVENT_BUS_PUBLISH(EV_NET_CFG_RESULT, &res);
+        }
+        return DG_ERR_IO;
+    }
 
     net_apply_job_t *job = malloc(sizeof(*job));
     if (!job)
@@ -720,9 +741,9 @@ static int network_request(const net_cfg_req_t *r, bool notify_ui)
     job->cfg = *r;
     job->notify_ui = notify_ui;
     pthread_t tid;
-    if (pthread_create(&tid, NULL, apply_worker, job) == 0)
+    if (pthread_create(&tid, NULL, apply_worker, job) == 0) {
         pthread_detach(tid);
-    else {
+    } else {
         free(job);                           /* 罕见:配置已存,提示手动重启生效 */
         return DG_ERR_IO;
     }
@@ -1442,25 +1463,28 @@ typedef struct {
     const char *label;
     const char *unit;
     bool is_dbl;
-    double lo, hi, step;
+    double step;
     int def_i;                          /* int 项默认展示(仅提示用) */
 } web_set_item_t;
 
+/* 数值范围不再写在本表(原 lo/hi 与 cfg META 双份维护会漂移):GET 的
+ * min/max 与 POST 校验统一走 cfg_meta_range(META 是唯一事实源)。
+ * 本表只留展示属性:标签/单位/步进/默认值 */
 static const web_set_item_t s_set_items[] = {
-    /* 键           标签              单位   dbl   lo     hi     step */
-    { "door_open_ms",      "开门时长",        "ms", false, 1000, 10000, 500,  3000 },
-    { "pwd_fail_lock_n",   "密码连错锁定次数", "次", false,    1,    10,   1,     5 },
-    { "pwd_fail_lock_s",   "锁定时长",        "s",  false,   10,  3600,  10,    60 },
-    { "standby_timeout_s", "待机超时",        "s",  false,   15,    60,   5,    30 },
-    { "menu_timeout_s",    "菜单超时",        "s",  false,    5,   120,   5,    15 },
-    { "lost_hold_ms",      "脸框消失滞回",    "ms", false,    0,  2000,  50,   200 },
-    { "min_face_px",       "识别最小人脸",    "px", false,   40,   400,  10,    80 },
-    { "face_dup_threshold", "录入人脸查重阈值", "",  true,  0.50,  1.00, 0.05, 0.75 },
-    { "liveness_enable",   "活体检测开关",    "",   false,    0,     1,   1,     0 },
-    { "face_match_threshold", "1:N 识别阈值",    "",   true,  0.30,  1.00, 0.01,  0 },
-    { "det_threshold",     "检测出框阈值",    "",   true,  0.30,  0.95, 0.01,  0 },
-    { "det_score_min",     "检测分下限",      "",   true,  0.30,  1.00, 0.01,  0 },
-    { "blur_min",          "清晰度下限",      "",   true,  0.0, 50000,  5,     0 },
+    /* 键           标签              单位   dbl   step  默认 */
+    { "door_open_ms",      "开门时长",        "ms", false,  500,  3000 },
+    { "pwd_fail_lock_n",   "密码连错锁定次数", "次", false,    1,     5 },
+    { "pwd_fail_lock_s",   "锁定时长",        "s",  false,   10,    60 },
+    { "standby_timeout_s", "待机超时",        "s",  false,    5,    30 },
+    { "menu_timeout_s",    "菜单超时",        "s",  false,    5,    15 },
+    { "lost_hold_ms",      "脸框消失滞回",    "ms", false,   50,   200 },
+    { "min_face_px",       "识别最小人脸",    "px", false,   10,    80 },
+    { "face_dup_threshold", "录入人脸查重阈值", "",  true,  0.05,  0.75 },
+    { "liveness_enable",   "活体检测开关",    "",   false,    1,     0 },
+    { "face_match_threshold", "1:N 识别阈值",    "",  true,  0.01,     0 },
+    { "det_threshold",     "检测出框阈值",    "",   true,  0.01,     0 },
+    { "det_score_min",     "检测分下限",      "",   true,  0.01,     0 },
+    { "blur_min",          "清晰度下限",      "",   true,     5,     0 },
 };
 
 static bool cfg_value_of(const dg_cfg_t *c, const char *key, double *out)
@@ -1511,8 +1535,11 @@ static void handle_access_set_get(struct mg_connection *c, struct mg_http_messag
         cJSON_AddStringToObject(o, "unit", it->unit);
         cJSON_AddBoolToObject(o, "is_dbl", it->is_dbl);
         cJSON_AddNumberToObject(o, "value", val);
-        cJSON_AddNumberToObject(o, "min", it->lo);
-        cJSON_AddNumberToObject(o, "max", it->hi);
+        double lo = 0, hi = 0;                    /* 范围唯一事实源 = cfg META */
+        if (!cfg_meta_range(it->key, &lo, &hi))
+            DG_LOGW(TAG, "设置项 %s 无 META 范围,滑条范围退化为 0~0", it->key);
+        cJSON_AddNumberToObject(o, "min", lo);
+        cJSON_AddNumberToObject(o, "max", hi);
         cJSON_AddNumberToObject(o, "step", it->step);
         cJSON_AddItemToArray(arr, o);
     }
@@ -1552,10 +1579,17 @@ static void handle_access_set_post(struct mg_connection *c, struct mg_http_messa
             cJSON_Delete(body);
             return;
         }
-        if (it->valuedouble < m->lo || it->valuedouble > m->hi) {
+        double lo = 0, hi = 0;                    /* 校验同 GET:走 cfg META */
+        if (!cfg_meta_range(m->key, &lo, &hi)) {
+            DG_LOGE(TAG, "设置项 %s 无 META 范围,拒绝", m->key);
+            json_msg(c, 500, "设置项范围缺失");
+            cJSON_Delete(body);
+            return;
+        }
+        if (it->valuedouble < lo || it->valuedouble > hi) {
             char msg[128];
             snprintf(msg, sizeof(msg), "%s 需在 %g~%g %s内",
-                     m->label, m->lo, m->hi, m->unit);
+                     m->label, lo, hi, m->unit);
             json_msg(c, 400, msg);
             cJSON_Delete(body);
             return;
@@ -1736,9 +1770,9 @@ static int on_ntp_result(const event_t *e, void *ud)
 {
     (void)ud;
     const ev_ntp_result_t *r = (const ev_ntp_result_t *)e->data;
+    pthread_mutex_lock(&s_ntp_mtx);
     s_ntp_ok = r->ok;
     s_ntp_ts = r->ok ? r->synced_ts : 0;
-    pthread_mutex_lock(&s_ntp_mtx);
     s_ntp_running = false;                   /* 一次校正落幕,允许下一轮 */
     pthread_mutex_unlock(&s_ntp_mtx);
 
@@ -1796,20 +1830,25 @@ static void uptime_push_cb(void *arg)
 
 /* ---- 地址变化监视(loop 5s 定时)与 EV_NET_ADDR → WebSocket ---- */
 
-/* 上次推送的地址快照(loop 线程私有);变化才推送,续租同址不刷屏 */
+/* 上次推送的地址快照;变化才推送,续租同址不刷屏。
+ * 注释原写"loop 线程私有",实际是跨线程:on_net_addr(总线线程订阅者)
+ * 写、net_watch_cb(loop 5s 定时)读——2026-09-28 加锁纠正 */
 static net_info_addr_t s_last_addr;
 static bool s_last_addr_valid = false;
+static pthread_mutex_t s_addr_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 static int on_net_addr(const event_t *e, void *ud)
 {
     (void)ud;
     const ev_net_addr_t *a = (const ev_net_addr_t *)e->data;
+    pthread_mutex_lock(&s_addr_mtx);
     s_last_addr_valid = true;
     snprintf(s_last_addr.ifname, sizeof(s_last_addr.ifname), "%s", a->ifname);
     snprintf(s_last_addr.ip, sizeof(s_last_addr.ip), "%s", a->ip);
     snprintf(s_last_addr.mask, sizeof(s_last_addr.mask), "%s", a->mask);
     snprintf(s_last_addr.gw, sizeof(s_last_addr.gw), "%s", a->gw);
     s_last_addr.have_ip = a->have_ip;
+    pthread_mutex_unlock(&s_addr_mtx);
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "net");
@@ -1838,12 +1877,15 @@ static void net_watch_cb(void *arg)
     net_info_addr_t now;
     if (net_info_read(&now) != DG_OK)
         return;
-    if (s_last_addr_valid &&
+    pthread_mutex_lock(&s_addr_mtx);
+    const bool same = s_last_addr_valid &&
         strcmp(now.ifname, s_last_addr.ifname) == 0 &&
         strcmp(now.ip, s_last_addr.ip) == 0 &&
         strcmp(now.mask, s_last_addr.mask) == 0 &&
         strcmp(now.gw, s_last_addr.gw) == 0 &&
-        now.have_ip == s_last_addr.have_ip)
+        now.have_ip == s_last_addr.have_ip;
+    pthread_mutex_unlock(&s_addr_mtx);
+    if (same)
         return;
 
     ev_net_addr_t ev;

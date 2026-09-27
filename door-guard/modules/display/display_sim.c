@@ -7,10 +7,10 @@
  * (同 ARGB8888 直通)。
  */
 #include "display.h"
+#include "types.h"   /* DG_SCREEN_W/H(2026-09-28 起 proto 契约,不再借 ui/theme.h) */
 #include "SDL2/SDL.h"
 #include "dg_log.h"
 #include "lvgl.h"
-#include "ui/theme.h"
 
 #include <stdlib.h>
 #include "err.h"

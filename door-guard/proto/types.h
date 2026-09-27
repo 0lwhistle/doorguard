@@ -50,6 +50,12 @@ typedef enum {
 #define DG_AUTH_IC      (1u << 3)
 #define DG_AUTH_ALL     (DG_AUTH_FACE | DG_AUTH_FINGER | DG_AUTH_PWD | DG_AUTH_IC)
 
+/* 屏幕物理分辨率(硬件事实,display 模块与 UI 版式共用;2026-09-28 从
+ * ui/theme.h 上移——modules/display 反向 include ui 头是越层,而显示
+ * 尺寸本就属于 proto 层契约,取景框常量已在此引用它) */
+#define DG_SCREEN_W   720
+#define DG_SCREEN_H   1280
+
 /* 拍摄取景框(预览/屏幕域,720×1280 居中):拍摄页四角括号按此绘制,
  * vision 截取头像按此裁剪——UI 引导与实际取材严格同源,所见即所得 */
 #define DG_CAPTURE_VIEW_SZ   400  /**< 边长(正方形,与人脸预览窗同比例) */

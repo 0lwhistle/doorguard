@@ -620,16 +620,27 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
             return;
         }
 
-        /* 密码连错锁定(spec §5):同 ID 连错 N 次锁 S 秒 */
+        /* 密码连错锁定(spec §5):同 ID 连错 N 次锁 S 秒(按 UID 分槽记账,
+         * 槽定义见 auth_fsm.h;锁定期间 auth_fsm_pwd_locked 预检直接拒) */
         if (method == DG_METHOD_PWD && !r->locked) {
-            if (!strcmp(fsm->lock_uid, fsm->cur_uid))
-                fsm->lock_fail_cnt++;
-            else
-                fsm->lock_fail_cnt = 1;
-            snprintf(fsm->lock_uid, sizeof(fsm->lock_uid), "%s", fsm->cur_uid);
-            if (fsm->lock_fail_cnt >= fsm->pwd_fail_lock_n) {
-                fsm->lock_until_ms = r->now_ms + (int64_t)fsm->pwd_fail_lock_s * 1000;
-                fsm->lock_fail_cnt = 0;
+            int slot = -1;
+            for (int i = 0; i < FSM_PWD_LOCK_SLOTS; i++) {
+                if (!strcmp(fsm->pwd_locks[i].uid, fsm->cur_uid)) {
+                    slot = i;
+                    break;
+                }
+            }
+            if (slot < 0) {
+                slot = fsm->pwd_lock_pos;
+                fsm->pwd_lock_pos = (fsm->pwd_lock_pos + 1) % FSM_PWD_LOCK_SLOTS;
+                memset(&fsm->pwd_locks[slot], 0, sizeof(fsm->pwd_locks[slot]));
+                snprintf(fsm->pwd_locks[slot].uid, DG_UID_LEN, "%s", fsm->cur_uid);
+            }
+            fsm->pwd_locks[slot].fail_cnt++;
+            if (fsm->pwd_locks[slot].fail_cnt >= fsm->pwd_fail_lock_n) {
+                fsm->pwd_locks[slot].lock_until_ms =
+                    r->now_ms + (int64_t)fsm->pwd_fail_lock_s * 1000;
+                fsm->pwd_locks[slot].fail_cnt = 0;
                 /* 锁定中:失败弹窗(文案由 UI 依 locked 状态区分"锁定中") */
             }
         }
@@ -642,10 +653,15 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
     }
 }
 
-/* 密码方式入口前的锁定预检:锁定中直接提示,不计失败次数(spec §5) */
+/* 密码方式入口前的锁定预检:该用户连错锁定中返回 true(锁定中直接提示,不计次数;
+ * 按 UID 查槽——多个 ID 各自的锁定互不影响,spec §5) */
 bool auth_fsm_pwd_locked(const auth_fsm_t *fsm, const char *user_id, int64_t now_ms)
 {
-    return fsm->lock_until_ms > now_ms && !strcmp(fsm->lock_uid, user_id);
+    for (int i = 0; i < FSM_PWD_LOCK_SLOTS; i++) {
+        if (fsm->pwd_locks[i].uid[0] && !strcmp(fsm->pwd_locks[i].uid, user_id))
+            return fsm->pwd_locks[i].lock_until_ms > now_ms;
+    }
+    return false;
 }
 
 void auth_fsm_init(auth_fsm_t *fsm, int32_t door_open_ms, int32_t standby_timeout_s,

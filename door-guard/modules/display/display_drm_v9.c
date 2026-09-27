@@ -15,10 +15,10 @@
  * 届时 lv_tick_set_cb(dg_ui_tick_ms) 覆盖为 ui 时基,顺序天然正确。
  */
 #include "display.h"
+#include "types.h"   /* DG_SCREEN_W/H(2026-09-28 起 proto 契约,不再借 ui/theme.h) */
 #include "dg_log.h"
 #include "lvgl.h"       /* LV_USE_LINUX_DRM=1 时 lvgl.h 已暴露 lv_linux_drm.h */
 #include "touch_evdev.h"
-#include "ui/theme.h"
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -143,6 +143,14 @@ typedef enum {
     FSM_ACT_HINT_CLEAR,
 } fsm_action_t;
 
+/* 密码连错锁定槽(定义见 auth_fsm_t.pwd_locks 注释) */
+#define FSM_PWD_LOCK_SLOTS 8
+typedef struct {
+    char uid[DG_UID_LEN];
+    int32_t fail_cnt;
+    int64_t lock_until_ms;
+} fsm_pwd_lock_t;
+
 typedef struct {
     fsm_timer_t timer_id;
     uint32_t ms;
@@ -230,10 +238,12 @@ typedef struct {
      *  新机/管理员被删光的情形下,要求管理员认证会让菜单永远进不去(鸡生蛋) */
     int32_t admin_count;
 
-    /* 密码连错锁定(内存即可,掉电可丢;spec-auth §5) */
-    char lock_uid[DG_UID_LEN];
-    int32_t lock_fail_cnt;
-    int64_t lock_until_ms;
+    /* 密码连错锁定(内存即可,掉电可丢;spec-auth §5)。按 UID 分槽记账:
+     * 单槽实现下 A 错 N-1 次→B 错 1 次→A 再错,A 的计数被顶掉归 1,两个 ID
+     * 交替试错永不触发锁定(2026-09-28 修)。槽位有限,满则覆盖最旧——防的
+     * 是单 ID 暴破;多 ID 撒网由 web 登录锁定与 access_logs 审计兜底 */
+    fsm_pwd_lock_t pwd_locks[FSM_PWD_LOCK_SLOTS];
+    int pwd_lock_pos;               /* 轮转分配游标 */
 
     /* 待机(空闲秒计数;仅 ST_NORMAL 累加——倒计时只在主页面跑,回主页清零
      * 重新倒数;触摸/人脸清零) */

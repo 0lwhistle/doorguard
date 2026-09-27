@@ -982,6 +982,13 @@ static int rknn_start(bool enable_mock)
 {
     (void)enable_mock;
 
+    /* 幂等守卫(与其余服务一致):registry 看门狗对本后端 restart 时,
+     * 无守卫会重复订阅 EV_VISION_CAPTURE_REQ、重复挂 camera listener、
+     * 再起一个 worker——半启动失败(线程创建失败等)被拉起时的真路径 */
+    static bool s_started = false;
+    if (s_started)
+        return DG_OK;
+
     const char *dir = env_or("DG_RKNN_MODEL_DIR", RKNN_DEFAULT_DIR);
     char fpath[512], rpath[512];
     snprintf(fpath, sizeof(fpath), "%s/%s", dir,
@@ -1090,6 +1097,7 @@ static int rknn_start(bool enable_mock)
     }
 
     s_ready = true;
+    s_started = true;
     DG_LOGI(TAG, "rknn 就绪:检测 %s %dx%d(锚框 %d,阈值 %.2f)+ 识别 %s(%d 维,"
                  "特征 %d B),库 %d 人",
             RKNN_FACE_MODEL, s_in_w, s_in_h, s_nanchor,

@@ -102,6 +102,14 @@ static void publish_req(const char *uid, int32_t kind)
 
 static char s_dir[64];
 
+/* ④b 注入桩:模拟后端降级(add 失败)与恢复(恒成功) */
+static int fail_add(const char *uid, const uint8_t *f, uint16_t n)
+{ (void)uid; (void)f; (void)n; return DG_ERR_NO_MEMORY; }
+static int ok_add(const char *uid, const uint8_t *f, uint16_t n)
+{ (void)uid; (void)f; (void)n; return DG_OK; }
+static int ok_del(const char *uid)
+{ (void)uid; return DG_OK; }
+
 static void cleanup(void)
 {
     char cmd[160];
@@ -184,9 +192,27 @@ int main(void)
     DG_CHECK(user_face_len("10001") == 0);
     DG_CHECK(user_avatar_len("10001") == 0);    /* 清人脸连带头像消失 */
 
+    /* ---- ④b commit 时内存特征库写失败:DB 必须还原,不留半状态(2026-09-28) ----
+     * 注入点 = vision_service_set_lib_ops(装配层同款接线):后端降级
+     * (!ready)/库满会让 library_add 失败。期望:commit 返回错误、DB 人脸
+     * 保持清除态(无人脸时)或旧值、草稿保留可重试;恢复后重提成功 */
+    publish_req("10001", DG_ENROLL_FACE);
+    wait_cnt(&s_result_cnt[DG_ENROLL_FACE], 4, 3000);
+    DG_CHECK(atomic_load(&s_result_err[DG_ENROLL_FACE]) == DG_OK);
+    DG_CHECK(enroll_service_draft_active("10001"));
+    vision_service_set_lib_ops(fail_add, ok_del);
+    DG_CHECK(enroll_service_commit_draft("10001") != DG_OK);
+    DG_CHECK(user_face_len("10001") == 0);      /* DB 被还原,不是半状态 */
+    DG_CHECK(enroll_service_draft_active("10001"));  /* 草稿保留可重试 */
+    vision_service_set_lib_ops(NULL, NULL);     /* 恢复:后端原 ops 由下次 start 重接 */
+    DG_CHECK(enroll_service_commit_draft("10001") != DG_OK); /* NULL ops 仍失败,防误成功 */
+    vision_service_set_lib_ops(ok_add, ok_del); /* 给个恒成功 add 恢复链路 */
+    DG_CHECK(enroll_service_commit_draft("10001") == DG_OK);
+    DG_CHECK(user_face_len("10001") > 0);
+
     /* ---- ⑤ 对不存在用户采集:回执当场失败,且不产生草稿 ---- */
     publish_req("99999", DG_ENROLL_FACE);
-    wait_cnt(&s_result_cnt[DG_ENROLL_FACE], 4, 3000);
+    wait_cnt(&s_result_cnt[DG_ENROLL_FACE], 5, 3000);
     DG_CHECK(atomic_load(&s_result_err[DG_ENROLL_FACE]) != DG_OK);
     DG_CHECK(user_face_len("99999") == -1);     /* 用户依旧不存在 */
     DG_CHECK(!enroll_service_draft_active("99999"));
@@ -196,7 +222,7 @@ int main(void)
 
     /* ---- ⑦ 删除用户连带丢草稿(DB+特征库一致,草稿不残留) ---- */
     publish_req("10001", DG_ENROLL_FACE);
-    wait_cnt(&s_result_cnt[DG_ENROLL_FACE], 5, 3000);
+    wait_cnt(&s_result_cnt[DG_ENROLL_FACE], 6, 3000);
     DG_CHECK(enroll_service_draft_active("10001"));
     publish_req("10001", DG_ENROLL_DELETE);
     wait_cnt(&s_result_cnt[DG_ENROLL_DELETE], 1, 3000);

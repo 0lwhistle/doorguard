@@ -45,7 +45,7 @@ int vision_service_set_mode(dg_vision_mode_t mode, const char *user_id);
 dg_vision_mode_t vision_service_get_mode(void);
 
 /** 模式名(日志/上位机;未知返回 "?") */
-const char *vision_mode_name(dg_vision_mode_t mode);
+const char *vision_service_mode_name(dg_vision_mode_t mode);
 
 /** VERIFY_11 目标用户(拷贝语义;非 VERIFY_11/未指定 → 空串) */
 void vision_service_get_verify_uid(char *out, size_t cap);

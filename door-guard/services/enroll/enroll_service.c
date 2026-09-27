@@ -108,12 +108,21 @@ int enroll_service_commit_draft(const char *user_id)
     rec.face_vec_len = (uint16_t)flen;
 
     /* update 为覆盖语义:先取现有记录回填 role/auth_flags,避免清零
-     * (db_user_update 契约见 storage.h);查重比较器在 update 内触发 */
+     * (db_user_update 契约见 storage.h);查重比较器在 update 内触发。
+     * existing 同时是回滚依据:内存特征库写失败时把 DB 还原成库内旧值 */
     user_rec_t existing;
-    if (db_user_get(user_id, &existing) == DG_OK) {
+    bool had_existing = db_user_get(user_id, &existing) == DG_OK;
+    if (had_existing) {
         rec.role = existing.role;
         rec.auth_flags = existing.auth_flags;
     }
+
+    /* 事务序 = DB 先行、内存特征库随后,失败反向还原:
+     * - DB 失败(查重冲突等):两侧都未动,干净返回,草稿保留;
+     * - library_add 失败(后端降级 !ready/库满):按 existing 还原 DB——
+     *   否则留下「DB 有新特征、内存没有」的半状态,用户存在却识别不出,
+     *   直到重启才自愈(原实现静默忽略返回值的真后果)。还原窗口内
+     *   内存仍是旧特征、DB 已是新特征,但两者同属本 uid,不构成越权 */
     int rc = db_user_update(&rec);
     if (rc != DG_OK) {
         /* 冲突(DUP_FACE 等)时草稿保留:可重拍覆盖或放弃,不静默吞 */
@@ -121,7 +130,23 @@ int enroll_service_commit_draft(const char *user_id)
         return rc;
     }
 
-    vision_service_library_add(user_id, feature, flen);      /* 特征库 INSERT */
+    rc = vision_service_library_add(user_id, feature, flen);
+    if (rc != DG_OK) {
+        DG_LOGE(TAG, "commit: %s 内存特征库写入失败(%d),还原 DB,草稿保留",
+                user_id, rc);
+        if (had_existing && existing.face_vec_len > 0) {
+            user_rec_t back = rec;
+            memcpy(back.face_vec, existing.face_vec, existing.face_vec_len);
+            back.face_vec_len = existing.face_vec_len;
+            const int brc = db_user_update(&back);
+            if (brc != DG_OK)
+                DG_LOGE(TAG, "commit: %s DB 旧特征还原失败(%d),重启后以内存库为准",
+                        user_id, brc);
+        } else {
+            db_user_clear_face(user_id);
+        }
+        return rc;
+    }
 
     if (jlen) {
         const int arc = db_user_set_avatar(user_id, jpeg, jlen);
@@ -155,9 +180,14 @@ int enroll_service_clear_face(const char *user_id)
     /* 清除人脸(保留用户):专用接口——db_user_update 的 len=0=保留语义
      * 表达不了清除(2026-09-21 测试抓出);特征库经事件同步删除 */
     int rc = db_user_clear_face(user_id);
-    if (rc == DG_OK)
-        vision_service_library_remove(user_id);
-    return rc;
+    if (rc != DG_OK)
+        return rc;
+    rc = vision_service_library_remove(user_id);
+    /* NOT_INIT = 后端未起(内存库本就为空),视同已清;其余失败留痕:
+     * rknn lib_del 契约恒 OK,走到这分支即异常(重启后以 DB 为准自愈) */
+    if (rc != DG_OK && rc != DG_ERR_NOT_INIT)
+        DG_LOGE(TAG, "clear_face: %s 内存特征库删除异常(%d)", user_id, rc);
+    return DG_OK;
 }
 
 static void publish_result(const char *uid, int32_t kind, uint32_t seq, int err)
@@ -229,7 +259,11 @@ static int on_request(const event_t *e, void *ud)
     if (r->kind == DG_ENROLL_DELETE) {
         enroll_service_discard_draft(r->user_id);   /* 用户即删:草稿不得残留 */
         int rc = db_user_del(r->user_id);
-        vision_service_library_remove(r->user_id);   /* 特征库 DELETE */
+        const int lrc = vision_service_library_remove(r->user_id);  /* 特征库 DELETE */
+        /* 同 clear_face:NOT_INIT=内存库本空;其余异常留痕(search_1n 命中
+         * 时会回查 DB,已删用户不会再开门,残留只浪费检索) */
+        if (lrc != DG_OK && lrc != DG_ERR_NOT_INIT)
+            DG_LOGE(TAG, "delete: %s 内存特征库删除异常(%d)", r->user_id, lrc);
         publish_result(r->user_id, r->kind, r->seq, rc);
         return 0;
     }

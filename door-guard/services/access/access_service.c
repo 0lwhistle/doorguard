@@ -172,8 +172,6 @@ static enum task_t fsm_timer_pub_task(void *ctx)
     return TASK_OK;
 }
 
-static enum task_t fsm_timer_pub_task(void *ctx);
-
 static void arm_fsm_timer(int32_t id, uint32_t ms, uint32_t seq)
 {
     tmr_user_t *u = malloc(sizeof(*u));

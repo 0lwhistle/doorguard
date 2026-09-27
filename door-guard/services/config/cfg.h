@@ -99,6 +99,10 @@ int cfg_reset_all(void);
 /** 同步强制落盘(原子写:临时文件→fsync→rename);无未落盘改动时为空操作 */
 int cfg_flush(void);
 
+/** 查某业务键的合法域(INT/DBL 项;范围唯一事实源=META 表,web 上位机的
+ *  滑条范围/校验从这里取,不再各自维护一份)。STR 键/未知键返回 false */
+bool cfg_meta_range(const char *key, double *lo, double *hi);
+
 #ifdef __cplusplus
 }
 #endif

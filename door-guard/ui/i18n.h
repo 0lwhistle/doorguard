@@ -15,7 +15,8 @@ int i18n_init(const char *lang_dir);
 /** 翻译:查当前语言表;缺键回退原文并 WARN(便于发现漏翻) */
 const char *_(const char *key);
 
-/** 切换语言并立即生效:换表 + 发 EVENT_UI_REFRESH_REQUEST,各页面重刷静态文本 */
+/** 切换语言并立即生效:换表 + 异步重建当前页(navigator_reload,
+ *  见 i18n.c:弹窗回调里不能同步销毁页面);其余页面导航经过时自然重建 */
 int i18n_set_language(const char *lang);
 
 const char *i18n_current_language(void);

@@ -78,6 +78,19 @@ static const cfg_meta_t *meta_find(const char *key)
     return NULL;
 }
 
+/* 业务键合法域对外暴露(范围唯一事实源;web 滑条/校验从这里取) */
+bool cfg_meta_range(const char *key, double *lo, double *hi)
+{
+    if (!key || !lo || !hi)
+        return false;
+    const cfg_meta_t *m = meta_find(key);
+    if (!m || m->kind == CK_STR)
+        return false;
+    *lo = m->lo;
+    *hi = m->hi;
+    return true;
+}
+
 /* ---- 状态:双缓冲快照(读端拿稳定指针)+ cur/def JSON 树 + 互斥 ---- */
 
 static cJSON *s_def_root;          /* 出厂模板树(常驻,只读) */

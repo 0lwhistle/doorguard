@@ -204,7 +204,7 @@ static struct {
     .mode = DG_VMODE_DETECT_1N,
 };
 
-const char *vision_mode_name(dg_vision_mode_t m){
+const char *vision_service_mode_name(dg_vision_mode_t m){
     switch (m) {
     case DG_VMODE_IDLE:        return "IDLE";
     case DG_VMODE_DETECT_ONLY: return "DETECT_ONLY";
@@ -236,7 +236,7 @@ int vision_service_set_mode(dg_vision_mode_t mode, const char *user_id)
         return DG_OK;
     if (s_active && s_active->on_mode)
         s_active->on_mode(mode, uid);
-    DG_LOGI(TAG, "工作模式 → %s%s%s", vision_mode_name(mode),
+    DG_LOGI(TAG, "工作模式 → %s%s%s", vision_service_mode_name(mode),
             uid[0] ? " 目标 " : "", uid);
     return DG_OK;
 }

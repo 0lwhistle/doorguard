@@ -4,8 +4,9 @@
 #include "i18n.h"
 #include "cJSON.h"
 #include "dg_log.h"
-#include "event_bus.h"
 #include "err.h"
+#include "lvgl.h"
+#include "navigator/navigator.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -103,6 +104,17 @@ const char *_(const char *key)
     return out;
 }
 
+/* 整页重建必须在 LVGL 事件处理完毕后做:语言切换入口(page_device lang_pick)
+ * 运行在 dg_popup 弹窗的选项回调里,同步销毁页面会连带删掉回调正跑着的
+ * 弹窗对象树。lv_async_call 把 reload 排到本轮事件循环之后,弹窗先自行
+ * 关闭,页面再重建(2026-09-28:原实现发 EVENT_UI_REFRESH_REQUEST,该事件
+ * 全库无订阅者——语言切换后当前页残留旧语言,离开本页才恢复) */
+static void reload_page_async(void *arg)
+{
+    (void)arg;
+    navigator_reload();
+}
+
 int i18n_set_language(const char *lang)
 {
     if (!lang)
@@ -110,8 +122,9 @@ int i18n_set_language(const char *lang)
     int rc = i18n_apply_locked(lang);
     if (rc != DG_OK)
         return rc;
-    /* 立即生效:各页面订阅刷新事件重刷静态文本(spec-ui §2) */
-    event_bus_publish(EVENT_UI_REFRESH_REQUEST, NULL, 0);
+    /* 立即生效:重建当前页重刷静态文本(spec-ui §2;页面整建整删,
+     * 其余页面导航经过时自然用新语言) */
+    lv_async_call(reload_page_async, NULL);
     return DG_OK;
 }
 

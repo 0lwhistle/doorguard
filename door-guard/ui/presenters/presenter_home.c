@@ -172,10 +172,6 @@ static void home_on_evt(const ui_evt_t *evt)
     }
     case UI_EVT_HINT: {
         const ev_hint_t *h = &evt->hint;
-        if (h->method == DG_HINT_LANG_RELOAD) {
-            navigator_reload();              /* 整页重建(语言刷新) */
-            break;
-        }
         if (h->method == DG_HINT_NO_ADMIN) {
             /* 无管理员免认证进菜单的提示:此时页面已切到菜单,由菜单页弹(menu presenter) */
             break;

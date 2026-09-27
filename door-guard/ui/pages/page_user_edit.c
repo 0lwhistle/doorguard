@@ -604,6 +604,7 @@ void page_user_edit_destroy(void)
     s_btn_finger = s_btn_ic = NULL;
     s_row_del = NULL;
     memset(s_pending_pwd, 0, sizeof(s_pending_pwd));
+    memset(s_draft_pwd, 0, sizeof(s_draft_pwd));   /* 页面销毁即擦:明文不留静态区 */
 }
 
 void page_user_edit_open(const char *uid)

@@ -11,10 +11,10 @@
  * 同一套 env 门控思路,生产路径无 IO。
  */
 #include "display.h"
+#include "types.h"   /* DG_SCREEN_W/H(2026-09-28 起 proto 契约,不再借 ui/theme.h) */
 #include "SDL2/SDL.h"
 #include "dg_log.h"
 #include "lvgl.h"
-#include "ui/theme.h"
 
 #include <stdlib.h>
 #include "err.h"

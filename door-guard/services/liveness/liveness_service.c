@@ -66,11 +66,6 @@ bool liveness_service_pass(void)
     return true;                         /* B8:返回动作序列判定结果 */
 }
 
-dg_liveness_result_t liveness_check(void)
-{
-    return liveness_service_pass() ? DG_LIVE_PASS : DG_LIVE_PENDING;
-}
-
 int64_t liveness_service_last_face_age_ms(void)
 {
     int64_t ms;

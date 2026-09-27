@@ -332,7 +332,8 @@ typedef struct {
 #define DG_HINT_ADMIN_AUTH  (-1)          /**< 「管理员认证」 */
 #define DG_HINT_NO_ADMIN    (-2)          /**< 「未设置管理员,请先添加管理员」(新机引导) */
 #define DG_HINT_CHALLENGE   (-3)          /**< 「人脸验证未通过,请选择其他方式」(反欺骗降级) */
-#define DG_HINT_LANG_RELOAD (-5)          /**< 语言热切换:整页重建(ui/README §5) */
+/* 语言热切换不走 hint:入口在 UI 自身(page_device→i18n_set_language),
+ * 直接异步 navigator_reload(2026-09-28;原 -5 哨兵从未有发布者) */
 
 /** EV_UI_ASK_UID:请求弹 ID 输入框(无载荷) */
 

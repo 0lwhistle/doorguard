@@ -27,16 +27,9 @@ extern "C" {
 
 int liveness_service_start(void);
 
-typedef enum {
-    DG_LIVE_SKIP = 0,     /**< 未启用,直接放行 */
-    DG_LIVE_PASS,
-    DG_LIVE_FAIL,
-    DG_LIVE_PENDING,
-} dg_liveness_result_t;
-
-dg_liveness_result_t liveness_check(void);
-
-/* ---- B7 留口:关键点回灌与命中门禁 ---- */
+/* ---- B7 留口:关键点回灌与命中门禁 ----
+ * (旧接口 liveness_check()/dg_liveness_result_t 已删:B7 改口后零调用者,
+ *  2026-09-28;命中门禁走下方 pass(),结果语义 bool) */
 
 /** 人脸关键点(与后端解耦的归一坐标;ROCKIVA 给万分比 0~9999) */
 typedef struct {

@@ -109,9 +109,9 @@ static int on_capture_req(const event_t *e, void *ud)
 
     /* 伪头像 = 同 seed 派生的渐变图,编码成真 JPEG(与板上 rknn 后端同路:
      * 照片槽 → enroll 按 seq 取件落库;宿主端到端要能验到 DB 里那张图)。
-     * seq 与特征提交用同一个(照片槽按 seq 与特征配对) */
-    static uint32_t s_seq = 0;              /* 槽位句柄:进程内单调 */
-    const uint32_t seq = ++s_seq;
+     * seq 原样回传请求里的 r->seq(与 rknn 后端一致:enroll/页面按请求 seq
+     * 对回执;自增计数会让"请求-回执"配对语义只在 rknn 后端成立) */
+    const uint32_t seq = r->seq;
     /* static:总线分发线程栈仅 64KB,大数组上栈会溢出(与板上后端同纪律) */
     static uint8_t rgb[64 * 64 * 3];
     static uint8_t jpeg[DG_AVATAR_JPEG_MAX];
@@ -130,6 +130,58 @@ static int on_capture_req(const event_t *e, void *ud)
 
     vision_service_submit_feature(r->user_id, seq, feat, len);
     return 0;
+}
+
+/* ---- 内存特征库(PC 版) ----
+ * 2026-09-28:enroll commit 改严格事务序后,后端必须提供库操作(返回值被
+ * 检查,NULL ops 会让 PC/sim 路径的录入保存必然失败)。库内容只做
+ * 增删记账——sim 的假 1:N 命中逻辑与库无关(构造性假数据),但
+ * 「DB 与内存库两侧一致」的契约要与板上后端同构 */
+#define SIM_LIB_MAX 64
+static struct {
+    pthread_mutex_t mtx;
+    int n;
+    char uid[SIM_LIB_MAX][DG_UID_LEN];
+    uint8_t vec[SIM_LIB_MAX][DG_FEATURE_MAX];
+    uint16_t len[SIM_LIB_MAX];
+} s_sim_lib = { .mtx = PTHREAD_MUTEX_INITIALIZER };
+
+static int sim_lib_del(const char *user_id);   /* add 的覆盖语义先删后加 */
+
+static int sim_lib_add(const char *user_id, const uint8_t *feature, uint16_t len)
+{
+    if (!user_id || !user_id[0] || !feature || len == 0 || len > DG_FEATURE_MAX)
+        return DG_ERR_PARAM;
+    sim_lib_del(user_id);                      /* 同 uid = 覆盖(幂等) */
+    pthread_mutex_lock(&s_sim_lib.mtx);
+    int rc = DG_ERR_NO_MEMORY;
+    if (s_sim_lib.n < SIM_LIB_MAX) {
+        snprintf(s_sim_lib.uid[s_sim_lib.n], DG_UID_LEN, "%s", user_id);
+        memcpy(s_sim_lib.vec[s_sim_lib.n], feature, len);
+        s_sim_lib.len[s_sim_lib.n] = len;
+        s_sim_lib.n++;
+        rc = DG_OK;
+    }
+    pthread_mutex_unlock(&s_sim_lib.mtx);
+    return rc;
+}
+
+static int sim_lib_del(const char *user_id)
+{
+    pthread_mutex_lock(&s_sim_lib.mtx);
+    for (int i = 0; i < s_sim_lib.n; i++) {
+        if (strcmp(s_sim_lib.uid[i], user_id) == 0) {
+            s_sim_lib.n--;
+            if (i != s_sim_lib.n) {            /* 尾行补位,保持紧凑(与 rknn 同款) */
+                memcpy(s_sim_lib.uid[i], s_sim_lib.uid[s_sim_lib.n], DG_UID_LEN);
+                memcpy(s_sim_lib.vec[i], s_sim_lib.vec[s_sim_lib.n], DG_FEATURE_MAX);
+                s_sim_lib.len[i] = s_sim_lib.len[s_sim_lib.n];
+            }
+            break;
+        }
+    }
+    pthread_mutex_unlock(&s_sim_lib.mtx);
+    return DG_OK;                              /* 删不存在 = 成功(与 rknn 契约一致) */
 }
 
 /* 后端私有启动:PC 恒成功(mock 与摄像头 sim 解耦;工作模式由服务层持有,
@@ -158,8 +210,8 @@ const vision_backend_ops_t vision_backend_sim = {
     .model_tag = NULL,          /* 伪特征无口径:服务层不校验 */
     .has_landmarks = false,     /* 不做活体(PC 只验链路) */
     .start = sim_start,
-    .lib_add = NULL,            /* 不提供特征库:PC 端 enroll 只走槽位/查重 */
-    .lib_del = NULL,
+    .lib_add = sim_lib_add,
+    .lib_del = sim_lib_del,
     .compare = NULL,            /* NULL = storage 默认逐字节相等 */
     .on_mode = NULL,
 };

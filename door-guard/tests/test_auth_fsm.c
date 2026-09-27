@@ -11,7 +11,8 @@
 
 /* ---- 动作记录器 ---- */
 
-#define REC_MAX 64
+#define REC_MAX 256   /* 封顶后新记录被丢,last_act 断言会拿旧值:F08b 六轮
+                         迭代约 90 条动作,64 不够用(2026-09-28 踩坑) */
 typedef struct {
     fsm_action_t act;
     fsm_action_data_t d;
@@ -108,6 +109,37 @@ static void uid_flow(const char *uid, bool found, int32_t role, uint32_t flags)
     d.uid_res.role = role;
     d.uid_res.auth_flags = flags;
     auth_fsm_handle(&s_fsm, FSM_EV_UID_RESOLVED, &d);
+}
+
+/* ---- F08 锁定族辅助:查槽 + 单次密码失败全流程(发起到结果弹窗收回) ---- */
+static const fsm_pwd_lock_t *lock_slot(const char *uid)
+{
+    for (int i = 0; i < FSM_PWD_LOCK_SLOTS; i++)
+        if (strcmp(s_fsm.pwd_locks[i].uid, uid) == 0)
+            return &s_fsm.pwd_locks[i];
+    return NULL;
+}
+
+static void timer_fire(fsm_timer_t id);   /* 定义在本文件后段 */
+
+static void pwd_fail_once(const char *uid, int64_t now_ms)
+{
+    uid_flow(uid, true, DG_ROLE_NORMAL, DG_AUTH_PWD);
+    DG_CHECK(s_fsm.step == V_PICK_METHOD);
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.method = DG_METHOD_PWD;
+    auth_fsm_handle(&s_fsm, FSM_EV_METHOD_PICK, &d);
+    DG_CHECK(s_fsm.step == V_PWD);
+    memset(&d, 0, sizeof(d));
+    d.result.method = DG_METHOD_PWD;
+    d.result.ok = false;
+    d.result.reason = DG_REASON_WRONG_PWD;
+    d.result.now_ms = now_ms;
+    auth_fsm_handle(&s_fsm, FSM_EV_VERIFY_RESULT, &d);
+    DG_CHECK(s_fsm.state == ST_RESULT);
+    timer_fire(FSM_TMR_RESULT_3S);
+    DG_CHECK(s_fsm.state == ST_NORMAL);
 }
 
 /* 分步驱动(需要断言中间动作时用,如 ASK_UID/ASK_PWD) */
@@ -483,8 +515,8 @@ static void t08_pwd_lock(void)
         auth_fsm_handle(&s_fsm, FSM_EV_TIMER, &d);
         DG_CHECK(s_fsm.state == ST_NORMAL);
     }
-    DG_CHECK(s_fsm.lock_fail_cnt == 0);             /* 第 5 次触发锁定并清零 */
-    DG_CHECK(s_fsm.lock_until_ms == 5 * 10000 + 60 * 1000);
+    DG_CHECK(lock_slot("10001")->fail_cnt == 0);     /* 第 5 次触发锁定并清零 */
+    DG_CHECK(lock_slot("10001")->lock_until_ms == 5 * 10000 + 60 * 1000);
 
     /* 第 6 次:输入 ID 后服务层预检 locked → 直接红弹窗,不计次数 */
     uid_flow("10001", true, DG_ROLE_NORMAL, DG_AUTH_PWD);
@@ -503,6 +535,27 @@ static void t08_pwd_lock(void)
 
     /* 锁定 60s 过后:预检放行 */
     DG_CHECK(!auth_fsm_pwd_locked(&s_fsm, "10001", 5 * 10000 + 61 * 1000));
+}
+
+/* ---- F08b 多 UID 交替试错不得互相顶掉计数(2026-09-28 单槽缺陷回归) ---- */
+
+static void t08b_pwd_lock_multi_uid(void)
+{
+    printf("[F08b] A 错4次→B 错1次→A 再错:A 的计数不被 B 顶掉,第 5 次锁定\n");
+    fsm_reset();
+    /* 交替到第 5 轮:A 共 5 错(锁定),B 只有 1 错(不锁)。
+     * 旧单槽实现里 B 的那次失败会把 lock_uid 切到 B、计数归 1,
+     * A 永远到不了 5 ——两个 ID 轮流试就绕过锁定 */
+    for (int i = 1; i <= 4; i++) {
+        pwd_fail_once("10001", (int64_t)i * 10000);         /* A 错 4 次 */
+    }
+    pwd_fail_once("20002", 5 * 10000);                      /* B 错 1 次 */
+    pwd_fail_once("10001", 6 * 10000);                      /* A 第 5 错 → 锁定 */
+
+    DG_CHECK(auth_fsm_pwd_locked(&s_fsm, "10001", 6 * 10000 + 1000));
+    DG_CHECK(!auth_fsm_pwd_locked(&s_fsm, "20002", 6 * 10000 + 1000));
+    DG_CHECK(lock_slot("10001")->lock_until_ms == 6 * 10000 + 60 * 1000);
+    DG_CHECK(lock_slot("20002")->fail_cnt == 1);
 }
 
 /* ================= 9 结果 3s 自动回;期间新验证请求被忽略 ================= */
@@ -929,6 +982,7 @@ int main(void)
     t06_step_timeout_and_stale_timer();
     t07_admin_flow();
     t08_pwd_lock();
+    t08b_pwd_lock_multi_uid();
     t09_result_ignores_requests();
     t10_standby();
     t10b_menu_timeout();

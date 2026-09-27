@@ -227,7 +227,7 @@ void bridge_init(void)
     event_bus_subscribe(EV_ENROLL_RESULT, on_enroll_result, NULL);
     event_bus_subscribe(EV_VISION_QUALITY, on_vision_quality, NULL);
     event_bus_subscribe(EV_NET_CFG_RESULT, on_net_cfg_result, NULL);
-    DG_LOGI("[BRIDGE]", "事件桥就绪(16 订阅)");
+    DG_LOGI("[BRIDGE]", "事件桥就绪(17 订阅)");
 }
 
 void bridge_btn(const ev_ui_btn_t *btn)

@@ -22,7 +22,6 @@
 #include "face_quality.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
-#include "storage.h"
 #include "theme.h"
 #include "widgets/dg_avatar.h"
 #include "widgets/dg_btn.h"

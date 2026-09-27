@@ -7,11 +7,11 @@
  * 触摸输入:evdev 自动探测(fts_ts/goodix,见 touch_evdev.c),注册 pointer indev。
  */
 #include "display.h"
+#include "types.h"   /* DG_SCREEN_W/H(2026-09-28 起 proto 契约,不再借 ui/theme.h) */
 #include "dg_log.h"
 #include "lvgl.h"
 #include "../../third_party/lv_drivers/drm.h"
 #include "touch_evdev.h"
-#include "ui/theme.h"
 
 #include <stdlib.h>
 #include <stdio.h>
