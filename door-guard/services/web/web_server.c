@@ -1745,6 +1745,39 @@ static int on_ntp_result(const event_t *e, void *ud)
     return 0;
 }
 
+/* 活跃 WS 连接数:0 = 无客户端,周期推送直接跳过(不占推送队列挤实时事件) */
+static int ws_active_count(void)
+{
+    int n = 0;
+    for (int i = 0; i < WS_MAX_CONN; i++)
+        if (s_ws[i])
+            n++;
+    return n;
+}
+
+/* loop 定时(5s):运行时长推送——上位机概览不再等 30s 轮询。
+ * /proc/uptime 纯内存文件读取,与 net_watch 同级开销 */
+static void uptime_push_cb(void *arg)
+{
+    (void)arg;
+    if (!s_started || ws_active_count() == 0)
+        return;
+    int64_t up = read_uptime_s();
+    char uptext[48];
+    fmt_uptime(up, uptext, sizeof(uptext));
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "uptime");
+    cJSON_AddNumberToObject(root, "uptime_s", (double)up);
+    cJSON_AddStringToObject(root, "uptime_text", uptext);
+    char *s = cJSON_PrintUnformatted(root);
+    if (s) {
+        ws_enqueue(s);
+        ws_push_async();
+        free(s);
+    }
+    cJSON_Delete(root);
+}
+
 /* ---- 地址变化监视(loop 5s 定时)与 EV_NET_ADDR → WebSocket ---- */
 
 /* 上次推送的地址快照(loop 线程私有);变化才推送,续租同址不刷屏 */
@@ -1863,6 +1896,7 @@ static void web_setup(void *arg)
     else
         DG_LOGI(TAG, "web 上位机就绪 :%d(版本 %s)", s_port, DG_FW_VERSION);
     mg_timer_add(netcore_mgr(), 5000, MG_TIMER_REPEAT, net_watch_cb, NULL);
+    mg_timer_add(netcore_mgr(), 5000, MG_TIMER_REPEAT, uptime_push_cb, NULL);
     net_watch_cb(NULL);                  /* 起服即记录基线地址(变化才推) */
 }
 

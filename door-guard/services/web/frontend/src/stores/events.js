@@ -1,15 +1,16 @@
 /*
  * events.js — 实时事件流(WebSocket 落地)
  *
- * 服务端推两种消息:auth(每次验证)与 ntp(时间校正结果)。这里做三件事:
+ * 服务端推送:auth(每次验证)/ ntp(校时结果)/ net(地址变化)/
+ * uptime(运行时长,5s 一次)。这里做三件事:
  *   1) 维护滚动缓冲(最多 MAX 条,最新的在最前);
  *   2) 把连接状态暴露给顶栏指示;
- *   3) 把 ntp 结果转成提示并刷新设备快照(校正后时间/状态变了)。
+ *   3) 把业务消息转成提示/快照刷新(校正、地址、运行时长)。
  */
 import { computed, reactive } from 'vue'
 import { createEventSocket } from '../api/ws'
 import { getToken } from '../api/client'
-import { refreshQuiet } from './device'
+import { applyUptime, refreshQuiet } from './device'
 import { toast } from './toast'
 
 const MAX_ITEMS = 60
@@ -47,6 +48,11 @@ function onEvent(msg) {
      * 静态地址切换会断开本页连接,提示用户改用新地址访问 */
     toast.info(msg.msg || '设备网络已更新')
     refreshQuiet()
+    return
+  }
+  if (msg.type === 'uptime') {
+    /* 设备周期推送运行时长:概览页实时,无需刷新页面 */
+    applyUptime(msg)
   }
 }
 

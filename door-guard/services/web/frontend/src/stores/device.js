@@ -61,6 +61,14 @@ export async function refreshNetwork() {
   }
 }
 
+/** WS 推送的运行时长(5s 一次):概览页不再等 30s 轮询 */
+export function applyUptime(d) {
+  if (state.data && d) {
+    state.data.uptime_s = d.uptime_s
+    state.data.uptime_text = d.uptime_text
+  }
+}
+
 export async function refresh() {
   state.loading = true
   refreshNetwork()                        /* 并行取,不阻塞设备快照 */
