@@ -250,6 +250,7 @@ static void cap_invalidate(void)
 /* ---- 特征库维护 ---------------------------------------------------------- */
 
 static int lib_del(const char *user_id);   /* lib_add 的覆盖语义要先删后加 */
+static bool antispoof_challenge(void);     /* search_1n 使用,定义在识别路径后 */
 
 static int lib_load_cb(const char *user_id, const uint8_t *plain,
                        uint16_t len, void *ud)
