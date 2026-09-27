@@ -135,6 +135,10 @@ static void on_mode(lv_event_t *e)
     dg_popup_choice(_("接入方式"), opts, 2, draft_set_static, NULL, NULL);
 }
 
+static void edit_ip(void *ud, const char *text);
+static void edit_mask(void *ud, const char *text);
+static void edit_gw(void *ud, const char *text);
+
 static void edit_ip(void *ud, const char *text)
 {
     (void)ud;
@@ -242,8 +246,8 @@ void page_net_set_set_addr(const char *ifname, const char *ip,
         return;
     char buf[128];
     if (have_ip)
-        snprintf(buf, sizeof(buf), "%s: %s · %s: %s",
-                 _("接口"), ifname, _("网关"), gw);
+        snprintf(buf, sizeof(buf), "%s: %s · IP: %s · %s: %s",
+                 _("接口"), ifname, ip, _("网关"), gw);
     else
         snprintf(buf, sizeof(buf), "%s", _("当前无网络地址"));
     lv_label_set_text(s_addr_line, buf);

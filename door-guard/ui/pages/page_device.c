@@ -92,8 +92,9 @@ static void refresh_time(void)
 
 static void status_timer_cb(lv_timer_t *t)
 {
+    (void)t;
     refresh_time();
-    refresh_rows(t->user_data);
+    refresh_rows(NULL);
 }
 
 static const int standby_opts[] = { 15, 30, 45, 60 };
