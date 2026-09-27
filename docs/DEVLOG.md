@@ -4,6 +4,31 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-27(续)三问排查:web 中文名设备端空白/NTP 慢 8 小时/两套网络配置分层
+
+**结论与修复**:
+1. **web 改中文名设备端显示空白**:根因 = 设备端是位图字体(gen.sh 按 lang/*.json
+   字集生成),web 是浏览器渲染;用户名字形(唐/力/俊/杰)不在字集 → label 无字形
+   可画,菜单等预置文案全在字集内所以正常。修复 = font/symbols_cjk.txt(GB2312
+   全集 6763 字)入库,gen.sh 把 **16/26/30px 三档**并入(姓名出现档位:主页验证
+   提示 30px/列表行 26px/编辑页 30px);40px 标题档只渲染预置文案,保持小字集。
+   代价:lvgl9 lv_conf 开 `LV_FONT_FMT_TXT_LARGE`(三档位图超 1MB,20 位
+   bitmap_index 溢出编译 #error;**注意改的是 third_party/lvgl9/lv_conf.h,8.3
+   目录的同名文件是回退用**);应用 5.07MB → 10.6MB。
+2. **NTP"不准"**:SNTP 同步的 UTC 一直是对的,rootfs `/etc/localtime → Etc/UTC`
+   且无 TZ,展示慢 8 小时。修复 = main 最前 `setenv("TZ","CST-8",1)`(POSIX TZ
+   内建解析,不依赖 tzdata;板上实测 `TZ=CST-8 date` 正确)。UI 时钟/web
+   last_ok_at/日志时间戳全进程生效,板上验证 last_ok_at=14:02 北京时间。
+3. **两套网络配置分层**(答疑,不改代码):系统层 `/etc/network/interfaces`
+   (ifupdown,S40network,用户手动配的 static)+ S41dhcpcd;应用层 device_config
+   `net_mode/net_ip/net_mask/net_gw`(web/设备端写入,net_cfg 服务开机应用,
+   static 时 dhcpcd -x + ip addr,启动最晚所以实际生效)。两者当前一致不冲突;
+   interfaces 是保底(保证 ssh 可达),应用层是 web 可改的运行时覆盖。
+
+**遗留**:GB2312 之外的超集生僻字(𠮷之类)仍无法显示,极小概率,遇到再说;
+字体让仓库 .c 增大(30px 源 16.7MB),git 体积可接受。
+
+---
 ## 2026-09-27 网络配置(IP/掩码/网关)+ NTP 完善 + 主页 IP;CRLF 推板大坑
 
 **做了什么**(宿主 32/32 绿、交叉零告警、板上验证通过):
