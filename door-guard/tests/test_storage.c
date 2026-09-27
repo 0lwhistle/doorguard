@@ -157,6 +157,79 @@ static void test_add(void)
 /* ================= 2 密码 ================= */
 
 /* 字段合法性:UI 弹窗已即时拦,存储层是权威兜底(脚本/上位机/API 绕不过) */
+/* 编辑(update)的唯一性:IC/指纹/人脸与他人重复必须拒;与自身原值相同
+ * (web 编辑路径会带原值回写)必须放行——"排除自身"语义的回归防线 */
+static void test_update_dup(void)
+{
+    printf("[S8] update 唯一性:IC/指纹/人脸跨用户拒,原值回写放行,密码可重复\n");
+    fresh_setup();
+
+    /* 甲:人脸+指纹+IC 全套;乙:另一套;密码相同(密码允许重复) */
+    user_rec_t a = make_user("50001", "甲", "samepwd");
+    memset(a.face_vec, 0xAA, 64);
+    a.face_vec_len = 64;
+    memset(a.finger_vec, 0x55, 32);
+    a.finger_vec_len = 32;
+    snprintf(a.ic_card, sizeof(a.ic_card), "IC-A-0001");
+    DG_CHECK(db_user_add(&a) == DG_OK);
+
+    user_rec_t b = make_user("50002", "乙", "samepwd");
+    memset(b.face_vec, 0xBB, 64);
+    b.face_vec_len = 64;
+    memset(b.finger_vec, 0x66, 32);
+    b.finger_vec_len = 32;
+    snprintf(b.ic_card, sizeof(b.ic_card), "IC-B-0002");
+    DG_CHECK(db_user_add(&b) == DG_OK);
+
+    user_rec_t ra, rb;
+    DG_CHECK(db_user_get("50001", &ra) == DG_OK);
+    DG_CHECK(db_user_get("50002", &rb) == DG_OK);
+
+    /* 密码可重复:甲乙同明文,验证都对 */
+    DG_CHECK(db_verify_password("50001", "samepwd", NULL) == DG_OK);
+    DG_CHECK(db_verify_password("50002", "samepwd", NULL) == DG_OK);
+
+    /* 编辑甲:IC 改成乙的 → 拒 */
+    user_rec_t e = ra;
+    snprintf(e.ic_card, sizeof(e.ic_card), "IC-B-0002");
+    DG_CHECK(db_user_update(&e) == DG_ERR_DUP_IC);
+
+    /* 编辑甲:face 改成乙的 → 拒 */
+    e = ra;
+    memcpy(e.face_vec, rb.face_vec, rb.face_vec_len);
+    e.face_vec_len = rb.face_vec_len;
+    DG_CHECK(db_user_update(&e) == DG_ERR_DUP_FACE);
+
+    /* 编辑甲:finger 改成乙的 → 拒 */
+    e = ra;
+    memcpy(e.finger_vec, rb.finger_vec, rb.finger_vec_len);
+    e.finger_vec_len = rb.finger_vec_len;
+    DG_CHECK(db_user_update(&e) == DG_ERR_DUP_FINGER);
+
+    /* web 编辑路径:读原记录、只改 name/role,face/finger/ic 原值回写 →
+     * 必须放行(排除自身;否则带人脸的老用户在 web 一编辑就报 DUP_FACE) */
+    e = ra;
+    snprintf(e.user_name, sizeof(e.user_name), "甲改");
+    e.role = DG_ROLE_ADMIN;
+    DG_CHECK(db_user_update(&e) == DG_OK);
+    DG_CHECK(db_user_get("50001", &ra) == DG_OK);
+    DG_CHECK(strcmp(ra.user_name, "甲改") == 0 && ra.role == DG_ROLE_ADMIN);
+    DG_CHECK(ra.face_vec_len == 64);            /* 特征原值未丢 */
+
+    /* 编辑甲:IC/特征原样重写(值未变)→ 放行 */
+    e = ra;
+    DG_CHECK(db_user_update(&e) == DG_OK);
+
+    /* IC 改成全新值 → 放行 */
+    e = ra;
+    snprintf(e.ic_card, sizeof(e.ic_card), "IC-A-9999");
+    DG_CHECK(db_user_update(&e) == DG_OK);
+    DG_CHECK(db_user_get("50001", &ra) == DG_OK);
+    DG_CHECK(strcmp(ra.ic_card, "IC-A-9999") == 0);
+
+    storage_deinit();
+}
+
 static void test_field_valid(void)
 {
     printf("[S7] 字段合法性:非法 ID/姓名/密码一律拒(与 proto/valid.h 同规则)\n");
@@ -591,6 +664,7 @@ int main(void)
 {
     test_add();          /* 含 2000 边界,最慢 */
     test_password();
+    test_update_dup();
     test_field_valid();
     test_user_list_ids();
     test_logs();
