@@ -13,6 +13,7 @@ import NetworkCard from '../components/NetworkCard.vue'
 import StatGrid from '../components/StatGrid.vue'
 import { useClock } from '../composables/useClock'
 import { triggerNtp } from '../api/ntp'
+import { rebootSystem } from '../api/system'
 import { setNetwork } from '../api/network'
 import { address, device, refreshNetwork, refreshQuiet, storageText } from '../stores/device'
 import { clearFeed, events } from '../stores/events'
@@ -21,6 +22,7 @@ import { toast } from '../stores/toast'
 const clock = useClock()
 const ntpBusy = ref(false)
 const netBusy = ref(false)
+const rebootBusy = ref(false)
 
 const statItems = computed(() => {
   const d = device.data || {}
@@ -75,12 +77,35 @@ async function onApplyNetwork(cfg) {
     }, 1500)
   }
 }
+/** 远程重启:确认后受理;设备约 1s 后断连,重启完成前页面不可用属预期 */
+async function onReboot() {
+  if (rebootBusy.value) return
+  if (!window.confirm('确认重启设备?重启期间门禁与上位机将短暂不可用。')) return
+  rebootBusy.value = true
+  try {
+    await rebootSystem()
+    toast.info('已受理:设备正在重启,稍后请刷新页面重新访问')
+  } catch (err) {
+    toast.err(err.message)
+    rebootBusy.value = false
+  }
+}
+
 </script>
 
 <template>
   <AppCard title="设备概览" span2 :index="0">
     <template #actions>
       <AppButton variant="ghost" size="sm" icon="refresh" @click="refreshQuiet">刷新</AppButton>
+      <AppButton
+        variant="warn"
+        size="sm"
+        icon="warn"
+        :loading="rebootBusy"
+        @click="onReboot"
+      >
+        重启设备
+      </AppButton>
     </template>
     <StatGrid :items="statItems" />
   </AppCard>

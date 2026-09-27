@@ -43,6 +43,7 @@ extern "C" {
 
 /* SYSTEM:系统/装配层(看门狗 → UI/web 上位机) */
 #define EV_SYS_SERVICE_STATE EV_DEF(DG_MODULE_ID_SYSTEM, 0x0010) /**< 服务状态变化(降级/禁用通知) */
+#define EV_SYS_REBOOT        EV_DEF(DG_MODULE_ID_SYSTEM, 0x0011) /**< 设备重启请求(ev_sys_reboot_t) */
 
 /* CAPTURE:取流状态(capture → UI/服务) */
 #define EV_CAPTURE_STATE     EV_DEF(DG_MODULE_ID_CAPTURE, 0x0001) /**< 就绪/断流 */
@@ -197,6 +198,11 @@ typedef struct {
     int32_t state;                        /**< registry_state_t 值 */
     int32_t err;                          /**< 预留(0 = 无) */
 } ev_sys_service_state_t;
+
+/** EV_SYS_REBOOT:设备重启请求(设备端 UI/web → sysctl 服务;2026-09-27) */
+typedef struct {
+    uint32_t delay_ms;                    /**< 延迟执行:让 HTTP 回执/弹窗先落地 */
+} ev_sys_reboot_t;
 
 /** EV_NET_NTP_RESULT */
 typedef struct {
@@ -394,6 +400,7 @@ _Static_assert(sizeof(ev_web_set_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_set_t �
 _Static_assert(sizeof(ev_web_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_state_t 超限");
 _Static_assert(sizeof(ev_web_set_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_set_result_t 超限");
 _Static_assert(sizeof(ev_sys_service_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_sys_service_state_t 超限");
+_Static_assert(sizeof(ev_sys_reboot_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_sys_reboot_t 超限");
 _Static_assert(sizeof(ev_finger_status_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_finger_status_t 超限");
 _Static_assert(sizeof(ev_ic_card_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ic_card_t 超限");
 _Static_assert(sizeof(ev_door_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_door_state_t 超限");

@@ -88,7 +88,16 @@ commit_draft(查重落库一次完成,DUP_FACE 保存时报草稿保留),直接�
 discard_draft 安全擦除;清除人脸改草稿标志同步清;dirty 全覆盖(字段/ADD
 待建/人脸草稿/清除标志);编辑页「已拍摄,未保存」「待清除,未保存」+
 内存头像预览(dg_avatar_decode);测试改写(test_enroll_flow 7 段、e2e commit
-语义);直调登记 proposal §1。 |
+语义);直调登记 proposal §1。⑪ **2026-09-27(续十四:设备重启双入口,
+34/34 绿,交叉编译零告警)**:sysctl 服务(services/sysctl+modules/sysctl)
+为重启唯一执行点——UI/web 均发 EV_SYS_REBOOT{delay_ms},服务去重后分离线程
+延迟执行;原语 sync→system("reboot")(busybox 经 init 干净关停)→失败兜底
+reboot() 系统调用;宿主构建 DG_SYSCTL_FAKE 模拟(root 跑 sim 防真重启);
+入口①设备管理页红色「重启设备」+红色确认;入口②web POST /api/system/reboot
+(202 后 1s 执行)+概览页按钮;test_sysctl 新增(34/34),api_test 补 4 用例,
+前端 vitest 45/45+frontend_check 过;坑:pages/ 产物 CRLF 破坏资源表长度
+(eol=lf 补属性),WSL npm 无网→前端构建只能在权威克隆(Windows 提交源码→
+WSL pull 构建产物→WSL 提交产物)。 |
 
 ---
 

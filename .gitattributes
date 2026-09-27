@@ -7,3 +7,6 @@
 *.py text eol=lf
 env/bin/* text eol=lf
 board/rootfs-overlay/** text eol=lf
+# 前端构建产物:gen_pages.sh 把文件长度编进 web_pages.c 资源表,CRLF 会让
+# 长度对不上(frontend_check 抓"声明 N 实际 N+行数")
+door-guard/services/web/pages/** text eol=lf

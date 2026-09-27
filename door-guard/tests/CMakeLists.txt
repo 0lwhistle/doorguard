@@ -41,6 +41,9 @@ dg_add_test(test_npu_pre dg_rknn_face)
 dg_add_test(test_enroll_flow dg_enroll dg_vision dg_storage dg_config
                              dg_tasker dg_event_bus dg_proto cjson)
 set_tests_properties(test_enroll_flow PROPERTIES TIMEOUT 120)
+
+# 系统控制(重启请求链路;宿主 DG_SYSCTL_FAKE 模拟,不真重启)
+dg_add_test(test_sysctl dg_sysctl dg_event_bus dg_proto)
 target_include_directories(test_npu_pre PRIVATE ${CMAKE_SOURCE_DIR}/drv/npu)
 add_executable(test_e2e test_e2e.c)
 target_include_directories(test_e2e PRIVATE ${CMAKE_SOURCE_DIR}/services/access ${CMAKE_SOURCE_DIR}/services/vision)

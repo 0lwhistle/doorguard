@@ -18,6 +18,7 @@
  *   GET  /api/network     网络配置快照(接口/IP/掩码/网关/模式;未拿到=0.0.0.0)
  *   POST /api/network     应用网络配置(DHCP 或 静态 IP/掩码/网关;持久化+后台应用)
  *   POST /api/account     改账号/口令(需旧口令;成功后所有会话失效)
+ *   POST /api/system/reboot  远程重启(→ EV_SYS_REBOOT;202 回执后 1s 执行)
  *   POST /api/ota/upload  OTA 包流式接收(MG_EV_HTTP_HDRS + MG_EV_READ 喂入,
  *                         按 ota_can_accept() 限流,绝不阻塞 loop;见 ota_service.h)
  *   GET  /api/ws          WebSocket:实时推送认证事件/NTP 结果/网络地址变化
@@ -1420,6 +1421,20 @@ static void handle_users_face_clear(struct mg_connection *c, struct mg_http_mess
     json_msg(c, 202, "清除请求已受理");
 }
 
+/* 远程重启:与设备端「重启设备」同一入口(EV_SYS_REBOOT → sysctl 服务)。
+ * 延迟 1s 发布执行,让本 202 回执先落到客户端再断连 */
+static void handle_system_reboot(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    const ev_sys_reboot_t ev = { .delay_ms = 1000 };
+    EVENT_BUS_PUBLISH(EV_SYS_REBOOT, &ev);
+    DG_LOGI(TAG, "web 触发设备重启");
+    json_msg(c, 202, "重启请求已受理,设备即将重启");
+}
+
 /* ---- 门禁/系统设置(meta 表权威范围;写走 cfg_set_* 同一入口) ---- */
 
 typedef struct {
@@ -1591,6 +1606,7 @@ static const route_t s_routes[] = {
     { "POST", "/api/users/face_clear", "清除人脸只接受 POST",   handle_users_face_clear },
     { "GET",  "/api/access_set",       "门禁设置只接受 GET",    handle_access_set_get },
     { "POST", "/api/access_set",       "门禁设置只接受 POST",   handle_access_set_post },
+    { "POST", "/api/system/reboot",    "重启接口只接受 POST",   handle_system_reboot },
 };
 
 /* 分派次序:精确路由 → /api/ws 升级 → 未知 /api/ 回 JSON 404 →

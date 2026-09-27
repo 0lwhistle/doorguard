@@ -332,6 +332,18 @@ if(NOT DG_GIT_DESC)
 endif()
 target_compile_definitions(dg_net PUBLIC DG_FW_VERSION="${DG_GIT_DESC}")
 
+# sysctl:系统控制(设备重启;UI/web 经 EV_SYS_REBOOT 请求,服务统一执行。
+# 宿主构建注入 DG_SYSCTL_FAKE=sim/ctest 只模拟重启,不真执行)
+add_library(dg_sysctl STATIC services/sysctl/sysctl_service.c
+                             modules/sysctl/sysctl.c)
+target_include_directories(dg_sysctl PUBLIC ${CMAKE_SOURCE_DIR}/services/sysctl
+                                            ${CMAKE_SOURCE_DIR}/modules/sysctl
+                                            ${CMAKE_SOURCE_DIR}/proto)
+target_link_libraries(dg_sysctl PUBLIC dg_proto dg_event_bus dg_log)
+if(DG_SIM OR DG_BUILD_TESTS)
+    target_compile_definitions(dg_sysctl PRIVATE DG_SYSCTL_FAKE=1)
+endif()
+
 if(DG_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
@@ -415,7 +427,7 @@ add_executable(door-guard app/main.c)
 target_link_libraries(door-guard PRIVATE
     -Wl,--start-group
     dg_event_bus dg_tasker dg_holder dg_registry dg_proto dg_storage dg_config
-    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_gpio dg_uart dg_net dg_display dg_camera
+    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_gpio dg_uart dg_net dg_sysctl dg_display dg_camera
     -Wl,--end-group)
 
 if(DG_SIM)

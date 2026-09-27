@@ -99,6 +99,17 @@ R=$(curl -s -m 3 -X POST $B/api/users/delete -H "$A" -H "Content-Type: applicati
   -d '{"uid":"nouser99"}')
 ck "删不存在回 404 文案" "用户不存在" "$R"
 
+# 远程重启(宿主 sim 是 DG_SYSCTL_FAKE 模拟执行,不会真重启)
+R=$(curl -s -m 3 $B/api/system/reboot)
+ck "重启只接受 POST" "重启接口只接受 POST" "$R"
+R=$(curl -s -m 3 -X POST $B/api/system/reboot)
+ck "未授权重启被拒" "未登录" "$R"
+R=$(curl -s -m 3 -X POST $B/api/system/reboot -H "$A")
+ck "重启请求受理" "重启请求已受理" "$R"
+sleep 2
+R=$(curl -s -m 3 -H "$A" "$B/api/device")
+ck "模拟重启后设备仍在(宿主不真重启)" '"version"' "$R"
+
 # 门禁设置读
 R=$(curl -s -m 3 -H "$A" "$B/api/access_set")
 ck "设置含 door_open_ms" "door_open_ms" "$R"

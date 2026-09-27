@@ -29,6 +29,7 @@
   | GET | `/api/logs` | token | `from,to,user_id,page,page_size(≤100)` 分页 JSON,字段与 access_logs 一致 |
   | POST | `/api/ntp` | token | 异步触发(202),结果经 WebSocket 回 |
   | POST | `/api/account` | token + 旧口令 | 改账号/口令,成功后**吊销全部会话** |
+  | POST | `/api/system/reboot` | token | **远程重启**(2026-09-27):202 受理后延迟 1s 发布 `EV_SYS_REBOOT` → sysctl 服务执行(与设备端「重启设备」同一入口);重启期间门禁与上位机短暂不可用 |
   | POST | `/api/ota/upload` | token | 流式收包 + sha256 校验(§2) |
   | GET | `/api/ws` | `?token=` | WebSocket 推送四类消息:`auth`(验证事件)/ `ntp`(校时结果)/ `net`(地址变化,web 轮询与 5s 监视触发)/ `uptime`(运行时长,5s 周期,概览实时显示) |
 

@@ -6,7 +6,7 @@
  *     event_bus → tasker → storage → config → camera
  *   registry(components/registry):services 层(依赖可跨表解析到 holder)
  *     capture → vision_service → vision_backend → access → enroll → liveness
- *     → ntp → web → mdns → ui
+ *     → ntp → sysctl → net_cfg → web → mdns → ui
  *
  * 初始化完成后 main 线程转看门狗(5s 巡检):
  *   - 可选服务异常/心跳超龄 → 重启一次 → 仍异常置 DISABLED + EV_SYS_SERVICE_STATE
@@ -34,6 +34,7 @@
 #include "net/net_cfg.h"
 #include "ntp/ntp_service.h"
 #include "registry.h"
+#include "sysctl/sysctl_service.h"
 #include "web/web_server.h"
 #include "storage.h"
 #include "tasker.h"
@@ -206,6 +207,13 @@ static int mod_web(void)
     return web_server_start();
 }
 
+/* sysctl:设备重启统一执行点(设备管理页/web 经 EV_SYS_REBOOT 请求)。
+ * 必须真装配:只 include 头不初始化时请求被静默丢弃(同 ntp 的坑) */
+static int mod_sysctl(void)
+{
+    return sysctl_service_start();
+}
+
 static int mod_mdns(void)
 {
     return mdns_start();
@@ -261,6 +269,7 @@ static registry_err_t register_services(void)
         { "enroll",         mod_enroll,         false, DEP_TASKER_ONLY, 1, NULL },
         { "liveness",       mod_liveness,       false, DEP_TASKER_ONLY, 1, NULL },
         { "ntp",            mod_ntp,            false, DEP_EVENT_BUS,   1, NULL },
+        { "sysctl",         mod_sysctl,         false, DEP_EVENT_BUS,   1, NULL },
         { "net_cfg",        mod_net_cfg,        false, DEP_CONFIG,      1, NULL },
         { "web",            mod_web,            false, DEP_WEB,         2,
           web_server_heartbeat_ms },

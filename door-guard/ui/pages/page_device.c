@@ -149,6 +149,26 @@ static void on_web(lv_event_t *e)
     navigator_push("web_set");
 }
 
+/* 重启设备:红色确认(spec 删除类同规范)→ EV_SYS_REBOOT(sysctl 服务
+ * 延迟执行,延迟窗口让本提示先落地) */
+static void apply_reboot(void *ud, int idx)
+{
+    (void)ud;
+    if (idx != 0)
+        return;
+    const ev_sys_reboot_t ev = { .delay_ms = 1500 };
+    EVENT_BUS_PUBLISH(EV_SYS_REBOOT, &ev);
+    dg_popup_success(_("正在重启,设备即将关闭"), 1500, NULL, NULL);
+}
+
+static void on_reboot(lv_event_t *e)
+{
+    (void)e;
+    const char *const opts[] = { _("重启") };
+    dg_popup_choice_ex(_("确认重启设备?"), opts, 1, 1u << 0, apply_reboot,
+                       NULL, NULL);
+}
+
 static lv_timer_t *s_timer;
 
 void page_device_create(lv_obj_t *parent)
@@ -206,6 +226,14 @@ void page_device_create(lv_obj_t *parent)
     lv_obj_set_size(menuto, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
     lv_obj_align(menuto, LV_ALIGN_TOP_MID, 0, 180 + 5 * (DG_BTN_H + DG_PAD));
     lv_obj_add_event_cb(menuto, on_menu_timeout, LV_EVENT_CLICKED, NULL);
+
+    /* 重启设备(2026-09-27):破坏性操作=红色;web 同款能力走
+     * POST /api/system/reboot(同一 EV_SYS_REBOOT 入口) */
+    lv_obj_t *reboot = dg_btn_create_danger(parent, LV_SYMBOL_REFRESH,
+                                            _("重启设备"));
+    lv_obj_set_size(reboot, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
+    lv_obj_align(reboot, LV_ALIGN_TOP_MID, 0, 180 + 6 * (DG_BTN_H + DG_PAD));
+    lv_obj_add_event_cb(reboot, on_reboot, LV_EVENT_CLICKED, NULL);
 
     /* 按钮内追加「当前值」label(与门禁设置页同款手法:btn>row>label) */
     lv_obj_t *row1 = lv_obj_get_child(standby, 0);

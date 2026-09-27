@@ -4,6 +4,38 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-27(续十四)设备重启:设备管理页 + web 远程重启(34/34 绿,交叉编译零告警)
+
+用户需求:设备管理页加重启选项,点击即重启;暴露接口给 web 远程重启。
+1. **统一执行点 sysctl 服务(services/sysctl + modules/sysctl)**:UI/web 都发
+   `EV_SYS_REBOOT{delay_ms}`(写与命令走事件总线),服务去重(在途忽略重复)
+   后起分离线程延迟执行——不占事件总线工作线程。原语:sync →
+   `system("reboot")`(busybox,与 SSH 验证过的路径同源,经 init 干净关停,
+   SQLite 落盘安全)→ 失败兜底 reboot(RB_AUTOBOOT) 系统调用。main.c registry
+   注册 sysctl(依赖 event_bus;同 ntp 的坑:不装配请求就被静默丢弃)。
+2. **宿主不真重启(DG_SYSCTL_FAKE)**:sim/ctest 构建下 reboot 是模拟(CMake
+   按 DG_SIM/DG_BUILD_TESTS 注入)——WSL 里 root 跑 sim 有先例,真执行会把
+   宿主机带走。板上成功路径进程在关停中被杀,`sysctl_service_last_err()`
+   能看到返回即失败或宿主模拟。
+3. **两个入口**:设备管理页最下一行红色「重启设备」(红色确认弹窗,spec 删除
+   类同规范);web `POST /api/system/reboot`(token 鉴权,202 后 1s 执行,让
+   回执先落)+ 概览页「重启设备」按钮(window.confirm + toast)。延迟窗口:
+   UI 1.5s / web 1s。
+4. **验证**:test_sysctl 新增(受理→延迟执行→last_err=DG_OK;可重复;未装配
+   丢弃不崩),宿主 34/34 绿;交叉编译零告警;前端 vitest 45/45 +
+   frontend_check 通过(产物在 WSL 权威克隆重建,见下);api_test.sh 补
+   4 用例(405/401/202 受理/模拟重启后设备仍在)。
+5. **坑两枚**:①web 路由/前端 PATHS/资源表三方一致性靠 frontend_check.py
+   钉死,但 **pages/ 产物 CRLF 会让"声明长度=实际长度±行数"对不上**——
+   .gitattributes 补 `door-guard/services/web/pages/** text eol=lf`(属性
+   前缀漏 door-guard/ 一次,已修);②WSL npm 无网(localhost 代理不镜像
+   NAT),前端构建只能在权威克隆跑(有 node_modules):Windows 提交源码 →
+   push → WSL pull → build_frontend.sh → WSL 提交产物 → push。
+**下一步**:推板真机验收重启(重启后静态 IP 自恢复此前已验证);真机过
+反欺骗阈值标定仍待用户。
+
+---
+
 ## 2026-09-27(续十三)UI 色彩规范 + 编辑全字段草稿化(33/33 绿,交叉编译零告警)
 
 用户四条反馈:色彩两条、编辑流程两条。
