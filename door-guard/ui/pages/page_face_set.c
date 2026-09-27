@@ -137,7 +137,7 @@ static void build_row(lv_obj_t *parent, int idx, int y)
 
     /* 初始值文本(与滑条一致) */
     char t[16];
-    snprintf(t, sizeof(t), "%d", (int)(r->get(cfg_get()) * 100.0 + 0.5));
+    snprintf(t, sizeof(t), "%d", (int)(ROWS[idx].get(cfg_get()) * 100.0 + 0.5));
     lv_label_set_text(val, t);
 }
 
