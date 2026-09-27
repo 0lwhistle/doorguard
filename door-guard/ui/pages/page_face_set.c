@@ -21,10 +21,10 @@
 
 #include <stdio.h>
 
-/* 每行一个滑条:标题(左)/当前值(右)/滑条/一句说明 */
+/* 每行一个滑条:标题(左)/当前值(右)/滑条/一句说明。
+ * 文案(中文)必须以 _("...") 字面量出现(i18n 键提取与裸中文检查都认
+ * 这个形式),静态表只放非中文元数据,取词走 row_text() 的 switch。 */
 typedef struct {
-    const char *title;                 /* _() 键 */
-    const char *hint;                  /* _() 键 */
     const char *cfg_key;               /* cfg META 键名 */
     int min, max;                      /* 滑条范围(=阈值×100) */
     double (*get)(const dg_cfg_t *c);  /* 当前值读取(cfg 字段映射) */
@@ -35,14 +35,30 @@ static double get_match(const dg_cfg_t *c) { return c->face_match_threshold; }
 static double get_antispoof(const dg_cfg_t *c) { return c->antispoof_threshold; }
 
 static const face_row_t ROWS[] = {
-    { "人脸检测阈值", "调高:更难出框,误检少;调低:远处侧脸更易检出",
-      "det_threshold", 30, 95, get_det },
-    { "人脸识别阈值", "调高:防误认他人;调低:更易命中,需防认错",
-      "face_match_threshold", 30, 100, get_match },
-    { "活体检测阈值", "真脸分数低于此值将要求二次验证;调高更严",
-      "antispoof_threshold", 0, 100, get_antispoof },
+    { "det_threshold", 30, 95, get_det },
+    { "face_match_threshold", 30, 100, get_match },
+    { "antispoof_threshold", 0, 100, get_antispoof },
 };
 #define ROW_N (int)(sizeof(ROWS) / sizeof(ROWS[0]))
+
+/* 行文案(渲染时查语言表;与 ROWS 下标一一对应) */
+static void row_text(int idx, const char **title, const char **hint)
+{
+    switch (idx) {
+    case 0:
+        *title = _("人脸检测阈值");
+        *hint = _("调高:更难出框,误检少;调低:远处侧脸更易检出");
+        break;
+    case 1:
+        *title = _("人脸识别阈值");
+        *hint = _("调高:防误认他人;调低:更易命中,需防认错");
+        break;
+    default:
+        *title = _("活体检测阈值");
+        *hint = _("真脸分数低于此值将要求二次验证;调高更严");
+        break;
+    }
+}
 
 static lv_obj_t *s_sliders[ROW_N];
 static lv_obj_t *s_values[ROW_N];
@@ -83,13 +99,14 @@ static void slider_cb(lv_event_t *e)
 
 static void build_row(lv_obj_t *parent, int idx, int y)
 {
-    const face_row_t *r = &ROWS[idx];
+    const char *title, *hint;
+    row_text(idx, &title, &hint);
 
-    lv_obj_t *title = lv_label_create(parent);
-    lv_label_set_text(title, _(r->title));
-    lv_obj_set_style_text_font(title, DG_FONT_CN, 0);
-    lv_obj_set_style_text_color(title, DG_COL_TEXT(), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, DG_PAD, y);
+    lv_obj_t *tlabel = lv_label_create(parent);
+    lv_label_set_text(tlabel, title);
+    lv_obj_set_style_text_font(tlabel, DG_FONT_CN, 0);
+    lv_obj_set_style_text_color(tlabel, DG_COL_TEXT(), 0);
+    lv_obj_align(tlabel, LV_ALIGN_TOP_LEFT, DG_PAD, y);
 
     lv_obj_t *val = lv_label_create(parent);
     lv_obj_set_style_text_font(val, DG_FONT_CN, 0);
@@ -100,8 +117,8 @@ static void build_row(lv_obj_t *parent, int idx, int y)
     lv_obj_t *slider = lv_slider_create(parent);
     lv_obj_set_size(slider, DG_SCREEN_W - 2 * DG_PAD, 56);
     lv_obj_align(slider, LV_ALIGN_TOP_LEFT, DG_PAD, y + 44);
-    lv_slider_set_range(slider, r->min, r->max);
-    lv_slider_set_value(slider, (int32_t)(r->get(cfg_get()) * 100.0 + 0.5),
+    lv_slider_set_range(slider, ROWS[idx].min, ROWS[idx].max);
+    lv_slider_set_value(slider, (int32_t)(ROWS[idx].get(cfg_get()) * 100.0 + 0.5),
                         LV_ANIM_OFF);
     /* 蓝白主题:已填充段用主色,旋钮加大触摸区 */
     lv_obj_set_style_bg_color(slider, DG_COL_SCRIM(), LV_PART_MAIN);
@@ -111,12 +128,12 @@ static void build_row(lv_obj_t *parent, int idx, int y)
     lv_obj_add_event_cb(slider, slider_cb, LV_EVENT_RELEASED, NULL);
     s_sliders[idx] = slider;
 
-    lv_obj_t *hint = lv_label_create(parent);
-    lv_label_set_text(hint, _(r->hint));
-    lv_obj_set_style_text_font(hint, DG_FONT_SUB, 0);
-    lv_obj_set_style_text_color(hint, DG_COL_TEXT(), 0);
-    lv_obj_set_style_text_opa(hint, LV_OPA_70, 0);   /* 次要文字:正文色降透明(page_users 同款) */
-    lv_obj_align(hint, LV_ALIGN_TOP_LEFT, DG_PAD, y + 108);
+    lv_obj_t *hintlabel = lv_label_create(parent);
+    lv_label_set_text(hintlabel, hint);
+    lv_obj_set_style_text_font(hintlabel, DG_FONT_SUB, 0);
+    lv_obj_set_style_text_color(hintlabel, DG_COL_TEXT(), 0);
+    lv_obj_set_style_text_opa(hintlabel, LV_OPA_70, 0);
+    lv_obj_align(hintlabel, LV_ALIGN_TOP_LEFT, DG_PAD, y + 108);
 
     /* 初始值文本(与滑条一致) */
     char t[16];
