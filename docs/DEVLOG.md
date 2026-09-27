@@ -4,6 +4,31 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-27(续七)web 触摸端"按下变大"根因修复 + API 全量验收(四套全绿)
+
+**做了什么**:①修前端"按钮/选项一按就变大"——全仓排查确认应用内**无任何按下放大
+样式**(:active 是 scale 0.99 缩小,ripple 藏在 overflow:hidden 里),变大来自
+**浏览器触摸行为**:双击按钮触发页面缩放、iOS 聚焦 <16px 输入框自动放大、tap 后
+hover 态残留。修法:index.html viewport 加 maximum-scale=1,user-scalable=no;
+base.css html 全局 touch-action: manipulation + text-size-adjust:100% +
+tap-highlight 透明;.btn/.card 的 hover 抬升/提亮包进 @media (hover: hover)。
+②顺修 device.spec.js **存量 5 败**(与本修无关,118822c 起 refresh() 并行拉
+/api/device+/api/network,旧桩只 Once 一次,第二个请求 undefined 崩在 client.js
+res.status)——桩改按 URL 分发的 mockImplementation;refreshQuiet 用例改持久
+rejection;补 web_port=80 地址免端口断言。③前端产物重建入库(pages/ +
+web_pages.c,git 7b8750c;rebase 过并行推入的 iccard 文档 ece1a91)。
+④**API 全量验收**(WSL 宿主 sim,产物含新前端):web_test.sh **67/67**(前端静态
+一致性/资源可达/鉴权 401/方法 405/设备信息/日志查询分页/NTP 202+ws_test.py WS
+全流程/账号口令修改/注销/OTA sha256 三态/mDNS 报文级/登录风控 429)+
+api_test.sh **28/28**(用户 CRUD/查重/合法性/门禁设置边界)+ vitest **45/45** +
+frontend_check 通过 + ctest **32/32**。
+**坑**:WSL 默认 root,起 sim 绑 80 成功不触发回退,web_test.sh 打 8080 全挂——
+须先给 sim/data/cur_config.json 种 `network.web_port: 8080`(注意节名是
+network 不是 web;该文件测试不清,种一次后续复用)。
+**结论**:上位机 REST/WS/OTA/mDNS/风控全链路宿主侧无回归;触摸端观感修复待
+真机/手机浏览器复验。**下一步**:手机浏览器实测缩放修复观感;固件推板带新前端
+(dg-build 后 dg-deploy);剩余遗留同续五/续六(指纹/IC 硬件、活体、配网自启)。
+
 ## 2026-09-27(续六)IC 卡 SPI 读头:驱动-应用层协议设计定稿(仅文档,未动码)
 
 **做了什么**:新 `docs/tech/ICCARD_PROTOCOL.md`——SPI 读卡器 Linux 驱动与 door-guard

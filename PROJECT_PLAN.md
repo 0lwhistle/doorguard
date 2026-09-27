@@ -66,7 +66,17 @@ modules/net/net_cfg 与 dhcpcd 协调,开机 net_cfg 服务按 cfg=static 自动
 (切换失效/删除键溢出/空格无字);**web 默认端口 80**(doorguard.local 免端口直达,
 非 root 回退 8080);**GB2312 全集字体**(16/26/30px,web 录中文名设备端可显示,
 应用 5.1→10.6MB);**CRLF 推板坑三重防护**(.gitattributes/dg-deploy tr -d/
-Windows 侧推板方法入手册 §7.1)。 |
+Windows 侧推板方法入手册 §7.1)。⑨ **2026-09-27(续七:web 触摸端"按下变大"修复
++ API 全量验收,前端 45/45·web 67/67·api 28/28·ctest 32/32 全绿)**:根因=浏览器
+触摸行为而非 CSS——双击按钮触发页面缩放、iOS 聚焦 14px 输入框自动放大、tap 后
+hover 抬升/提亮残留;修法=viewport maximum-scale=1+user-scalable=no、html 全局
+touch-action: manipulation(兼消 300ms 点按延迟)、text-size-adjust 100%+
+tap-highlight 透明、.btn/.card hover 包 @media (hover: hover)。顺修 device.spec
+存量 5 败(refresh 并行两请求,桩改 URL 分发;补 80 端口省略断言)。验收全程
+WSL 宿主 sim:web_test.sh 67 项(静态/鉴权/405/日志分页/NTP+WS/账号/OTA/mDNS
+报文级/登录风控)+ api_test.sh 28 项(用户 CRUD/门禁设置校验)+ vitest 45 +
+frontend_check + ctest 32。**坑**:root 跑 sim 绑 80 不回退,须先给
+sim/data/cur_config.json 种 network.web_port=8080。 |
 
 ---
 
