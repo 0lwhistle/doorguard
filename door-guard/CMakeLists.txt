@@ -220,7 +220,8 @@ endif()
 # 纯 C、零硬件依赖 → 宿主与板上都编:这是"能在宿主验证"的部分,
 # 硬件侧(喂帧/推理)在 drv/npu,契约装配在 vision_rknn.c。
 add_library(dg_rknn_face STATIC services/vision/rknn_face.c
-                                services/vision/face_quality.c)
+                                services/vision/face_quality.c
+                                services/vision/face_antispoof.c)
 target_include_directories(dg_rknn_face PUBLIC ${CMAKE_SOURCE_DIR}/services/vision)
 target_link_libraries(dg_rknn_face PUBLIC m)
 
@@ -271,6 +272,12 @@ if(NOT DG_SIM AND NOT DG_BUILD_TESTS)
     # 验证 ArcFace 的输入归一化假设——错了这里立刻暴露,不会带到产品路径。
     add_executable(rknn_rec_test tools/rknn_rec_test.c)
     target_link_libraries(rknn_rec_test PRIVATE dg_npu dg_rknn_face)
+
+    # 反欺骗链路对拍(板上跑):喂 crop 好的 80×80 uint8 BGR raw,打印双模型
+    # 3 类概率与 real 均分;与 tools/convert_antispoof 导出的 raw 分数对拍,
+    # 不一致说明转换/输入域有错(期望值见 convert_antispoof/README)。
+    add_executable(rknn_spoof_test tools/rknn_spoof_test.c)
+    target_link_libraries(rknn_spoof_test PRIVATE dg_npu dg_rknn_face)
 endif()
 
 # liveness:动作活体(B7 留口 on_face/pass;B8 状态机)

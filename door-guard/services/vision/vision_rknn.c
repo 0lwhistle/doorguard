@@ -48,6 +48,7 @@
 #include "npu_pre.h"
 #include "rknn_face.h"
 #include "face_quality.h"
+#include "face_antispoof.h"
 
 #include <math.h>
 #include <pthread.h>
@@ -110,6 +111,15 @@ static uint8_t  s_avatar_warp[RKNN_AVATAR_SZ * RKNN_AVATAR_SZ * 3];
 static float   *s_norm_in;            /* ArcFace 输入(归一化 f32) */
 static int64_t  s_last_rec_ms;
 
+/* 反欺骗(MiniFASNet×2,2026-09-27):启动即加载(开关运行时可改);
+ * 加载失败只降级一次 ERROR——不挑战=现状行为,不阻断识别主链路 */
+static npu_model_t *s_spoof_a, *s_spoof_b;      /* V2(scale2.7)/V1SE(scale4.0) */
+static bool s_spoof_ready;
+static antispoof_smooth_t s_spoof_smooth;       /* 多帧中位数平滑(worker 独占) */
+static float s_spoof_real = -1.0f;              /* 最近平滑 real 概率(-1=尚无) */
+static uint8_t s_spoof_rgb[ANTISPOOF_PATCH_SZ * ANTISPOOF_PATCH_SZ * 3];
+static uint8_t s_spoof_bgr[ANTISPOOF_PATCH_SZ * ANTISPOOF_PATCH_SZ * 3];
+
 /* ---- worker 线程:推理重活全部离开主循环(UI 卡顿的根因,2026-09-22) ----
  * 信箱容量 1:主循环回调只投"最新帧编号",worker 忙时新帧顶掉旧帧并立即
  * 归还旧帧(零拷贝契约:V4L2 缓冲要么在处理要么已归还,不积压)。 */
@@ -170,6 +180,8 @@ static void pub_face_lost(void)
     if (!s_face_present)
         return;
     s_face_present = false;
+    antispoof_smooth_reset(&s_spoof_smooth);    /* 离场/换人:平滑窗口清零 */
+    s_spoof_real = -1.0f;
     EVENT_BUS_PUBLISH_EMPTY(EV_VISION_FACE_LOST);
 }
 
@@ -403,9 +415,12 @@ static void search_1n(const float *feat)
     snprintf(m.user_name, sizeof(m.user_name), "%s", rec.user_name);
     m.role = rec.role;
     m.score_permille = (int32_t)(best * 1000.0f + 0.5f);
+    /* 反欺骗疑似假体:命中照报,由 FSM 收口为"多模态二次验证" */
+    m.spoof_challenge = antispoof_challenge() ? 1 : 0;
     EVENT_BUS_PUBLISH(EV_VISION_MATCH_1N, &m);
-    DG_LOGI(TAG, "1:N 命中 %s(%s) %d‰", rec.user_id, rec.user_name,
-            m.score_permille);
+    DG_LOGI(TAG, "1:N 命中 %s(%s) %d‰%s", rec.user_id, rec.user_name,
+            m.score_permille,
+            m.spoof_challenge ? "(疑似假体,发起二次验证)" : "");
 }
 
 /* ---- 识别路径:ROI 裁剪 → 对齐 → 归一化 → ArcFace ------------------------ */
@@ -535,6 +550,69 @@ static bool recognize(const uint8_t *nv12, int w, int h,
         return false;
     rknn_l2_normalize(feat_out, s_rec_dim);
     return true;
+}
+
+/* ---- 反欺骗(MiniFASNet×2):分数生产,判定供命中发布时取用 -------------- */
+
+/* 反欺骗是否对本次命中发起挑战:使能 + 模型可用 + 平滑分低于阈值。
+ * 只在 1:N 检索(DETECT_1N)生效——录入/1:1 子步不挑战 */
+static bool antispoof_challenge(void)
+{
+    if (!cfg_get()->antispoof_enable || !s_spoof_ready || s_spoof_real < 0.0f)
+        return false;
+    return antispoof_is_spoof(s_spoof_real, (float)cfg_get()->antispoof_threshold);
+}
+
+/* 对当前检测帧跑双模型,更新平滑 real 概率(worker 线程独占)。
+ * 任一模型失败 = 本帧跳过(不动平滑器,连续失败会有 2s 节流日志) */
+static void antispoof_run(const uint8_t *nv12, int w, int h,
+                          const rknn_face_t *src)
+{
+    const int bx = (int)src->x1, by = (int)src->y1;
+    const int bw = (int)(src->x2 - src->x1), bh = (int)(src->y2 - src->y1);
+    const npu_model_t *models[2] = { s_spoof_a, s_spoof_b };
+    const float scales[2] = { ANTISPOOF_SCALE_A, ANTISPOOF_SCALE_B };
+    float real_sum = 0.0f;
+
+    for (int i = 0; i < 2; i++) {
+        int rx, ry, rw, rh;
+        antispoof_scale_box(bx, by, bw, bh, w, h, scales[i], &rx, &ry, &rw, &rh);
+        if (rw < 8 || rh < 8 || rx + rw > w || ry + rh > h)
+            return;                             /* 退化取景:本帧不计分 */
+        if (npu_pre_nv12_crop_rgb(nv12, w, w, h, rx, ry, rw, rh,
+                                  s_spoof_rgb, ANTISPOOF_PATCH_SZ,
+                                  ANTISPOOF_PATCH_SZ) != DG_OK)
+            return;
+        antispoof_rgb_to_bgr(s_spoof_rgb,
+                             ANTISPOOF_PATCH_SZ * ANTISPOOF_PATCH_SZ, s_spoof_bgr);
+        /* 输入 = BGR 原域 U8(官方 to_tensor 无 /255);softmax 已烤进模型 */
+        float prob[3];
+        uint32_t n = 0;
+        if (npu_model_run((npu_model_t *)models[i], s_spoof_bgr,
+                          sizeof(s_spoof_bgr), DG_NPU_TYPE_U8) != DG_OK ||
+            npu_model_output_f32((npu_model_t *)models[i], 0, prob, 3, &n) != DG_OK ||
+            n != 3) {
+            static int64_t last_err;
+            const int64_t t = now_ms();
+            if (t - last_err >= 2000) {
+                last_err = t;
+                DG_LOGE(TAG, "反欺骗模型 %d 推理失败(2s 节流)", i);
+            }
+            return;
+        }
+        real_sum += prob[1];                    /* [fake, real, other],label1=真 */
+    }
+    s_spoof_real = antispoof_smooth_push(&s_spoof_smooth, real_sum / 2.0f);
+
+    /* 标定日志:阈值 face.antispoof_threshold 的唯一依据 */
+    static int64_t last_log;
+    const int64_t t = now_ms();
+    if (t - last_log >= 2000) {
+        last_log = t;
+        DG_LOGI(TAG, "反欺骗 real=%.3f(阈值 %.2f %s)", s_spoof_real,
+                cfg_get()->antispoof_threshold,
+                cfg_get()->antispoof_enable ? "启用" : "未启用");
+    }
 }
 
 /* ---- 帧入口 -------------------------------------------------------------- */
@@ -753,6 +831,11 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
             s_snap.ms = t;
             pthread_mutex_unlock(&s_cap_mtx);
 
+            /* 反欺骗分数:质量合格的帧才算(与识别同节奏;要在归还缓冲前
+             * 读旋转帧)。DETECT_1N 检索命中时由 search_1n 取用 */
+            if (s_spoof_ready && mode == DG_VMODE_DETECT_1N)
+                antispoof_run(s_rot, rw, rh, &src);
+
             if (mode == DG_VMODE_VERIFY_11)
                 verify_against_target(feat);
             else if (mode == DG_VMODE_DETECT_1N)
@@ -950,6 +1033,27 @@ static int rknn_start(bool enable_mock)
         goto fail;
     }
     s_rec_dim = (int)rout.elems;
+
+    /* ---- 反欺骗模型(可选,加载失败降级不阻断) ----
+     * 启动即加载而非使能时才加载:antispoof_enable 走 META 可运行时改
+     * (web/设备页),使能即生效,不用重启 */
+    {
+        char spath[512];
+        snprintf(spath, sizeof(spath), "%s/%s", dir,
+                 env_or("DG_RKNN_SPOOF_MODEL_A", "2.7_80x80_MiniFASNetV2.rknn"));
+        s_spoof_a = npu_model_load(spath);
+        snprintf(spath, sizeof(spath), "%s/%s", dir,
+                 env_or("DG_RKNN_SPOOF_MODEL_B", "4_0_0_80x80_MiniFASNetV1SE.rknn"));
+        s_spoof_b = npu_model_load(spath);
+        if (s_spoof_a && s_spoof_b) {
+            s_spoof_ready = true;
+        } else {
+            DG_LOGE(TAG, "反欺骗模型加载失败(A=%p B=%p):降级为不挑战,识别不受影响",
+                    (void *)s_spoof_a, (void *)s_spoof_b);
+            if (s_spoof_a) { npu_model_release(s_spoof_a); s_spoof_a = NULL; }
+            if (s_spoof_b) { npu_model_release(s_spoof_b); s_spoof_b = NULL; }
+        }
+    }
 
     /* ---- 缓冲 ---- */
     s_rgb      = malloc((size_t)s_in_w * s_in_h * 3);
