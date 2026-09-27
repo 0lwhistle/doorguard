@@ -40,7 +40,7 @@ CREATE TABLE users (
 |---|---|---|
 | user_id | SQL UNIQUE + 业务预检 | 与任何已有用户重复 → `DG_ERR_DUP_UID` |
 | IC 卡号 | SQL UNIQUE + 业务预检 | 与任何已有用户重复 → `DG_ERR_DUP_IC` |
-| 人脸特征 | **业务层 1:N 查重** | 提取特征后与库内所有 face_vec 比对,相似度 ≥ 阈值(默认 0.90,进 device_config)→ `DG_ERR_DUP_FACE` |
+| 人脸特征 | **业务层 1:N 查重** | 提取特征后与库内所有 face_vec 比对,相似度 ≥ 阈值(默认 0.75,2026-09-27 真机标定,cfg 键 `face.face_dup_threshold`)→ `DG_ERR_DUP_FACE` |
 | 指纹特征 | **业务层 1:N 查重** | 同上,指纹算法比对分 ≥ 阈值 → `DG_ERR_DUP_FINGER` |
 | 密码 | 不校验 | 允许重复 |
 
@@ -106,9 +106,10 @@ reason 枚举:`0 成功` `1 陌生人` `2 黑名单` `3 密码错误` `4 特征�
 CREATE TABLE device_config (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
 ```
 
-预置键:`language`、`standby_timeout_s`(15~60)、`face_dup_threshold`、`ota_url`、
-`ntp_server`、`door_open_ms`、`pwd_fail_lock_n`(连续错 N 次锁定)、`pwd_fail_lock_s`。
-(原计划网络配置(DHCP/IP/掩码/网关)也存这里,截至 2026-09-22 未实现——无代码读取网络键,net_info 仅只读显示,勿当现状依赖。)
+**表已冻结(v2 决议,2026-09-22)**:上列业务配置键全部改走 `cur_config.json`
+(cfg.c META 表管理);本表仅剩 web 凭据、mdns 主机名、`face_model_tag` 口径
+登记在用。网络配置键(net_mode/net_ip/net_mask/net_gw)已随 2026-09-27
+网络配置功能落在 cfg JSON(勿再往本表加键)。
 
 ## 6. 存储服务接口(modules/sqlite,示意)
 

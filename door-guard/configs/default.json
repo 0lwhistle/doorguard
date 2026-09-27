@@ -1,5 +1,5 @@
 {
-  "_comment": "door-guard 设备配置(出厂默认;用户改动落 DB device_config 并覆盖本文件)— 键集=services/config/cfg.c META 表+json-only 键,只列代码实际读取的键;相机/显示参数走环境变量(见 modules/camera/camera_board.c 头注释)",
+  "_comment": "door-guard 设备配置(出厂默认;用户改动落 /userdata/doorguard/cur_config.json 稀疏覆盖本文件,DB device_config 已冻结仅首启迁移)— 键集=services/config/cfg.c META 表+json-only 键,只列代码实际读取的键;相机/显示参数走环境变量(见 modules/camera/camera_board.c 头注释)",
   "face": {
     "backend": "",
     "model_dir": "/usr/lib",

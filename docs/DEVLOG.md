@@ -4,6 +4,44 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-28 全库代码审查+性能优化+文档对齐(34/34 绿,板上 A 槽 0d27f95 构建)
+
+两个子代理(风格扫描+事件契约核查)+人工精读核心链路,产出分三批落地:
+1. **安全/业务缺陷(bd7f05b)**:①enroll commit 事务化——library_add 失败
+   回滚 DB,杜绝「DB 有新特征/内存没有」半状态(原实现忽略返回值,后端
+   降级时录入"成功"却永远识别不出);②密码连错锁单槽→8 槽按 UID 记账
+   (A 错4→B 错1→A 再错,旧实现计数被顶掉永不锁定=可绕过);③语言热切换
+   断链(EVENT_UI_REFRESH_REQUEST 无订阅者,改 i18n 内 lv_async_call 整页
+   重建);④web 网络配置 cfg_set/flush 返回值检查+失败回执;⑤web 两处
+   跨线程无锁对(s_ntp_ok/ts、s_last_addr)补锁;⑥ntp 补 netcore_running
+   预检(不再静默丢);⑦rknn start 幂等守卫;⑧编辑页销毁擦明文密码残留。
+2. **板上实锤追加(0d27f95)**:①**语言表路径失效**——cwd=/ 而 lang_dir
+   相对路径,中文恰是回退原文故未察觉,**英文切换一直静默无效**,改绝对
+   /root/ui/lang;②**识别 ROI 4 对齐**——side≡2(mod4)(如 246/242)
+   被 librga 拒 RGB888 目标=特定脸距间歇性识别失败,dw 向下对齐 4;
+   ③**rknn_cosine NEON 化**(A72 11.9→7.0ms/2000×512,小核 3.05x,
+   两路差 1.5e-7),tools/rknn_rec_test 加 bench 模式(DEV_HANDBOOK 有用法)。
+3. **风格收敛(bd7f05b)**:DG_SCREEN_W/H 上移 proto/types.h(display 四文件
+   不再反向 include ui/theme.h);cfg_meta_range() 公开,web 设置表删 lo/hi
+   双份;sim 后端补特征库(与板上契约同构);死接口 liveness_check 删除;
+   events.c 名表补 12;bridge 注释 17 订阅;sim capture seq 回传。
+- **坑**:①测试动作记录器 REC_MAX=64 封顶后静默丢新记录,last_act 断言
+  拿旧值→级联误报,64→256;②WSL /tmp 随 VM 空闲关机即失,构建+测试必须
+  一次跑完且产物放 /root;③WSL git 对 /mnt/c 仓库要 `git config
+  core.autocrlf true`(否则全树 CRLF 误报 modified);④WSL 到板 ICS 网段
+  不通,推板仍走 Windows 侧(DOORGUARD_BIN=<产物>.exe 绕 -x 检查)。
+- **文档对齐(13 文件)**:ui/README 语言切换机制、config/README 补
+  cfg_meta_range、vision/README ROI 对齐、web/README 用户管理已开放+
+  vitest 45+WS 四类、sqlite/README+spec-database+spec-network 的
+  device_config 冻结改 cfg JSON、spec-database 查重默认 0.75、
+  architecture.md 登记表+sysctl、door-guard/README 34 用例+默认 IP、
+  proto/README 屏幕宏、default.json _comment、DEV_HANDBOOK bench。
+- **待拍板**:docs/PENDING_DECISIONS.md(UI 直写 DB/config 收口、待机降帧、
+  死事件清理、now_ms 收敛等 12 项,均已给方案与建议)。
+- 板上:A 槽=0d27f95 构建(md5 c3b66210)、B 槽=bd7f05b 回退位;fps 29-30、
+  服务全 READY、NTP 同步、语言表加载成功。
+
+---
 ## 2026-09-27(续十五)设备管理-人脸识别子页:三阈值滑条上屏(34/34 绿,板上 A 槽 0fb3063)
 
 用户需求:检测/识别/活体三个阈值不进代码/ssh,上屏可调(滑条 1~100)。

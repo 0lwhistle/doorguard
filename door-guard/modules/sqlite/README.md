@@ -28,8 +28,8 @@
 └────────────────────────────────────────────────────────────────┘
 ┌──────────────── device_config(KV) ────────────────────────────┐
 │ key TEXT PK / value TEXT NOT NULL / updated_at INTEGER        │
-│ 预置键:language / standby_timeout_s / face_dup_threshold /    │
-│ ota_url / ntp_server / door_open_ms / pwd_fail_lock_n / ...   │
+│ 表已冻结(v2 决议):仅首启迁移读一次,业务配置走 cur_config.json│
+│ (仍在用此表的:web 凭据、mdns 主机名、face_model_tag 口径登记)│
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -83,9 +83,9 @@ access_log_t log = { .ts = time(NULL), .has_user = true,
 snprintf(log.user_id, sizeof(log.user_id), "10001");
 db_log_append(&log);
 
-char lang[16];
-if (db_config_get("language", lang, sizeof(lang)) == DG_ERR_NOT_FOUND)
-    db_config_set("language", "zh-CN");          /* 默认值由调用方决定 */
+/* 业务配置别走 device_config(表已冻结):语言等经 config 服务,
+   cfg_set_str("language", "zh-CN");——本表只剩 web 凭据/mdns 主机名/
+   face_model_tag 口径登记这类设备级 KV */
 ```
 
 ## 测试

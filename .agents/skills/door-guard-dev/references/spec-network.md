@@ -7,7 +7,7 @@
 - 板上起内嵌 HTTP 服务(mongoose 7.23,跑在 `modules/net/netcore` 统一事件循环,
   2026-09-22 起 civetweb 退役;端口默认 **80**(2026-09-27:URL 免带端口,root 绑定
   无权限问题;非 root 环境(PC 模拟器)绑定失败自动回退 **8080** 并经 `mdns_set_port()`
-  同步通告),进 device_config `web_port`,
+  同步通告),进 cur_config.json(cfg 键 `network.web_port`),
   OTA 上传端点同端口)。前端是 **Vue 3 单页应用**(`services/web/frontend/`,Vite 构建),
   产物同步到 `pages/` 再经 `gen_pages.sh` 生成资源表 `web_pages.c`,**两者都入库**:
   固件构建机不需要 node,只有改前端时才要 `./build_frontend.sh`
@@ -111,7 +111,7 @@
 
 实现(2026-09-22 起为**应用内 SNTP 客户端**,mongoose `mg_sntp_connect`,跑在
 netcore 统一事件循环):成功 `settimeofday` 步进写系统时间;服务器地址 `ntp_server`
-进 device_config。未联网(`net_info_is_online`)时触发直接失败返回,按钮置灰提示。
+进 cur_config.json(cfg 键 `network.ntp_server`)。未联网(`net_info_is_online`)时触发直接失败返回,按钮置灰提示。
 **rootfs 侧需停用 chrony 常驻**(随固件 Phase 落地):两个东西同时调系统时间会打架;
 chrony 是持续 slew,SNTP 是一次步进,门禁场景接受步进(时间回拨对 access_logs
 展示顺序的影响以落库 ts 为准,界面查询按时间段过滤,不受影响)。
@@ -122,7 +122,7 @@ chrony 是持续 slew,SNTP 是一次步进,门禁场景接受步进(时间回拨
 
 ## 4. 网络配置(IP/掩码/网关,2026-09-27)
 
-- 配置键:device_config `net_mode`("dhcp" 默认 /"static")+ `net_ip`/`net_mask`/`net_gw`
+- 配置键:cur_config.json(cfg 键 `network.net_mode`("dhcp" 默认 /"static")+ `net_ip`/`net_mask`/`net_gw`)
   (点分;gw 空串 = 不下发默认路由)。**配置 = 期望值**,实际地址永远以 net_info 读取为准
 - 应用:`modules/net/net_cfg`——静态先 `dhcpcd -x <if>` 释放租约并移出 dhcpcd 管理
   (否则 dhcpcd 会按租约周期覆盖手动地址),再 `ip addr add ip/plen` + `ip route replace default`;

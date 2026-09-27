@@ -68,8 +68,11 @@ door_open_for(c->door_open_ms);
 
 /* UI 设置页改动(校验 → 写 cur_config.json → 刷快照) */
 cfg_set_int("standby_timeout_s", 45);
-cfg_set_str("language", "en-US");       /* 经 EV_UI_HINT(DG_HINT_LANG_RELOAD)
-                                           通知 UI 整页重建(navigator_reload) */
+cfg_set_str("language", "en-US");       /* 只持久化;设备端切语言由页面直调
+                                           i18n_set_language()(内部异步重建页) */
+/* 业务键合法域(2026-09-28 公开;web 设置接口 min/max 与校验同源) */
+double lo, hi;
+if (cfg_meta_range("face_match_threshold", &lo, &hi)) { /* 0.30 ~ 1.00 */ }
 ```
 
 ## 测试

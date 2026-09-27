@@ -5,7 +5,7 @@
 | 头文件 | 内容 | 消费方 |
 |---|---|---|
 | `err.h` | 统一错误码(0 成功/负数失败,分段:通用 -1~-19、用户 -20~-29、验证 -30~-39、网络 -40~-49) | 全部模块;UI 按此映射提示文案 |
-| `types.h` | `user_rec_t` / `access_log_t` / `log_query_t` / `log_page_t`,users/access_logs 表的唯一内存投影,字段对齐 spec-database §1/§4;含 role/auth_flags 位宽静态断言 | storage/enroll/access/UI |
+| `types.h` | `user_rec_t` / `access_log_t` / `log_query_t` / `log_page_t`,users/access_logs 表的唯一内存投影,字段对齐 spec-database §1/§4;含 role/auth_flags 位宽静态断言、屏幕分辨率 `DG_SCREEN_W/H` 与拍摄取景框常量(2026-09-28 起,display 模块与 UI 版式共用) | storage/enroll/access/UI/display |
 | `events.h` | `EV_*` 业务事件全集 + 负载结构(编译期守卫 ≤256B);`dg_event_name()` 事件名 | vision/access/enroll/net/HAL/UI |
 
 基础组件:`event_bus/`(发布订阅)、`tasker/`(短任务调度)、`holder/`(模块注册表),

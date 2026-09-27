@@ -77,7 +77,7 @@ components/      纯展示:只吃 props、只发 emits(不 import store / api / 
 | POST | `/api/ntp` | token | 异步触发(202),结果走 WebSocket |
 | POST | `/api/account` | token+旧口令 | 改账号/口令,成功后**所有会话失效** |
 | POST | `/api/ota/upload` | token | 流式收包 + sha256 校验 |
-| GET | `/api/ws` | `?token=` | WebSocket:认证事件与 NTP 结果 |
+| GET | `/api/ws` | `?token=` | WebSocket:认证事件、NTP 结果、网络地址、uptime 心跳 |
 
 约束与理由:
 - **改状态的接口一律 POST**,方法不符回 405(原先 GET 也能触发 NTP 校时,错误面过宽);
@@ -113,7 +113,7 @@ netcore 契约下不存在。(历史上 civetweb 时代靠"推送线程 + 连接
 
 ```bash
 # 前端逻辑与产物(需要 node/npm;不需要板子)
-cd services/web/frontend && npx vitest run    # 44 项
+cd services/web/frontend && npx vitest run    # 45 项
 
 # 交付面静态检查(不需要 node)
 python3 door-guard/tests/web/frontend_check.py
@@ -122,7 +122,7 @@ python3 door-guard/tests/web/frontend_check.py
 door-guard/tests/web/web_test.sh                 # 63 项
 ```
 
-- **vitest(44 项)**:`api/client`(token/401/参数编码)、`api/logs`(查询拼装)、
+- **vitest(45 项)**:`api/client`(token/401/参数编码)、`api/logs`(查询拼装)、
   `api/ws`(重连退避状态机)、`stores/{session,device,events}`、`utils/format`、
   组件(EventFeed/DataTable/AppField/StatusPill/StatValue)、路由守卫与 401 跳转,以及
   **`tests/integration/bundle.spec.js`:把 `pages/assets/app.js` 这份将编进固件的字节直接
@@ -159,6 +159,7 @@ door-guard/tests/web/web_test.sh                 # 63 项
 - 页面文案只有中文(设备端 `ui/lang/*.json` 那套 i18n 未接入前端);要接的话在
   `frontend/src/` 加文案表即可。
 - 监控画面仍是占位:RTSP/MJPEG 要与 `capture_service` 对接(统一走 capture,不另开链路)。
-- web 端用户管理按 spec 仍不开放(接口未实现,返回 404)。
+- web 端用户管理已开放(CRUD/改密/清人脸,2026-09-27 a275a1f:与设备端同源
+  校验;删除/清人脸经 enroll 服务事件,DB+特征库+头像一起动)。
 - 产物未做 gzip 内嵌(131KB JS,gzip 后 51KB):局域网直发可接受;若要省,可在构建时
   同时内嵌 `.gz` 并按 `Accept-Encoding` 返回。

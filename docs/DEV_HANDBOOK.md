@@ -91,6 +91,7 @@ ls -lh /userdata/doorguard/models/          # 视觉模型(持久分区;A/B 升�
 #   DG_NPU_BENCH=30 /root/npu_probe <model.rknn>     # 压测 30 次取稳态耗时
 /root/rknn_det_test <model.rknn> <raw_rgb_320x320x3> 0.5   # 检测链路离线对拍
 /root/rknn_rec_test <rec.rknn> f32 a.raw b.raw c.raw       # 识别链路(余弦自检)
+/root/rknn_rec_test bench   # 余弦内核标量 vs NEON 对拍(2000×512,不加载模型)
 grep -E "rknn 就绪|检出|1:N 最高分|录入取特征" /var/log/door-guard.log | tail -20
 # 特征口径(换模型必改,否则命中被屏蔽——有意安全阀;DB 已冻结,改 JSON):
 #   编辑 /userdata/doorguard/cur_config.json 的 face.model_tag 为新口径

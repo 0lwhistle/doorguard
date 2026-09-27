@@ -55,7 +55,9 @@ reason→文案映射、键盘与输入校验见 spec-ui §6。
    页面栈;menu→users 这类前进用 navigator_push。
 4. **ui/ 下注释不得用 ASCII 引号包中文**(`"xx"` 会被 i18n 检查判成字符串
    字面量),引用词用「xx」;用户可见文案一律 `_()`;页面日志用英文。
-5. 语言热切换:`EV_UI_HINT(method=-5)` → presenter 调 `navigator_reload()`。
+5. 语言热切换:页面直调 `i18n_set_language()`,其内部 `lv_async_call` 排
+   `navigator_reload()` 整页重建(2026-09-28;必须异步——入口跑在弹窗选项
+   回调里,同步销毁页面会连带删回调所在对象树)。
 
 ## 已知例外
 

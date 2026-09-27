@@ -27,7 +27,8 @@ camera NV12 1280×720(主循环 camera_poll 投递)
            → RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)
            → rknn_retinaface_decode → NMS → 最大脸 → 逆映射(**屏幕域坐标**)
            → EV_VISION_FACE_BOX(黄框,15Hz 节流)
-     [每 300ms 且非 IDLE] 从旋转帧裁人脸 ROI(RGA,正方形,偶对齐)→ 5 点
+     [每 300ms 且非 IDLE] 从旋转帧裁人脸 ROI(RGA,正方形,dw 向下 4 对齐——
+           librga 对 RGB888 目标宽度 stride 硬约束)→ 5 点
            对齐 112×112 → (x-127.5)/127.5 → ArcFace@NPU(56ms)→ 512 维 → L2
            → 录入缓存 / 1:1 比对 / 1:N 检索(内存特征库暴力余弦)
 ```

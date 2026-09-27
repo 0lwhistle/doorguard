@@ -10,8 +10,8 @@ RK3576 K7 人脸识别门禁主应用。业务规格唯一权威:仓库根 `.age
 source env/env.sh            # 仓库根执行
 dg-build                     # 板上(aarch64)构建,-c 全新配置
 dg-build-pc [-r]             # PC 模拟器(SDL2 720×1280),调 UI 一律先过模拟器
-dg-test [--tsan]             # 宿主 ctest 全量(30 用例,含 demo 冒烟);--tsan 并发检查
-dg-deploy [-r] <IP>          # 推板运行(默认 192.168.2.95)
+dg-test [--tsan]             # 宿主 ctest 全量(34 用例,含 demo 冒烟);--tsan 并发检查
+dg-deploy [-r] <IP>          # 推板运行(默认 192.168.137.100)
 dg-ota-upload <IP> <包>       # OTA 上传+校验闭环
 tests/web/web_test.sh        # web 上位机功能验收
 ```
