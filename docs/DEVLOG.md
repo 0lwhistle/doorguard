@@ -31,7 +31,8 @@
    前缀漏 door-guard/ 一次,已修);②WSL npm 无网(localhost 代理不镜像
    NAT),前端构建只能在权威克隆跑(有 node_modules):Windows 提交源码 →
    push → WSL pull → build_frontend.sh → WSL 提交产物 → push。
-**下一步**:推板真机验收重启(重启后静态 IP 自恢复此前已验证);真机过
+**下一步**:真机验收重启(板上已部署:B 槽=7fde6d8 生产运行,A 槽=ca8dc3b
+反欺骗回退位;板上日志确认 sysctl 服务启动、web 新路由鉴权生效);真机过
 反欺骗阈值标定仍待用户。
 
 ---
