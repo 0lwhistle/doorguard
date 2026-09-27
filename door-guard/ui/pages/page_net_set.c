@@ -315,7 +315,6 @@ void page_net_set_create(lv_obj_t *parent)
     lv_label_set_text(s_addr_line, "");
 
     /* 行:接入方式 / IP / 掩码 / 网关 */
-    lv_obj_t *v;
     lv_obj_t *r = row_create(parent, _("接入方式"), &s_val_mode, NULL);
     (void)r;
     lv_obj_align(r, LV_ALIGN_TOP_MID, 0, 170);
