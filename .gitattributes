@@ -1,0 +1,5 @@
+# 2026-09-27 坑:Windows 工作区 CRLF 的 S60doorguard 被 scp 上板,
+# shebang "#!/bin/sh" 无法执行 → 重启后应用起不来。板上/WSL 消费的脚本一律 LF。
+*.sh text eol=lf
+env/bin/* text eol=lf
+board/rootfs-overlay/** text eol=lf

@@ -37,7 +37,10 @@ echo "==> 资源直推(语言包/自启脚本;资源文件不走槽位)"
 sshx 'mkdir -p /root/ui/lang'
 scp -q "${scpp[@]}" "$DOORGUARD_ROOT"/door-guard/ui/lang/*.json "root@$ip:/root/ui/lang/" 2>/dev/null || true
 if [ -f "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" ]; then
-    scp -q "${scpp[@]}" "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" "root@$ip:/etc/init.d/S60doorguard"
+    # 防坑(2026-09-27):Windows 工作区 autocrlf 会把脚本 checkout 成 CRLF,
+    # shebang 带 \r 上板即无法执行("required file not found")。上传前强制转 LF
+    tr -d '\r' < "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" > "${TMPDIR:-/tmp}/S60.upload"
+    scp -q "${scpp[@]}" "${TMPDIR:-/tmp}/S60.upload" "root@$ip:/etc/init.d/S60doorguard"
     sshx 'chmod +x /etc/init.d/S60doorguard'
 fi
 

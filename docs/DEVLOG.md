@@ -4,6 +4,49 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-27 网络配置(IP/掩码/网关)+ NTP 完善 + 主页 IP;CRLF 推板大坑
+
+**做了什么**(宿主 32/32 绿、交叉零告警、板上验证通过):
+1. **网络配置功能落地**(spec-network §4):web GET/POST /api/network(DHCP/静态切换,
+   静态 IP/掩码/网关,校验点分+连续掩码);新模块 modules/net/net_cfg(静态先
+   `dhcpcd -x` 释放再 `ip addr add`,回 DHCP 用 `dhcpcd -n`;开机 net_cfg 服务按
+   cfg=static 自动恢复);持久化进 cur_config.json(net_mode/net_ip/net_mask/net_gw)。
+   应用走独立线程(先回 202 再切地址,防把响应切死)。
+2. **地址变化实时性**:web loop 5s 定时(net_watch)对比 net_info_read 快照,变化才发
+   EV_NET_ADDR → WebSocket `net` 事件(前端立即重取)+ NTP 补同步;应用静态配置的结果
+   由 apply 线程发布同一事件。地址没变不推送(续租不刷屏)。
+3. **0.0.0.0 兜底**:net_info_read 把 IP/掩码/网关一次读齐(网关读 /proc/net/route),
+   取不到统一 "0.0.0.0"+have_ip=false;/api/device、主页状态栏、设备管理页弹窗、上位机
+   全部直接渲染,不再各写兜底。
+4. **UI**:主页网络图标旁小字 IP(1s 轮询,文本变化才重绘);设备管理页"网络配置"按钮
+   弹窗显示接口/IP/掩码/网关/模式(只读,设置入口在上位机)。字体重生成(新增「子/掩」
+   等字形)。
+5. **NTP 完善**:开机未在线改为 30s 重试(~5min);EV_NET_ADDR 且从未同步成功 → 自动补
+   一次(同步过就不再跟,防续租刷同步)。板上实测:两条自动路径都触发,同步成功。
+6. 前端:NetworkCard 卡片(DHCP/静态 radio + 三输入框 + 前端校验 + 应用/刷新),
+   device store 并取网络快照,events 分流 net 事件。
+7. **板上验收**:静态同地址应用(不断连)→ mode=static+configured 回读正确;非法请求
+   400;最终定格 static 192.168.137.100/24/192.168.137.1 并持久化(cur_config.json 已含
+   network 段)。
+
+**踩坑(两次,都值钱)**:
+- **CRLF 推板大坑**:Windows 工作区 autocrlf=true,S60doorguard checkout 成 CRLF,
+  Windows 侧跑 dg-deploy 资源直推把坏脚本传上板;当时运行中的老进程(内存里)没暴露,
+  用户按 reboot 后 init 跑不了 S60 → **应用起不来、/var/log/door-guard.log 都不存在**,
+  板上手动执行报 "cannot execute: required file not found"(shebang `#!/bin/sh\r`)。
+  修复 = tr -d 上传 LF 版;防复发 = .gitattributes(board/rootfs-overlay、env/bin、*.sh
+  一律 eol=lf)+ dg-deploy 上传前强制 tr -d '\r'。教训:**从 Windows 侧跑 dg-deploy 必须
+  防 CRLF**,推板优先回 WSL 权威克隆做。
+- **静态环境切回 DHCP = 失联**:板上验证时 POST dhcp 走了一遍"dhcpcd -x + flush + 重取",
+  但该环境(网线直连,137.1 静态,无 DHCP 服务器)永远拿不到地址 → 板子失联约 5 分钟,
+  靠人工重启恢复。**无 DHCP 服务器的环境严禁切 DHCP**;后续前端可在 DHCP 回切时加二次
+  确认。
+
+**下一步**:①浏览器连上位机观察 WS net 事件与 NetworkCard;②设备端屏幕主页 IP/设备页
+弹窗肉眼验收;③reboot 一次复验 net_cfg 开机静态恢复;④WSL→板直连不通时,Windows 侧
+dg-deploy 走法(DOORGUARD_BIN 用 .exe 后缀绕执行位)记入 DEV_HANDBOOK。
+
+---
 ## 2026-09-27(续四)UI 文案改造:简短明确+术语统一(a4d8b9d 已推板,用户确认)
 
 **做了什么**:逐条审查 118 个 UI 键,三类修正:
