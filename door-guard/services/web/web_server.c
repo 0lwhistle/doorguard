@@ -378,7 +378,7 @@ static void fmt_uptime(int64_t sec, char *out, size_t cap)
         snprintf(out, cap, "%lld 秒", (long long)sec);
     else if (sec < 3600)
         snprintf(out, cap, "%lld 分 %lld 秒", (long long)(sec / 60),
-                 (long long)(sec % 3600));
+                 (long long)(sec % 60));
     else if (sec < 86400)
         snprintf(out, cap, "%lld 小时 %lld 分", (long long)(sec / 3600),
                  (long long)((sec % 3600) / 60));
