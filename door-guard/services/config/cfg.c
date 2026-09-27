@@ -242,7 +242,7 @@ static void defaults_apply(dg_cfg_t *c)
     c->standby_timeout_s = 30;
     c->menu_timeout_s = 15;
     snprintf(c->language, sizeof(c->language), "zh-CN");
-    c->web_port = 8080;
+    c->web_port = 80;    /* 2026-09-27 起默认 80:URL 免带端口;非 root 回退 8080 */
     snprintf(c->ntp_server, sizeof(c->ntp_server), "ntp.aliyun.com");
     c->ota_url[0] = '\0';
     snprintf(c->net_mode, sizeof(c->net_mode), "dhcp");

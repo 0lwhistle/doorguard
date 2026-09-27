@@ -8,7 +8,7 @@ ip="${1:-}"; pkg="${2:-}"; ver="${3:-dev}"
 [ -f "$pkg" ] || { echo "包文件不存在: $pkg"; exit 1; }
 [ -r "$pkg" ] || { echo "包不可读"; exit 1; }
 
-port="${DG_WEB_PORT:-8080}"
+port="${DG_WEB_PORT:-80}"
 base="http://$ip:$port"
 
 user="${DG_WEB_USER:-admin}"

@@ -29,10 +29,16 @@ export const address = computed(() => {
   const d = state.data
   if (!d) return '—'
   if (!d.have_ip) return '设备未联网'
-  const name = d.mdns_running ? `http://${d.mdns_host}.local:${d.web_port}` : null
-  const ip = d.ip ? `${d.ip}:${d.web_port}` : null
+  const name = d.mdns_running ? `http://${d.mdns_host}.local${portSuffix(d.web_port)}` : null
+  const ip = d.ip ? `${d.ip}${portSuffix(d.web_port)}` : null
   return [name, ip].filter(Boolean).join('  ·  ') || '—'
 })
+
+/* 80 是 HTTP 默认端口,展示时省略 */
+function portSuffix(p) {
+  const n = Number(p)
+  return n && n !== 80 ? `:${n}` : ''
+}
 
 export const storageText = computed(() => {
   const d = state.data

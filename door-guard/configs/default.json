@@ -22,7 +22,7 @@
   },
   "network": {
     "ntp_server": "ntp.aliyun.com",
-    "web_port": 8080,
+    "web_port": 80,
     "ota_url": "",
     "net_mode": "dhcp",
     "net_ip": "",

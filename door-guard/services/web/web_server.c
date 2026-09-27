@@ -43,8 +43,7 @@
 #include "ntp/ntp_service.h"
 #include "net_info.h"
 #include "net_cfg.h"
-#include "mdns/mdns_responder.h"
-#include "netcore.h"
+#include "mdns/mdns_responder.h"#include "netcore.h"
 #include "dg_log.h"
 #include "event_bus.h"
 #include "events.h"
@@ -1884,13 +1883,22 @@ static int on_web_set(const event_t *e, void *ud)
 
 /* ---- 生命周期 ---- */
 
-/* loop 线程(netcore_post 闭包):建监听。注册动作与 poll 同线程,无并发 */
+/* loop 线程(netcore_post 闭包):建监听。注册动作与 poll 同线程,无并发。
+ * 默认 80(HTTP 标准端口,URL 免带端口);绑定失败(非 root 环境如 PC 模拟器)
+ * 自动回退 8080 并同步 mDNS 通告端口 */
 static void web_setup(void *arg)
 {
     (void)arg;
     char url[32];
     snprintf(url, sizeof(url), "http://0.0.0.0:%d", s_port);
     s_lsn = mg_http_listen(netcore_mgr(), url, http_handler, NULL);
+    if (!s_lsn && s_port == 80) {
+        DG_LOGW(TAG, "80 端口绑定失败(需要 root),回退 8080");
+        s_port = 8080;
+        mdns_set_port(s_port);
+        snprintf(url, sizeof(url), "http://0.0.0.0:%d", s_port);
+        s_lsn = mg_http_listen(netcore_mgr(), url, http_handler, NULL);
+    }
     if (!s_lsn)
         DG_LOGE(TAG, "web 启动失败(端口 %d 被占?)", s_port);
     else

@@ -73,7 +73,7 @@ static bool s_running = false;
 
 static char s_base[40] = DEFAULT_HOST;         /* 配置的基名(重名时加后缀) */
 static char s_host[64] = DEFAULT_HOST;         /* 实际通告名,不含 .local */
-static uint16_t s_port = 8080;
+static uint16_t s_port = 80;
 static mdns_state_t s_state = ST_IDLE;
 static int s_step = 0;                         /* 探测/通告已发次数 */
 static uint8_t s_ip[4];                        /* 当前通告地址 */
@@ -630,16 +630,27 @@ int mdns_url(char *out, size_t cap)
     if (!out || cap == 0)
         return DG_ERR_PARAM;
     /* 以"名字形式"为主、IP 作括号补注:名字才是我们做 mDNS 的目的
-     * (换 DHCP 租约/换网段都不用改),IP 只在名字解析不了的旧设备上兜底 */
+     * (换 DHCP 租约/换网段都不用改),IP 只在名字解析不了的旧设备上兜底。
+     * 80 是 HTTP 默认端口,URL 里省略 */
     char host[96];
     snapshot(host, sizeof(host), NULL, 0, NULL);
     uint16_t port = s_port;
     char ip[64];
+    char pbuf[8] = "";
+    if (port != 80)
+        snprintf(pbuf, sizeof(pbuf), ":%u", (unsigned)port);
     if (net_info_primary_ipv4(ip, sizeof(ip)) == DG_OK)
-        return snprintf(out, cap, "http://%s:%u (%s)", host, (unsigned)port, ip) > 0
+        return snprintf(out, cap, "http://%s%s (%s)", host, pbuf, ip) > 0
                    ? DG_OK : DG_ERR_NO_MEMORY;
-    return snprintf(out, cap, "http://%s:%u", host, (unsigned)port) > 0
+    return snprintf(out, cap, "http://%s%s", host, pbuf) > 0
                ? DG_OK : DG_ERR_NO_MEMORY;
+}
+
+void mdns_set_port(uint16_t port)
+{
+    pthread_mutex_lock(&s_mtx);
+    s_port = port;
+    pthread_mutex_unlock(&s_mtx);
 }
 
 int mdns_announce(void)

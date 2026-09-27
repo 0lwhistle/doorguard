@@ -36,8 +36,11 @@ bool mdns_running(void);
 /** 本机通告的主机名(不含 .local),如 "doorguard" */
 int mdns_hostname(char *out, size_t cap);
 
-/** 局域网访问地址,如 "http://doorguard.local:8080"(UI/web 展示用) */
+/** 局域网访问地址,如 "http://doorguard.local"(80 端口省略;UI/web 展示用) */
 int mdns_url(char *out, size_t cap);
+
+/** 回退场景同步实际端口(如 web 80 绑定失败自动退 8080):改通告与 URL 拼接 */
+void mdns_set_port(uint16_t port);
 
 /** 手动重新通告(端口/主机名改动后调用):立即发一轮 announce 刷新局域网缓存 */
 int mdns_announce(void);
