@@ -4,6 +4,34 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-27(续五)UI 六项:实时刷新/设备端网络设置/编辑页统一导航
+
+**做了什么**(宿主 32/32 绿、零告警、已推板 baseline-59):
+1. **实时刷新**:设备管理页当前时间/超时行 1s;门禁设置当前值 1s;Web 管理状态
+   2s 轮询(bridge_web_state_req 回执渲染);网络配置页实际地址 1s——配置被他处
+   修改时页面跟随,不再显示过期值。
+2. **设备端网络设置**(此前只读):新 net_set 页 = 接入方式(DHCP/静态)+ IP/掩码/
+   网关编辑(屏幕键盘,预填现值,dg_popup_input 新增 initial 支持);右上「应用」
+   经 EV_NET_CFG_SET 总线发网络族(web_server 订阅,与 HTTP 入口共用 network_request,
+   后台线程应用),回执 EV_NET_CFG_RESULT 弹窗;静态环境切 DHCP 的失联风险在页内
+   提示。契约:events.h 0x000A/0x000B;bridge 转 UI_EVT_NET_CFG_RESULT。
+3. **编辑页统一导航**(新 widget dg_edit_nav):返回固定左上、保存固定右上;dirty
+   标志检测未保存修改,返回时弹「保存退出/直接退出」,保存后不询问。page_user_edit
+   EDIT 模式改**草稿**(姓名/权限/密码攒着,保存才落库;特征录入动作本身即落库);
+   「删除用户」移到编辑列表最下一项;特征按钮按状态显示「修改/录入」。
+   page_users/access_set/web_set/device 返回统一左上。
+
+**坑**:①lv_timer_t 不透明,user_data 别直接摸;②v9 无 LV_OBJ_FLAG_DISABLED,
+用 LV_STATE_DISABLED + add/remove_state;③test_i18n 把 2 字节符号(· U+00B7)
+也算非 ASCII 违规,注释里的中文引号会被引号配对误判——UI 源码里避开;
+④**Windows 侧 DOORGUARD_BIN 指向 git bash /tmp 时与 WSL /tmp 是两个目录**,
+产物拷贝后必须放真实 Windows 路径,否则推的是旧包(md5 会相同,一眼识破)。
+⑤dg-build 链接失败时 build/door-guard 保持旧产物,推板前看版本串。
+
+**下一步**:板上人工走查六项(用户编辑草稿/退出确认/网络配置设置/各页刷新);
+web 前端 NetworkCard 与设备端双入口并发修改的一致性观察。
+
+---
 ## 2026-09-27(续)三问排查:web 中文名设备端空白/NTP 慢 8 小时/两套网络配置分层
 
 **结论与修复**:
