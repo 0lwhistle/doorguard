@@ -214,7 +214,7 @@ static bool apply_cfg(void)
     s_busy = true;
     if (s_btn_apply) {
         dg_btn_set_label(s_btn_apply, _("应用中…"));
-        lv_obj_add_flag(s_btn_apply, LV_OBJ_FLAG_DISABLED);
+        lv_obj_add_state(s_btn_apply, LV_STATE_DISABLED);
     }
     return true;
 }
@@ -259,7 +259,7 @@ void page_net_set_on_result(bool ok, int err, const char *ip)
     s_busy = false;
     if (s_btn_apply) {
         dg_btn_set_label(s_btn_apply, _("应用配置"));
-        lv_obj_clear_flag(s_btn_apply, LV_OBJ_FLAG_DISABLED);
+        lv_obj_remove_state(s_btn_apply, LV_STATE_DISABLED);
     }
     if (ok) {
         draft_from_cfg();                        /* 草稿对齐已保存值 */
