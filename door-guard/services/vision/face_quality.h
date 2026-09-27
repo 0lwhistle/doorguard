@@ -31,7 +31,8 @@ typedef enum {
     FQ_OK = 0,
     FQ_ERR_SMALL,      /**< 人脸太小(离远/检测框过小) */
     FQ_ERR_BLURRY,     /**< 太模糊(抖动/失焦) */
-    FQ_ERR_LOW_SCORE,  /**< 检测置信度不足 */
+    FQ_ERR_LOW_SCORE,  /**< 检测置信度不足(UI 也把它用作"无脸/没对准") */
+    FQ_ERR_MULTI,      /**< 画面里有多张脸(录入拒绝;后端注入,非三因子产物) */
     FQ_ERR_PARAM,      /**< 入参非法 */
 } face_quality_verdict_t;
 

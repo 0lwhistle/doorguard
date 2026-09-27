@@ -95,6 +95,16 @@ float rknn_iou(const rknn_face_t *a, const rknn_face_t *b);
 int rknn_nms(rknn_face_t *faces, int n, float iou_thresh);
 
 /**
+ * 录入场景选脸:返回「人脸框中心离取景框 [vx1,vy1,vx2,vy2] 中心最近」的
+ * 候选下标,n<=0 返回 -1。in_view(可 NULL)输出该脸框是否与取景框相交。
+ * 为什么不是最大脸:头像按取景框直裁,特征也必须出自框内那张脸——
+ * 拍摄者站在框前时,背景路人常是更大的脸,按面积选会把别人的特征
+ * 配上拍摄者的头像(2026-09-27「两人同框录入后本人刷不开」的根因)。
+ */
+int rknn_pick_face(const rknn_face_t *faces, int n,
+                   float vx1, float vy1, float vx2, float vy2, bool *in_view);
+
+/**
  * 5 点对齐:求 2×3 仿射矩阵,把 src_kps 映射到 ArcFace 的 112×112 参考布局
  * (InsightFace arcface_src 五点,最小二乘相似变换——只有缩放/旋转/平移 4 自由度,
  *  不用透视变换:人脸是刚体近似,多出来的自由度只会拟合噪声)。

@@ -75,6 +75,7 @@ const char *face_quality_reason_str(face_quality_verdict_t v)
     case FQ_ERR_SMALL:     return "face too small";
     case FQ_ERR_BLURRY:    return "too blurry";
     case FQ_ERR_LOW_SCORE: return "low detect score";
+    case FQ_ERR_MULTI:     return "multiple faces";
     default:               return "bad param";
     }
 }

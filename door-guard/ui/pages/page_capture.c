@@ -75,7 +75,9 @@ static void quality_apply(int verdict)
         hint_set(_("请靠近一些"), DG_COL_WARN());
     else if (verdict == FQ_ERR_BLURRY)
         hint_set(_("画面模糊,请保持不动"), DG_COL_WARN());
-    else                                 /* LOW_SCORE:侧脸/遮挡多半也是这个 */
+    else if (verdict == FQ_ERR_MULTI)
+        hint_set(_("请保持拍摄单一人脸"), DG_COL_WARN());
+    else                                 /* LOW_SCORE:侧脸/遮挡/未对准多半也是这个 */
         hint_set(_("请正对摄像头"), DG_COL_WARN());
 
     if (s_btn_shot) {
@@ -213,8 +215,14 @@ static void on_evt(const ui_evt_t *evt)
         }
         break;
     case UI_EVT_QUALITY:
-        if (!s_review)
+        if (!s_review) {
+            /* 质量事件只在后端检测到脸时发布:收到即把取景框带回来——
+             * LOST 时它被隐藏,而此前没有任何路径恢复,人脸回来后框
+             * 再也不出现(2026-09-27 用户反馈) */
+            if (s_facebox)
+                lv_obj_clear_flag(s_facebox, LV_OBJ_FLAG_HIDDEN);
             quality_apply(evt->quality.verdict);
+        }
         break;
     case UI_EVT_ENROLL_RESULT:
         if (evt->enroll.kind != DG_ENROLL_FACE ||

@@ -115,6 +115,46 @@ static void test_nms(void)
     DG_CHECK(rknn_nms(f, 1, 0.45f) == 1);
 }
 
+static void test_pick_face(void)
+{
+    /* 取景框 [100,100]~[300,300],中心 (200,200) */
+    const float vx1 = 100, vy1 = 100, vx2 = 300, vy2 = 300;
+
+    bool in_view = true;
+    DG_CHECK(rknn_pick_face(NULL, 0, vx1, vy1, vx2, vy2, &in_view) == -1);
+
+    /* 单脸在框内 → 选中且判为在框内 */
+    rknn_face_t f = { .x1 = 150, .y1 = 120, .x2 = 260, .y2 = 260, .score = 0.9f };
+    in_view = false;
+    DG_CHECK(rknn_pick_face(&f, 1, vx1, vy1, vx2, vy2, &in_view) == 0);
+    DG_CHECK(in_view);
+
+    /* 单脸完全出框(左边缘之外)→ 仍返回它,由调用方拒绝;in_view=false */
+    rknn_face_t out = { .x1 = 0, .y1 = 120, .x2 = 99, .y2 = 260, .score = 0.9f };
+    in_view = true;
+    DG_CHECK(rknn_pick_face(&out, 1, vx1, vy1, vx2, vy2, &in_view) == 0);
+    DG_CHECK(!in_view);
+
+    /* 贴边(零面积交)不算入框 */
+    rknn_face_t touch = { .x1 = 20, .y1 = 120, .x2 = 100, .y2 = 260, .score = 0.9f };
+    DG_CHECK(rknn_pick_face(&touch, 1, vx1, vy1, vx2, vy2, &in_view) == 0);
+    DG_CHECK(!in_view);
+
+    /* 两脸:框内小脸 vs 框外大脸(按最大脸会选大脸)→ 按离取景框中心
+     * 最近选中小脸——录入场景"背景路人脸更大"的根因场景 */
+    rknn_face_t two[2] = {
+        { .x1 = 150, .y1 = 120, .x2 = 260, .y2 = 260, .score = 0.8f },
+        { .x1 = 0,   .y1 = 320, .x2 = 480, .y2 = 700, .score = 0.9f },
+    };
+    in_view = false;
+    const int pick = rknn_pick_face(two, 2, vx1, vy1, vx2, vy2, &in_view);
+    DG_CHECK(pick == 0);
+    DG_CHECK(in_view);
+
+    /* in_view 可为 NULL */
+    DG_CHECK(rknn_pick_face(two, 2, vx1, vy1, vx2, vy2, NULL) == 0);
+}
+
 /* ---- 5 点对齐 ----------------------------------------------------------- */
 
 /* 参考点自映射 = 单位阵(最有力的自检:变换的定点就是它自己) */
@@ -350,6 +390,7 @@ int main(void)
     test_retinaface_decode_threshold();
     test_iou();
     test_nms();
+    test_pick_face();
     test_align_identity();
     test_align_scale_translate();
     test_align_rotate();

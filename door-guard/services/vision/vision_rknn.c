@@ -205,6 +205,36 @@ static bool publish_gate(void)
     return false;
 }
 
+/* 质量事件(拍摄页实时提示/禁拍,其它页面忽略):verdict 变化即发,不变
+ * 1s 兜底刷一次——拍摄页 push 后最多 1s 内能拿到当前状态,平时近零开销。
+ * 识别路径的三因子判定与录入场景的 MULTI/出框拒绝共用本函数:节流状态
+ * 合一,两条路径不会交替发布互相顶掉 */
+static void pub_quality(int32_t verdict, int32_t face_px)
+{
+    static int32_t last_v = FQ_ERR_PARAM;
+    static int64_t last_ms;
+    const int64_t now = now_ms();
+    if (verdict != last_v || now - last_ms >= RKNN_Q_PUB_MS) {
+        last_v = verdict;
+        last_ms = now;
+        ev_vision_quality_t eq;
+        memset(&eq, 0, sizeof(eq));
+        eq.verdict = verdict;
+        eq.face_px = face_px;
+        EVENT_BUS_PUBLISH(EV_VISION_QUALITY, &eq);
+    }
+}
+
+/* 录入缓存作废:多脸/脸不在取景框内时,3s 内的旧单脸特征不许再被拍摄
+ * 取走(拍摄按钮虽已被质量事件禁用,后端必须同样把住这道门) */
+static void cap_invalidate(void)
+{
+    pthread_mutex_lock(&s_cap_mtx);
+    s_cap.len = 0;
+    s_cap.ms = 0;
+    pthread_mutex_unlock(&s_cap_mtx);
+}
+
 /* ---- 特征库维护 ---------------------------------------------------------- */
 
 static int lib_del(const char *user_id);   /* lib_add 的覆盖语义要先删后加 */
@@ -454,23 +484,7 @@ static bool recognize(const uint8_t *nv12, int w, int h,
         const face_quality_verdict_t v = face_quality_check(&q, &thr);
         s_last_q = q;
         s_last_q_verdict = v;
-
-        /* 质量事件(拍摄页实时提示用):verdict 变化即发;不变时 1s 兜底
-         * 刷一次——拍摄页 push 后最多 1s 内能拿到当前状态,平时近零开销 */
-        {
-            static face_quality_verdict_t last_pub_v = FQ_ERR_PARAM;
-            static int64_t last_pub_ms;
-            const int64_t now = now_ms();
-            if (v != last_pub_v || now - last_pub_ms >= RKNN_Q_PUB_MS) {
-                last_pub_v = v;
-                last_pub_ms = now;
-                ev_vision_quality_t eq;
-                memset(&eq, 0, sizeof(eq));
-                eq.verdict = v;
-                eq.face_px = q.face_px;
-                EVENT_BUS_PUBLISH(EV_VISION_QUALITY, &eq);
-            }
-        }
+        pub_quality(v, q.face_px);
 
         if (v != FQ_OK) {
             /* 节流日志:板上标定阈值的依据(先看实测值再改配置) */
@@ -653,7 +667,23 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
     }
     s_last_det_ms = now_ms();
 
-    /* 最大脸(检测模型空间)→ 预览/屏幕域坐标(框与关键点一并逆映射) */
+    /* 全部候选逆映射到预览/屏幕域(框与关键点一并):录入选脸要按屏幕域
+     * 的取景框比较,脸框事件也恒等发布(检测域=显示域,见文件头) */
+    for (int i = 0; i < n; i++) {
+        for (int k = 0; k < RKNN_FACE_KPS; k++)
+            npu_letterbox_unmap(&s_lb, s_cand[i].kps[k][0], s_cand[i].kps[k][1],
+                                &s_cand[i].kps[k][0], &s_cand[i].kps[k][1]);
+        npu_letterbox_unmap(&s_lb, s_cand[i].x1, s_cand[i].y1,
+                            &s_cand[i].x1, &s_cand[i].y1);
+        npu_letterbox_unmap(&s_lb, s_cand[i].x2, s_cand[i].y2,
+                            &s_cand[i].x2, &s_cand[i].y2);
+        if (s_cand[i].x1 < 0) s_cand[i].x1 = 0;
+        if (s_cand[i].y1 < 0) s_cand[i].y1 = 0;
+        if (s_cand[i].x2 > (float)rw) s_cand[i].x2 = (float)rw;
+        if (s_cand[i].y2 > (float)rh) s_cand[i].y2 = (float)rh;
+    }
+
+    /* 识别(1:N/1:1)用最大脸:门禁场景默认离镜头最近的人优先 */
     int best = 0;
     float best_area = 0.0f;
     for (int i = 0; i < n; i++) {
@@ -663,22 +693,53 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
             best = i;
         }
     }
-    rknn_face_t src = s_cand[best];
-    for (int i = 0; i < RKNN_FACE_KPS; i++)
-        npu_letterbox_unmap(&s_lb, s_cand[best].kps[i][0], s_cand[best].kps[i][1],
-                            &src.kps[i][0], &src.kps[i][1]);
-    npu_letterbox_unmap(&s_lb, s_cand[best].x1, s_cand[best].y1, &src.x1, &src.y1);
-    npu_letterbox_unmap(&s_lb, s_cand[best].x2, s_cand[best].y2, &src.x2, &src.y2);
-    if (src.x1 < 0) src.x1 = 0;
-    if (src.y1 < 0) src.y1 = 0;
-    if (src.x2 > (float)rw) src.x2 = (float)rw;
-    if (src.y2 > (float)rh) src.y2 = (float)rh;
+
+    /* ---- 录入场景(DETECT_ONLY)的选脸与拒绝 ----
+     * 特征必须出自取景框内那张脸(头像按取景框直裁,特征必须与它同人);
+     * 画面里有两张脸时直接拒绝——按最大脸选会把背景路人的特征配上
+     * 拍摄者的头像,录入后本人刷不开(2026-09-27 用户反馈的真因)。
+     * 识别模式不受影响(多脸时仍按最大脸检索) */
+    bool enroll_ok = true;
+    const dg_vision_mode_t mode = vision_service_get_mode();
+    if (mode == DG_VMODE_DETECT_ONLY) {
+        if (n >= 2) {
+            enroll_ok = false;
+        } else {
+            bool in_view = false;
+            const int pick = rknn_pick_face(s_cand, n,
+                    (float)(DG_CAPTURE_VIEW_CX - DG_CAPTURE_VIEW_SZ / 2),
+                    (float)(DG_CAPTURE_VIEW_CY - DG_CAPTURE_VIEW_SZ / 2),
+                    (float)(DG_CAPTURE_VIEW_CX + DG_CAPTURE_VIEW_SZ / 2),
+                    (float)(DG_CAPTURE_VIEW_CY + DG_CAPTURE_VIEW_SZ / 2),
+                    &in_view);
+            if (pick >= 0)
+                best = pick;
+            if (!in_view)
+                enroll_ok = false;      /* 脸不在取景框内:引导对准 */
+        }
+    }
+    const rknn_face_t src = s_cand[best];
 
     /* ---- 识别(节流;要读旋转帧,须在归还缓冲前) ---- */
-    const dg_vision_mode_t mode = vision_service_get_mode();
     const int64_t t = now_ms();
-    if (s_rec_dim == RKNN_REC_DIM && mode != DG_VMODE_IDLE &&
-        t - s_last_rec_ms >= RKNN_REC_MS) {
+    if (!enroll_ok) {
+        /* 与识别同节奏:发布具体原因 + 作废缓存(拍摄按钮已被质量事件
+         * 禁用,这里是不依赖 UI 的后端兜底) */
+        s_last_rec_ms = t;
+        cap_invalidate();
+        const float bw = src.x2 - src.x1, bh = src.y2 - src.y1;
+        pub_quality(n >= 2 ? (int32_t)FQ_ERR_MULTI : (int32_t)FQ_ERR_LOW_SCORE,
+                    (int32_t)(bw < bh ? bw : bh));
+        static int64_t last_rej_log;
+        /* 10s 节流:DETECT_ONLY 还覆盖菜单/待机页,脸在画面但不在取景框
+         * 内是常态,拒绝判定对它们无功能影响,日志只做低频留痕 */
+        if (t - last_rej_log >= 10000) {
+            last_rej_log = t;
+            DG_LOGI(TAG, "录入拒绝:%s(检出 %d 张脸)", n >= 2 ? "画面中有多张脸"
+                                                             : "人脸不在取景框内", n);
+        }
+    } else if (s_rec_dim == RKNN_REC_DIM && mode != DG_VMODE_IDLE &&
+               t - s_last_rec_ms >= RKNN_REC_MS) {
         s_last_rec_ms = t;
         float feat[RKNN_REC_DIM];
         if (recognize(s_rot, rw, rh, &src, s_cand[best].score, feat)) {

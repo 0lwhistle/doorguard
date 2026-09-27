@@ -212,6 +212,35 @@ int rknn_nms(rknn_face_t *faces, int n, float iou_thresh)
     return keep;
 }
 
+int rknn_pick_face(const rknn_face_t *faces, int n,
+                   float vx1, float vy1, float vx2, float vy2, bool *in_view)
+{
+    if (!faces || n <= 0)
+        return -1;
+
+    const float vcx = (vx1 + vx2) * 0.5f;
+    const float vcy = (vy1 + vy2) * 0.5f;
+    int best = 0;
+    float best_d2 = -1.0f;
+    for (int i = 0; i < n; i++) {
+        const float dx = (faces[i].x1 + faces[i].x2) * 0.5f - vcx;
+        const float dy = (faces[i].y1 + faces[i].y2) * 0.5f - vcy;
+        const float d2 = dx * dx + dy * dy;
+        if (best_d2 < 0.0f || d2 < best_d2) {
+            best_d2 = d2;
+            best = i;
+        }
+    }
+
+    if (in_view) {
+        /* 贴边(零面积交)不算入框:脸完全移出取景框时调用方要给引导提示 */
+        const rknn_face_t *f = &faces[best];
+        *in_view = !(f->x2 <= vx1 || f->x1 >= vx2 ||
+                     f->y2 <= vy1 || f->y1 >= vy2);
+    }
+    return best;
+}
+
 /* ---- 5 点对齐 ------------------------------------------------------------
  * ArcFace(InsightFace)的 112×112 参考五点。顺序与 SCRFD 输出一致:
  * 左眼、右眼、鼻尖、左嘴角、右嘴角。
