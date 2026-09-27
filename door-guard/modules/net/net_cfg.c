@@ -11,6 +11,7 @@
 #include "net_cfg.h"
 
 #include <arpa/inet.h>
+#include <ifaddrs.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
