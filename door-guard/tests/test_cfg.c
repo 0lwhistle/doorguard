@@ -57,7 +57,7 @@ static void test_bad_inputs_fall_back(void)
     DG_CHECK(cfg_get()->door_open_ms == 3000);
     DG_CHECK(cfg_get()->standby_timeout_s == 30);
     DG_CHECK(cfg_get()->menu_timeout_s == 15);
-    DG_CHECK(cfg_get()->web_port == 8080);
+    DG_CHECK(cfg_get()->web_port == 80);
     DG_CHECK(access(s_cur, F_OK) == 0);             /* 首启已生成 cur */
 
     /* 出厂模板坏 json:回退内置默认 */
@@ -83,7 +83,7 @@ static void test_bad_inputs_fall_back(void)
     DG_CHECK(cfg_get()->pwd_fail_lock_n == 5);
     DG_CHECK(cfg_get()->standby_timeout_s == 30);   /* bool 也算类型错 */
     DG_CHECK(strcmp(cfg_get()->language, "zh-CN") == 0);
-    DG_CHECK(cfg_get()->web_port == 8080);
+    DG_CHECK(cfg_get()->web_port == 80);
 }
 
 /* ---- C2 加载序:内置默认 → default 模板 → cur 覆盖 ---- */
@@ -129,7 +129,7 @@ static void test_db_migration_freeze(void)
     DG_CHECK(cfg_get()->door_open_ms == 2000);      /* DB 迁移值赢模板 */
     DG_CHECK(strcmp(cfg_get()->language, "en-US") == 0);
     DG_CHECK(cfg_get()->face_match_threshold > 0.499);
-    DG_CHECK(cfg_get()->web_port == 8080);          /* 非法值未迁移,走默认 */
+    DG_CHECK(cfg_get()->web_port == 80);          /* 非法值未迁移,走默认 */
     DG_CHECK(access(s_cur, F_OK) == 0);             /* cur 已生成 */
 
     /* 冻结:此后 DB 改动不再进配置(重新加载仍是迁移值) */
