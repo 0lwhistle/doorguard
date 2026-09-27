@@ -221,7 +221,7 @@ static void defaults_apply(dg_cfg_t *c)
     c->door_open_ms = 3000;
     c->pwd_fail_lock_n = 5;
     c->pwd_fail_lock_s = 60;
-    c->face_dup_threshold = 0.90;
+    c->face_dup_threshold = 0.75;   /* 同人跨拍摄余弦普遍 0.65~0.90,0.9 拦不住 */
     c->face_match_threshold = 0.42;      /* 与 default.json face.match_threshold 一致 */
     c->face_min_px = 80;                /* 人脸框较小边 ≥80px 才做识别 */
     c->face_blur_min = 50.0;            /* 清晰度下限(板上标定,见日志"清晰度") */

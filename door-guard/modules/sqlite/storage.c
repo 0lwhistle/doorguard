@@ -499,7 +499,9 @@ static int feature_dup_locked(bool is_face, const char *exclude_uid,
         sqlite3_bind_text(st, 1, exclude_uid, -1, SQLITE_TRANSIENT);
 
     int dup = 0;
+    int rows = 0;
     while (sqlite3_step(st) == SQLITE_ROW) {
+        rows++;
         const void *blob = sqlite3_column_blob(st, 1);
         int nbytes = sqlite3_column_bytes(st, 1);
         if (!blob || nbytes <= 16)
@@ -519,10 +521,13 @@ static int feature_dup_locked(bool is_face, const char *exclude_uid,
         dg_secure_wipe(existing, sizeof(existing));
         if (match == 1) {
             dup = 1;
+            DG_LOGI(TAG, "特征查重命中(%s,第 %d/%d 行)", col, rows, rows);
             break;
         }
     }
     sqlite3_finalize(st);
+    if (!dup)
+        DG_LOGI(TAG, "特征查重:遍历 %d 行无重复", rows);
     return dup;
 }
 

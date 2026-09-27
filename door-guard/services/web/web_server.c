@@ -1247,6 +1247,7 @@ static const web_set_item_t s_set_items[] = {
     { "menu_timeout_s",    "菜单超时",        "s",  false,    5,   120,   5,    15 },
     { "lost_hold_ms",      "脸框消失滞回",    "ms", false,    0,  2000,  50,   200 },
     { "min_face_px",       "识别最小人脸",    "px", false,   40,   400,  10,    80 },
+    { "face_dup_threshold", "录入人脸查重阈值", "",  true,  0.50,  1.00, 0.05, 0.75 },
     { "liveness_enable",   "活体检测开关",    "",   false,    0,     1,   1,     0 },
     { "face_match_threshold", "1:N 识别阈值",    "",   true,  0.30,  1.00, 0.01,  0 },
     { "det_threshold",     "检测出框阈值",    "",   true,  0.30,  0.95, 0.01,  0 },
@@ -1263,6 +1264,7 @@ static bool cfg_value_of(const dg_cfg_t *c, const char *key, double *out)
     else if (!strcmp(key, "menu_timeout_s"))     *out = c->menu_timeout_s;
     else if (!strcmp(key, "lost_hold_ms"))       *out = c->face_lost_hold_ms;
     else if (!strcmp(key, "min_face_px"))        *out = c->face_min_px;
+    else if (!strcmp(key, "face_dup_threshold")) *out = c->face_dup_threshold;
     else if (!strcmp(key, "liveness_enable"))    *out = c->liveness_enable;
     else if (!strcmp(key, "face_match_threshold"))    *out = c->face_match_threshold;
     else if (!strcmp(key, "det_threshold"))      *out = c->face_det_threshold;

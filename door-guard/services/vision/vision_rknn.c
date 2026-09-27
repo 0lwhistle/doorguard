@@ -272,7 +272,11 @@ static int rknn_cmp(const uint8_t *a, uint16_t alen,
     if (!a || !b || alen != RKNN_FEATURE_BYTES || blen != RKNN_FEATURE_BYTES)
         return -1;
     const float score = rknn_cosine((const float *)a, (const float *)b, RKNN_REC_DIM);
-    return score >= cfg_get()->face_dup_threshold ? 1 : 0;
+    const float thr = cfg_get()->face_dup_threshold;
+    /* 查重分数全量落日志:阈值标定的唯一依据(原来静默,高了低了全靠猜) */
+    DG_LOGI(TAG, "查重余弦 %.3f vs 阈值 %.2f → %s", score, thr,
+            score >= thr ? "重复" : "不重复");
+    return score >= thr ? 1 : 0;
 }
 
 /* ---- 1:1 / 1:N ----------------------------------------------------------- */
