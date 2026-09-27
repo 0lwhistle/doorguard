@@ -42,6 +42,8 @@ typedef enum {
 typedef enum {
     V_NONE = 0,
     V_INPUT_UID,
+    V_CHALLENGE_RESOLVE,   /**< 反欺骗降级:等服务层解析命中用户的方式位
+                                (UID 已知,跳过 V_INPUT_UID;2026-09-27) */
     V_PICK_METHOD,
     V_FACE_1V1,
     V_FINGER,
@@ -129,6 +131,8 @@ typedef enum {
     FSM_ACT_POPUP_SUCCESS,      /**< data: user_name(misc.hint "id|name") */
     FSM_ACT_POPUP_FAIL,         /**< data: reason(dg_auth_reason_t) + not_admin */
     FSM_ACT_ASK_UID,            /**< 请弹 ID 输入框(验证流程第一步) */
+    FSM_ACT_RESOLVE_UID,        /**< data: misc.uid;请服务层解析该用户(反欺骗
+                                     降级发起:UID 来自 1:N 命中,FSM 不碰 DB) */
     FSM_ACT_ASK_PWD,            /**< data: misc.uid;请弹密码输入框 */
     FSM_ACT_SHOW_METHODS,       /**< data: auth_flags(按开启方式显示按钮) */
     FSM_ACT_SET_TIMER,          /**< data: timer_req_t{timer_id, ms} */

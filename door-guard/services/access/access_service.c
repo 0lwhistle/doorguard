@@ -132,6 +132,25 @@ static struct {
     bool not_admin;
 } s_popup_defer;
 
+/* 查库解析用户 → 回 FSM_EV_UID_RESOLVED(FSM 不碰 DB)。ID 输入流程与
+ * 反欺骗降级发起共用同一回执:FSM 侧只认这个事件,不关心 UID 从哪来 */
+static void resolve_uid_feed(const char *uid)
+{
+    user_rec_t rec;
+    fsm_event_data_t rd;
+    memset(&rd, 0, sizeof(rd));
+    rd.uid_res.found = false;
+    copy_cstr(rd.uid_res.user_id, sizeof(rd.uid_res.user_id), uid);
+    if (db_user_get(uid, &rec) == DG_OK) {
+        rd.uid_res.found = true;
+        rd.uid_res.role = rec.role;
+        rd.uid_res.auth_flags = rec.auth_flags;
+        snprintf(rd.uid_res.user_name, sizeof(rd.uid_res.user_name), "%s",
+                 rec.user_name);
+    }
+    fsm_feed(FSM_EV_UID_RESOLVED, &rd);
+}
+
 typedef struct {
     int32_t timer_id;
     uint32_t seq;
@@ -233,6 +252,9 @@ static void on_fsm_action(fsm_action_t act, const fsm_action_data_t *d, void *ud
         break;
     case FSM_ACT_ASK_UID:
         EVENT_BUS_PUBLISH_EMPTY(EV_UI_ASK_UID);      /* 弹 ID 输入框(spec §4.1) */
+        break;
+    case FSM_ACT_RESOLVE_UID:
+        resolve_uid_feed(d->misc.uid);   /* 反欺骗降级:命中 UID 查方式位 */
         break;
     case FSM_ACT_ASK_PWD: {
         ev_ui_input_req_t ev;                        /* 弹密码输入框(掩码) */
@@ -397,20 +419,7 @@ static int on_text_input(const event_t *e, void *ud)
         copy_cstr(d.uid, sizeof(d.uid), t->text);
         fsm_feed(FSM_EV_UID_SUBMIT, &d);
 
-        /* 服务层解析 ID(FSM 不碰 DB) */
-        user_rec_t rec;
-        fsm_event_data_t rd;
-        memset(&rd, 0, sizeof(rd));
-        rd.uid_res.found = false;
-        copy_cstr(rd.uid_res.user_id, sizeof(rd.uid_res.user_id), t->text);
-        if (db_user_get(t->text, &rec) == DG_OK) {
-            rd.uid_res.found = true;
-            rd.uid_res.role = rec.role;
-            rd.uid_res.auth_flags = rec.auth_flags;
-            snprintf(rd.uid_res.user_name, sizeof(rd.uid_res.user_name), "%s",
-                     rec.user_name);
-        }
-        fsm_feed(FSM_EV_UID_RESOLVED, &rd);
+        resolve_uid_feed(t->text);      /* 服务层解析 ID(FSM 不碰 DB) */
         return 0;
     }
 

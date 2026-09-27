@@ -34,6 +34,12 @@ typedef struct {
     double face_dup_threshold; /**< 入库人脸查重相似度阈值,0.50~1.00,默认 0.90 */
     double face_match_threshold; /**< 1:N/1:1 命中阈值,0.30~1.00,默认 0.42(ROCKIVA 相似度) */
     int  liveness_enable;      /**< 动作活体开关,0/1,默认 0(B8 算法落地后开启) */
+    int  antispoof_enable;     /**< 反欺骗单帧判定(MiniFASNet)开关,0/1,默认 0;
+                                    模型上板+假体标定后开启。开启后 1:N 命中若判
+                                    "疑似假体"→ 不开门,发起多模态二次验证 */
+    double antispoof_threshold; /**< 反欺骗"真脸"分数下限,0~1:多帧平滑分低于它
+                                     即判疑似假体(降级方案下误拒只多验一道,
+                                     可放心调严),默认 0.50,须板上假体标定 */
     /* 视觉后端(json-only,不经 set/迁移:换模型/换后端属部署参数,见 services/vision/README.md) */
     char face_backend[16];     /**< 想要的后端名("rockiva"/"rknn"/"sim"),空=第一个注册的 */
     char face_model_dir[128];  /**< 模型目录,默认 /usr/lib(env DG_IVA_MODEL_DIR 优先) */

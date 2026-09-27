@@ -183,6 +183,8 @@ static void home_on_evt(const ui_evt_t *evt)
         const char *text = NULL;
         if (h->method == DG_HINT_ADMIN_AUTH)
             text = _("管理员认证");
+        else if (h->method == DG_HINT_CHALLENGE)
+            text = _("人脸验证未通过,请选择其他方式");
         else if (h->method == DG_METHOD_FACE_11)
             text = _("请正对摄像头");
         else if (h->method == DG_METHOD_FINGER)

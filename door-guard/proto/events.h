@@ -136,6 +136,9 @@ typedef struct {
     char    user_name[DG_NAME_LEN];
     int32_t role;                         /**< dg_role_t(黑名单命中即拒,spec-auth §2) */
     int32_t score_permille;               /**< 相似度千分比(0~1000) */
+    int32_t spoof_challenge;              /**< 1 = 反欺骗判"疑似假体":命中不放行,
+                                               发起多模态二次验证(2026-09-27);
+                                               0 = 未质疑(未启用/分数合格/模型不可用) */
 } ev_match_t;
 
 /** EV_CAPTURE_STATE */
@@ -322,6 +325,7 @@ typedef struct {
 /* ev_hint_t.method 负值哨兵(纯 UI 文案选择,不落日志、不进 FSM) */
 #define DG_HINT_ADMIN_AUTH  (-1)          /**< 「管理员认证」 */
 #define DG_HINT_NO_ADMIN    (-2)          /**< 「未设置管理员,请先添加管理员」(新机引导) */
+#define DG_HINT_CHALLENGE   (-3)          /**< 「人脸验证未通过,请选择其他方式」(反欺骗降级) */
 #define DG_HINT_LANG_RELOAD (-5)          /**< 语言热切换:整页重建(ui/README §5) */
 
 /** EV_UI_ASK_UID:请求弹 ID 输入框(无载荷) */

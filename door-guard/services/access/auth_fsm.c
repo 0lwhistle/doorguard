@@ -237,6 +237,26 @@ static void wake_up(auth_fsm_t *fsm)
 
 /* ---- 1:N 命中(普通态/管理员态共用入口) ---- */
 
+/* 反欺骗降级(2026-09-27):命中但疑似假体(照片/翻拍)→ 不开门,发起该
+ * 用户的二次验证。UID 已知跳过 ID 输入,先让服务层解析方式位(回执走
+ * UID_RESOLVED 同一条路);方式选择阶段排除人脸——刚被质疑的因子不能再
+ * 当第二因子。误拒代价只是"多验一道",反欺骗阈值因此可以放心调严 */
+static void challenge_start(auth_fsm_t *fsm)
+{
+    fsm->state = ST_VERIFY;
+    fsm->step = V_CHALLENGE_RESOLVE;
+    fsm->step_method = DG_METHOD_FACE_1N;   /* 未选方式前的超时日志口径:发起方式 */
+    fsm->verify_from_admin = false;         /* 挑战从普通模式发起,成功即开门 */
+    set_match_enabled(fsm, false);
+    hint_text(fsm, DG_HINT_CHALLENGE);
+    fsm_action_data_t d;
+    memset(&d, 0, sizeof(d));
+    snprintf(d.misc.uid, sizeof(d.misc.uid), "%s", fsm->cur_uid);
+    emit(fsm, FSM_ACT_RESOLVE_UID, &d);
+    set_timer(fsm, FSM_TMR_STEP_5S, 5000);
+    DG_LOGI(TAG, "反欺骗疑似假体,发起二次验证 %s", fsm->cur_uid);
+}
+
 static void on_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now_ms)
 {
     if (fsm->state == ST_ADMIN_AUTH) {
@@ -277,15 +297,19 @@ static void on_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now_ms)
     snprintf(fsm->cur_name, sizeof(fsm->cur_name), "%s", m->user_name);
     fsm->window_done = true;            /* 本次在场已有结论,不再开新判定窗 */
 
-    /* 命中重绘只改颜色:框位置沿用 FACE_DETECTED 的最近一次(UI 端保持) */
+    /* 命中重绘只改颜色:框位置沿用 FACE_DETECTED 的最近一次(UI 端保持)。
+     * 疑似假体同红框:命中未放行,与失败同色 */
     fsm_action_data_t d;
     memset(&d, 0, sizeof(d));
     d.facebox.box.w = 0;                /* w=0 = 沿用现有位置 */
-    d.facebox.state = (m->role == DG_ROLE_BLACKLIST) ? DG_BOX_FAILED : DG_BOX_MATCHED;
+    d.facebox.state = (m->role == DG_ROLE_BLACKLIST || m->spoof_challenge)
+                          ? DG_BOX_FAILED : DG_BOX_MATCHED;
     emit(fsm, FSM_ACT_FACEBOX, &d);
 
     if (m->role == DG_ROLE_BLACKLIST)
         fail_and_back(fsm, DG_METHOD_FACE_1N, DG_REASON_BLACKLIST, now_ms);
+    else if (m->spoof_challenge)
+        challenge_start(fsm);
     else
         succeed(fsm, DG_METHOD_FACE_1N, now_ms);
 }
@@ -515,7 +539,10 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
         return;
 
     case FSM_EV_UID_RESOLVED: {
-        if (fsm->state != ST_VERIFY || fsm->step != V_INPUT_UID)
+        /* 正常验证流程(V_INPUT_UID)与反欺骗降级(V_CHALLENGE_RESOLVE)共用:
+         * 都是"服务层查库回执 → 校验 → 出方式选择" */
+        if (fsm->state != ST_VERIFY ||
+            (fsm->step != V_INPUT_UID && fsm->step != V_CHALLENGE_RESOLVE))
             return;
         const fsm_uid_resolved_t *r = &data->uid_res;
         snprintf(fsm->cur_name, sizeof(fsm->cur_name), "%s", r->user_name);
@@ -531,7 +558,15 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
             fail_and_back(fsm, fsm->step_method, DG_REASON_BLACKLIST, 0);
             return;
         }
-        if (r->auth_flags == 0) {
+        if (fsm->step == V_CHALLENGE_RESOLVE) {
+            /* 二次验证:人脸刚被质疑,不再作为可选项(密码业务上必有;
+             * 极端"只开了人脸"的用户排除后无方式可用 → 明确失败,不出空弹窗) */
+            fsm->cur_auth_flags &= ~(uint32_t)DG_AUTH_FACE;
+            if (fsm->cur_auth_flags == 0) {
+                fail_and_back(fsm, DG_METHOD_FACE_1N, DG_REASON_AUTH_DISABLED, 0);
+                return;
+            }
+        } else if (r->auth_flags == 0) {
             fail_and_back(fsm, fsm->step_method, DG_REASON_AUTH_DISABLED, 0);
             return;
         }

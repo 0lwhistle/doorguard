@@ -237,6 +237,94 @@ static void t03_blacklist_hit(void)
     DG_CHECK(log->d.log.result == DG_RESULT_REJECT);
 }
 
+/* ================= 3b 反欺骗降级(多模态二次验证) ================= */
+
+static void t03b_challenge_flow(void)
+{
+    printf("[F03b] 疑似假体命中→二次验证:不出开门、解析方式位排除人脸、密码通过开门\n");
+    fsm_reset();
+    face_detected();
+    ev_match_t m = mk_match("10001", "张三", DG_ROLE_NORMAL, true);
+    m.spoof_challenge = 1;
+    handle_match(m);
+
+    /* 不开门,进挑战等待解析;提示与解析动作携带命中 UID */
+    DG_CHECK(s_fsm.state == ST_VERIFY);
+    DG_CHECK(s_fsm.step == V_CHALLENGE_RESOLVE);
+    DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 0);
+    DG_CHECK(count_act(FSM_ACT_WRITE_LOG) == 0);        /* 发起不是验证动作 */
+    const act_rec_t *hint = last_act(FSM_ACT_HINT_TEXT);
+    DG_CHECK(hint && hint->d.misc.method == DG_HINT_CHALLENGE);
+    const act_rec_t *res = last_act(FSM_ACT_RESOLVE_UID);
+    DG_CHECK(res && strcmp(res->d.misc.uid, "10001") == 0);
+    const act_rec_t *fb = last_act(FSM_ACT_FACEBOX);
+    DG_CHECK(fb && fb->d.facebox.state == DG_BOX_FAILED);
+
+    /* 解析回执:用户开了人脸+指纹+密码 → 方式列表必须排除人脸 */
+    uid_resolved("10001", true, DG_ROLE_NORMAL,
+                 DG_AUTH_FACE | DG_AUTH_FINGER | DG_AUTH_PWD);
+    DG_CHECK(s_fsm.step == V_PICK_METHOD);
+    const act_rec_t *sm = last_act(FSM_ACT_SHOW_METHODS);
+    DG_CHECK(sm && sm->d.misc.auth_flags == (DG_AUTH_FINGER | DG_AUTH_PWD));
+
+    /* 选密码 → 验证通过 → 开门+日志(method=密码:双重验证以第二因子落地) */
+    method_pick(DG_METHOD_PWD);
+    DG_CHECK(s_fsm.step == V_PWD);
+    verify_result(DG_METHOD_PWD, true, DG_REASON_OK);
+    DG_CHECK(s_fsm.state == ST_RESULT);
+    DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 1);
+    const act_rec_t *log = last_act(FSM_ACT_WRITE_LOG);
+    DG_CHECK(log && log->d.log.method == DG_METHOD_PWD);
+    DG_CHECK(log->d.log.result == DG_RESULT_PASS);
+}
+
+static void t03c_challenge_face_only(void)
+{
+    printf("[F03c] 挑战用户只开了人脸→排除后无方式可用→明确失败\n");
+    fsm_reset();
+    face_detected();
+    ev_match_t m = mk_match("10002", "李四", DG_ROLE_NORMAL, true);
+    m.spoof_challenge = 1;
+    handle_match(m);
+    uid_resolved("10002", true, DG_ROLE_NORMAL, DG_AUTH_FACE);
+    DG_CHECK(s_fsm.state == ST_RESULT);
+    const act_rec_t *log = last_act(FSM_ACT_WRITE_LOG);
+    DG_CHECK(log && log->d.log.reason == DG_REASON_AUTH_DISABLED);
+    DG_CHECK(count_act(FSM_ACT_SHOW_METHODS) == 0);     /* 不出空弹窗 */
+}
+
+static void t03d_challenge_timeout(void)
+{
+    printf("[F03d] 挑战流程 5s 超时→失败日志(method=发起方式 FACE_1N)\n");
+    fsm_reset();
+    face_detected();
+    ev_match_t m = mk_match("10001", "张三", DG_ROLE_NORMAL, true);
+    m.spoof_challenge = 1;
+    handle_match(m);
+    step_timeout();
+    DG_CHECK(s_fsm.state == ST_RESULT);
+    const act_rec_t *log = last_act(FSM_ACT_WRITE_LOG);
+    DG_CHECK(log && log->d.log.method == DG_METHOD_FACE_1N);
+    DG_CHECK(log->d.log.reason == DG_REASON_TIMEOUT);
+    DG_CHECK(log->d.log.result == DG_RESULT_REJECT);
+}
+
+static void t03e_challenge_back(void)
+{
+    printf("[F03e] 挑战弹窗用户取消→回普通模式不写日志,同场不重判\n");
+    fsm_reset();
+    face_detected();
+    ev_match_t m = mk_match("10001", "张三", DG_ROLE_NORMAL, true);
+    m.spoof_challenge = 1;
+    handle_match(m);
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    auth_fsm_handle(&s_fsm, FSM_EV_BACK, &d);
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+    DG_CHECK(count_act(FSM_ACT_WRITE_LOG) == 0);        /* 取消不是验证动作 */
+    DG_CHECK(s_fsm.window_done);                        /* 同一场不再重判 */
+}
+
 /* ================= 4 点验证后 match_enabled=0 ================= */
 
 static void t04_verify_suspends_match(void)
@@ -832,6 +920,10 @@ int main(void)
     t01_normal_hit();
     t02_match_timeout();
     t03_blacklist_hit();
+    t03b_challenge_flow();
+    t03c_challenge_face_only();
+    t03d_challenge_timeout();
+    t03e_challenge_back();
     t04_verify_suspends_match();
     t05_uid_reject_paths();
     t06_step_timeout_and_stale_timer();

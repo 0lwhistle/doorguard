@@ -52,6 +52,7 @@
   "拒绝": "Reject",
   "陌生人": "Stranger",
   "管理员认证": "Admin auth",
+  "人脸验证未通过,请选择其他方式": "Face not verified, choose another method",
   "设备未联网": "Offline",
   "门已开启": "Door opened",
   "开门中": "Door open",
