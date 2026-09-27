@@ -101,7 +101,8 @@ add_executable(test_net_info test_net_info.c
     ${CMAKE_SOURCE_DIR}/modules/net/net_info.c
     ${CMAKE_SOURCE_DIR}/modules/net/net_cfg.c)
 target_include_directories(test_net_info PRIVATE
-    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto ${CMAKE_SOURCE_DIR}/services/config)
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto ${CMAKE_SOURCE_DIR}/services/config
+    ${CMAKE_SOURCE_DIR}/modules/net)
 target_link_libraries(test_net_info PRIVATE dg_log dg_config)
 add_test(NAME test_net_info COMMAND test_net_info)
 set_tests_properties(test_net_info PROPERTIES TIMEOUT 30)
