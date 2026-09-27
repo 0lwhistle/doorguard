@@ -16,6 +16,7 @@
 #include "i18n.h"
 #include "navigator/navigator.h"
 #include "theme.h"
+#include "widgets/dg_btn.h"
 #include "widgets/dg_popup.h"
 
 #include <stdio.h>
@@ -113,7 +114,8 @@ static void build_row(lv_obj_t *parent, int idx, int y)
     lv_obj_t *hint = lv_label_create(parent);
     lv_label_set_text(hint, _(r->hint));
     lv_obj_set_style_text_font(hint, DG_FONT_SUB, 0);
-    lv_obj_set_style_text_color(hint, DG_COL_SUB(), 0);
+    lv_obj_set_style_text_color(hint, DG_COL_TEXT(), 0);
+    lv_obj_set_style_text_opa(hint, LV_OPA_70, 0);   /* 次要文字:正文色降透明(page_users 同款) */
     lv_obj_align(hint, LV_ALIGN_TOP_LEFT, DG_PAD, y + 108);
 
     /* 初始值文本(与滑条一致) */
@@ -146,7 +148,8 @@ void page_face_set_create(lv_obj_t *parent)
     lv_obj_t *tip = lv_label_create(parent);
     lv_label_set_text(tip, _("松手即保存并生效"));
     lv_obj_set_style_text_font(tip, DG_FONT_SUB, 0);
-    lv_obj_set_style_text_color(tip, DG_COL_SUB(), 0);
+    lv_obj_set_style_text_color(tip, DG_COL_TEXT(), 0);
+    lv_obj_set_style_text_opa(tip, LV_OPA_70, 0);
     lv_obj_align(tip, LV_ALIGN_TOP_MID, 0, 140 + ROW_N * 210);
 }
 
