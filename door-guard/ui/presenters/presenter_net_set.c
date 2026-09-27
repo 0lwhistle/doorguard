@@ -6,7 +6,9 @@
  */
 #include "presenter_net_set.h"
 #include "i18n.h"
+#include "navigator/navigator.h"
 #include "pages/page_net_set.h"
+#include "ui_events.h"
 #include "widgets/dg_popup.h"
 
 static void net_set_on_evt(const ui_evt_t *evt)
