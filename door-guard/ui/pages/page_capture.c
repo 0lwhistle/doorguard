@@ -204,12 +204,7 @@ static void on_evt(const ui_evt_t *evt)
 {
     switch (evt->kind) {
     case UI_EVT_FACE_BOX:
-        if (!s_review && s_facebox) {
-            lv_obj_clear_flag(s_facebox, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_pos(s_facebox, evt->box.x, evt->box.y);
-            lv_obj_set_size(s_facebox, evt->box.w, evt->box.h);
-        }
-        break;
+        break;                                  /* 取景框固定居中,不跟随检测框 */
     case UI_EVT_FACE_LOST:
         if (!s_review) {
             if (s_facebox)
@@ -261,13 +256,32 @@ void page_capture_create(lv_obj_t *parent)
 
     s_preview = dg_preview_create(parent, "CAPTURE");
 
+    /* 取景框(proto 取景框常量,与 vision 截取同源):只画四个角(括号式),
+     * 不画整框——构图引导而不遮挡;括号内即头像内容,所见即所得 */
     s_facebox = lv_obj_create(parent);
     lv_obj_remove_style_all(s_facebox);
-    lv_obj_set_style_border_width(s_facebox, 4, 0);
-    lv_obj_set_style_border_color(s_facebox, DG_COL_WARN(), 0);
-    lv_obj_set_style_radius(s_facebox, 8, 0);
-    lv_obj_set_style_bg_opa(s_facebox, LV_OPA_TRANSP, 0);
+    lv_obj_set_size(s_facebox, DG_CAPTURE_VIEW_SZ, DG_CAPTURE_VIEW_SZ);
+    lv_obj_align(s_facebox, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(s_facebox, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(s_facebox, LV_OBJ_FLAG_HIDDEN);
+    {
+        const int32_t sz = DG_CAPTURE_VIEW_SZ;
+        const int32_t arm = 44, th = 4;          /* 角臂长/线厚 */
+        const struct { int32_t x, y, w, h; } bars[8] = {
+            /* 左上 */ { 0, 0, arm, th }, { 0, 0, th, arm },
+            /* 右上 */ { sz - arm, 0, arm, th }, { sz - th, 0, th, arm },
+            /* 左下 */ { 0, sz - th, arm, th }, { 0, sz - arm, th, arm },
+            /* 右下 */ { sz - arm, sz - th, arm, th }, { sz - th, sz - arm, th, arm },
+        };
+        for (int i = 0; i < 8; i++) {
+            lv_obj_t *bar = lv_obj_create(s_facebox);
+            lv_obj_remove_style_all(bar);
+            lv_obj_set_size(bar, bars[i].w, bars[i].h);
+            lv_obj_set_pos(bar, bars[i].x, bars[i].y);
+            lv_obj_set_style_bg_color(bar, DG_COL_OK(), 0);
+            lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+        }
+    }
 
     lv_obj_t *title = lv_label_create(parent);
     lv_label_set_text(title, _("人脸录入"));

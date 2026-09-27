@@ -50,6 +50,12 @@ typedef enum {
 #define DG_AUTH_IC      (1u << 3)
 #define DG_AUTH_ALL     (DG_AUTH_FACE | DG_AUTH_FINGER | DG_AUTH_PWD | DG_AUTH_IC)
 
+/* 拍摄取景框(预览/屏幕域,720×1280 居中):拍摄页四角括号按此绘制,
+ * vision 截取头像按此裁剪——UI 引导与实际取材严格同源,所见即所得 */
+#define DG_CAPTURE_VIEW_SZ   400  /**< 边长(正方形,与人脸预览窗同比例) */
+#define DG_CAPTURE_VIEW_CX   360  /**< 中心 X(= DG_SCREEN_W/2) */
+#define DG_CAPTURE_VIEW_CY   640  /**< 中心 Y(= DG_SCREEN_H/2) */
+
 /* ---- users 表内存投影 ---- */
 
 typedef struct {

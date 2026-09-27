@@ -486,65 +486,24 @@ static bool recognize(const uint8_t *nv12, int w, int h,
     /* 头像大图:按 AVATAR/112 整体缩放对齐矩阵再采样一次(M'=S·M,复用同一
      * 份对齐结果,全库头像构图一致);与特征同帧,由调用方成对入缓存 */
     {
-        float mb[6];
-        const float s = (float)RKNN_AVATAR_SZ / 112.0f;
-        for (int i = 0; i < 6; i++)
-            mb[i] = m[i] * s;
-        /* 内容铺满(修"头像黑边"):特写+大倾角时,输出方块的回映采样区
-         * 会超出 ROI,越界处填黑=用户看到的内容黑角。按回映四角相对输出
-         * 中心预映点 c 的半跨度与 c 到 ROI 边缘的余量,求最大可行缩放 k
-         * (<1 时围绕输出中心等比缩小视角):构图/朝向不变,脸稍小但
-         * 方形铺满;极端情形(脸贴框,k 无解)由 warp 边缘钳位兜底 */
-        {
-            const float det = mb[0] * mb[4] - mb[1] * mb[3];
-            const float oc = (float)RKNN_AVATAR_SZ * 0.5f;
-            if (det > 1e-12f || det < -1e-12f) {
-                const float inv = 1.0f / det;
-                const float corners[4][2] = {
-                    {0.0f, 0.0f}, {(float)RKNN_AVATAR_SZ, 0.0f},
-                    {(float)RKNN_AVATAR_SZ, (float)RKNN_AVATAR_SZ},
-                    {0.0f, (float)RKNN_AVATAR_SZ},
-                };
-                float ccx, ccy;
-                {
-                    const float dx = oc - mb[2], dy = oc - mb[5];
-                    ccx = ( mb[4] * dx - mb[1] * dy) * inv;
-                    ccy = (-mb[3] * dx + mb[0] * dy) * inv;
-                }
-                float hx = 0.0f, hy = 0.0f;
-                for (int i = 0; i < 4; i++) {
-                    const float dx = corners[i][0] - mb[2];
-                    const float dy = corners[i][1] - mb[5];
-                    const float sx = ( mb[4] * dx - mb[1] * dy) * inv;
-                    const float sy = (-mb[3] * dx + mb[0] * dy) * inv;
-                    const float ex = fabsf(sx - ccx), ey = fabsf(sy - ccy);
-                    if (ex > hx) hx = ex;
-                    if (ey > hy) hy = ey;
-                }
-                const float mx = fminf(ccx, (float)dw - ccx);
-                const float my = fminf(ccy, (float)dw - ccy);
-                float k = 1.0f;
-                if (hx > 1e-3f && mx / hx < k) k = mx / hx;
-                if (hy > 1e-3f && my / hy < k) k = my / hy;
-                if (k > 0.05f && k < 1.0f) {
-                    for (int i = 0; i < 6; i++)
-                        mb[i] *= k;
-                    mb[2] += (1.0f - k) * oc;   /* D_k∘M':围绕输出中心缩放 */
-                    mb[5] += (1.0f - k) * oc;
-                }
-            }
-        }
-        rknn_align_warp_ex(s_roi, dw, dw, mb, s_avatar_warp, RKNN_AVATAR_SZ,
-                           RKNN_AVATAR_SZ, true);
-        /* 诊断日志(节流):对齐拟合出的面内旋转角。头像歪斜/识别分数异常时
-         * 第一时间看这里——检测输入已旋到正立域,正常应 ≈0°(即被摄者头部
-         * 的自然倾角,±10° 内);明显偏离=关键点或模板出了问题 */
-        static int64_t last_ang_log;
-        const int64_t now = now_ms();
-        if (now - last_ang_log >= RKNN_BOX_LOG_MS) {
-            last_ang_log = now;
-            const float deg = atan2f(m[3], m[0]) * (180.0f / 3.14159265f);
-            DG_LOGI(TAG, "对齐旋转角 %.1f°(ROI %dpx,缩放 %.2f)", deg, side, ks);
+        /* 头像 = 拍摄取景框直裁(用户方案,2026-09-27):拍摄页在屏幕中央
+         * 画 DG_CAPTURE_VIEW_SZ 四角括号,这里从同一屏幕域旋转帧裁同一区域
+         * 等比缩到 160×160——所见即所得,天然无黑角;识别特征的 112 对齐
+         * 路径不变(上方 recognize 已完成)。 */
+        const int vw = DG_CAPTURE_VIEW_SZ;
+        const int vx = DG_CAPTURE_VIEW_CX - vw / 2;
+        const int vy = DG_CAPTURE_VIEW_CY - vw / 2;
+        static uint8_t s_view_rgb[DG_CAPTURE_VIEW_SZ * DG_CAPTURE_VIEW_SZ * 3];
+        if (vx >= 0 && vy >= 0 && vx + vw <= w && vy + vw <= h &&
+            npu_pre_nv12_crop_rgb(nv12, w, w, h, vx, vy, vw, vw,
+                                  s_view_rgb, vw, vw) == DG_OK) {
+            /* 等比缩放 vw→160:用相似变换矩阵走 warp(双线性);scale=160/vw */
+            const float k = (float)RKNN_AVATAR_SZ / (float)vw;
+            const float mb[6] = { k, 0.0f, 0.0f, 0.0f, k, 0.0f };
+            rknn_align_warp_ex(s_view_rgb, vw, vw, mb, s_avatar_warp,
+                               RKNN_AVATAR_SZ, RKNN_AVATAR_SZ, true);
+        } else {
+            memset(s_avatar_warp, 0, sizeof(s_avatar_warp));
         }
     }
 
