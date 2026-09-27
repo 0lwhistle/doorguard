@@ -4,6 +4,17 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-27(续十)双读头内核侧部署形态定案(仅文档)
+
+**结论**:①IC 卡驱动 **开发期 .ko / 定稿 built-in**(.config =m→=y 代码零改转正);
+DTS 变更是两条路线共同的一次性成本(SPI 控制器默认 disabled);ko 必须在 VM SDK 内核
+树内编(vermagic 严格一致),开机自动加载走 buildroot overlay init 脚本且序号在 S60
+doorguard 之前;ko 不在线走应用降级,开发期安全。②**AS608 零内核驱动**:纯 UART
+从设备直接用现成 uart_hal;唯一工作=DTS 启用一个空闲 UART(**避开 UART2 调试口**)
++WAK 走 sysfs GPIO(EPOLLPRI)+VTI 接 3.3V(不接则 WAK 永不触发)。
+均已写入 ICCARD_PROTOCOL §10 / FINGERPRINT_AS608 §1。
+
+---
 ## 2026-09-27(续九)指纹决策拍板:每用户最多 3 枚 → DB 模型变更定稿(仅文档)
 
 **做了什么**:用户确认决策 A(模组内+DB 副本,容量满提示即可)并提出决策 B 变更:

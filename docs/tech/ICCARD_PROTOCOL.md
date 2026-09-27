@@ -164,6 +164,17 @@ IC 的 provider 仅作登记与生命周期管理,认证判定走 §7.2 事件�
 
 ## 10. 驱动侧实现要求与自由度
 
+**部署形态(2026-09-27 定)**:开发期驱动编为**可加载模块 .ko**,定稿转 built-in——
+两者代码零差别,仅内核 `.config` 的 `CONFIG_xxx=m`→`=y` 之别,转正时改配置重编内核即可。
+- DTS 变更是一次性成本,两条路线都绕不开(K7 官方 DTS SPI 控制器默认 disabled):
+  启用 SPI 控制器 + iccard 子节点(含 RST/IRQ GPIO 引用与 SPI 速率)。
+- ko 迭代纪律:必须**在 VM 的 SDK 内核树内编**(vermagic/符号版本与板上 6.1.75 严格
+  一致,WSL 编的装不上);`make M=` 增量编 ko → 推板 rmmod/insmod 秒级迭代。
+- 开机自动加载:buildroot overlay 加 init 脚本 insmod,**脚本序号在 S60(doorguard)
+  之前**,与开机自动配网脚本同一套 overlay 机制。
+- 失败隔离:ko 不在线时应用走 §7.1 降级("读卡器未就绪"),整机不受影响——开发期
+  ko 路线因此安全。
+
 - **应用层不轮询**:`poll + 阻塞 read` 事件驱动,零 CPU 空转。
 - **中断路线定案(2026-09-27)**:模块已确认引出 `RQ` 中断脚 → 走芯片 IRQ → wait_queue
   → 驱动内完成寻卡读 UID → 唤醒 poller。§10 原列的"无 IRQ 线退化内部周期寻卡"路线
