@@ -40,6 +40,13 @@ function onEvent(msg) {
     if (msg.ok) toast.ok(msg.msg || '时间校正成功')
     else toast.err(msg.msg || '时间校正失败')
     refreshQuiet()
+    return
+  }
+  if (msg.type === 'net') {
+    /* 地址变化(DHCP 续租/应用了新配置):立即重取快照,网络卡实时更新。
+     * 静态地址切换会断开本页连接,提示用户改用新地址访问 */
+    toast.info(msg.msg || '设备网络已更新')
+    refreshQuiet()
   }
 }
 

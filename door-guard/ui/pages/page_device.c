@@ -6,6 +6,7 @@
 #include "events.h"
 #include "dg_log.h"
 #include "i18n.h"
+#include "modules/net/net_info.h"
 #include "navigator/navigator.h"
 #include "theme.h"
 #include "widgets/dg_btn.h"
@@ -51,8 +52,20 @@ static void on_ntp(lv_event_t *e)
 static void on_net(lv_event_t *e)
 {
     (void)e;
-    /* 网络配置(静态 IP 等)Phase 9 接入;当前展示占位 */
-    dg_popup_success(_("网络配置"), 800, NULL, NULL);
+    /* 展示当前实际生效的网络信息(地址设置入口在 web 上位机——屏幕上
+     * 点数字键盘配 IP 不现实,这里让调试时能一眼核对);没拿到的项
+     * net_info 已统一给 0.0.0.0,不再各写兜底 */
+    net_info_addr_t a;
+    net_info_read(&a);
+    const dg_cfg_t *c = cfg_get();
+    char buf[192];
+    snprintf(buf, sizeof(buf), "%s: %s\nIP: %s\n%s: %s\n%s: %s\n%s: %s",
+             _("接口"), a.ifname[0] ? a.ifname : "-",
+             a.ip,
+             _("子网掩码"), a.mask,
+             _("网关"), a.gw,
+             _("模式"), c ? c->net_mode : "dhcp");
+    dg_popup_success(buf, 5000, NULL, NULL);
 }
 
 /* ---- 秒数选择项(待机超时/菜单超时;choice 比自由输入防呆,与门禁设置页同款) ---- */

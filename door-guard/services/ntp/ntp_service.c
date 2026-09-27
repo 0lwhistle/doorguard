@@ -7,9 +7,11 @@
  * (access_logs 的展示顺序以落库 ts 为准,记录在 spec-network §3)。
  *
  * 触发语义与旧版一致:
- *   - 开机自动一次(延迟 10s 等网络栈就绪)
+ *   - 开机自动一次(延迟后开始,未联网则周期重试直到在线,见 boot_trigger)
  *   - EV_NET_NTP_TRIGGER(菜单按钮)
  *   - web /api/ntp(202 异步,结果走 WebSocket)
+ * 2026-09-27 补:EV_NET_ADDR(地址变化,如 DHCP 拿到地址/应用静态配置)且
+ * 从未同步成功过 → 自动补一次——开机网线未就绪的场景不再依赖人工点按钮。
  * 联网探测不再 shell 出去 ping,直接用 net_info 的在线状态。
  *
  * 线程契约:SNTP 连接/超时判定都在 netcore loop 线程(经 netcore_post 进入),
@@ -35,8 +37,11 @@ static const char *TAG = "[NTP]";
 
 #define SNTP_TIMEOUT_MS  8000        /* 单次校正超时(含 DNS/往返) */
 #define BOOT_DELAY_S     10          /* 开机后等网络栈就绪 */
+#define BOOT_RETRY_S     30          /* 开机未在线的重试间隔 */
+#define BOOT_RETRY_MAX   10          /* 最多重试 ~5 分钟,放弃后等地址变化事件 */
 
 static atomic_bool s_running = false;
+static atomic_bool s_ever_synced = false;   /* 本次运行是否同步成功过 */
 /* loop 线程私有的在途请求 */
 static struct mg_connection *s_sntp_c = NULL;
 static int64_t s_deadline_ms = 0;
@@ -73,8 +78,10 @@ static void sntp_cb(struct mg_connection *c, int ev, void *ev_data)
         bool set_ok = (settimeofday(&tv, NULL) == 0);
         if (!set_ok)
             DG_LOGW(TAG, "settimeofday 失败(需要 root?),时间未写入");
-        else
+        else {
             DG_LOGI(TAG, "SNTP 同步成功:%lld", (long long)tv.tv_sec);
+            atomic_store(&s_ever_synced, true);
+        }
         s_sntp_c = NULL;
         /* 事件回调内禁止 mg_close_conn(立即 free,poll 循环继续用 c 即 UAF,
          * 板上实测段错误);is_closing 由 poll 末尾统一延迟关闭 */
@@ -156,18 +163,37 @@ static int on_trigger_req(const event_t *e, void *ud)
     return 0;
 }
 
-/* 开机自动校正一次(独立线程只做"等待+探测",校正本身已异步化) */
+/* 开机自动校正:等在线(最多 ~5 分钟)而不是一次探测定生死——板子先上电、
+ * 网关(ICS/DHCP 服务器)后就绪是常态;放弃后仍由 EV_NET_ADDR 兜底 */
 static void *boot_trigger(void *arg)
 {
     (void)arg;
     sleep(BOOT_DELAY_S);
-    if (net_info_is_online()) {
-        DG_LOGI(TAG, "开机联网检测通过,自动校正一次");
-        ntp_service_trigger();
-    } else {
-        DG_LOGW(TAG, "开机未联网,跳过自动校正");
+    for (int i = 0; i < BOOT_RETRY_MAX; i++) {
+        if (net_info_is_online()) {
+            DG_LOGI(TAG, "开机联网检测通过,自动校正一次");
+            ntp_service_trigger();
+            return NULL;
+        }
+        sleep(BOOT_RETRY_S);
     }
+    DG_LOGW(TAG, "开机后持续未联网,放弃自动校正(待地址变化再补)");
     return NULL;
+}
+
+/* 地址变化(DHCP 拿到地址/应用静态配置)且从未同步成功过 → 补一次。
+ * 同步成功过就不再跟:周期性续租会反复触发,没有意义 */
+static int on_addr_changed(const event_t *e, void *ud)
+{
+    (void)e;
+    (void)ud;
+    if (atomic_load(&s_ever_synced))
+        return 0;
+    if (net_info_is_online()) {
+        DG_LOGI(TAG, "检测到新地址且尚未同步过,自动补一次校正");
+        ntp_service_trigger();
+    }
+    return 0;
 }
 
 int ntp_service_start(void)
@@ -176,6 +202,7 @@ int ntp_service_start(void)
         return DG_OK;
     atomic_store(&s_running, true);
     event_bus_subscribe(EV_NET_NTP_TRIGGER, on_trigger_req, NULL);
+    event_bus_subscribe(EV_NET_ADDR, on_addr_changed, NULL);
     pthread_t tid;
     if (pthread_create(&tid, NULL, boot_trigger, NULL) == 0)
         pthread_detach(tid);

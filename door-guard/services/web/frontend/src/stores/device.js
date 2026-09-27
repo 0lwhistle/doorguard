@@ -1,11 +1,14 @@
 /*
- * device.js — 设备快照(/api/device)
+ * device.js — 设备快照(/api/device)+ 网络快照(/api/network)
  *
  * 视图不直接取数:这里统一拿、统一缓存、统一轮询(30s),并把常用派生文案
  * (地址/存储/版本)算好,避免每个组件各拼一遍字符串。
+ * 网络快照随同一节奏刷新;WS 推送 net 事件(地址变化)触发 refreshQuiet
+ * 时立即重取,做到"实时读取更新"。
  */
 import { computed, reactive } from 'vue'
 import { getDevice } from '../api/device'
+import { getNetwork } from '../api/network'
 import { markPwdDefault, session } from './session'
 
 const POLL_MS = 30000
@@ -15,6 +18,7 @@ const state = reactive({
   loading: false,
   error: '',
   data: null,
+  network: null,
 })
 
 let timer = null
@@ -48,8 +52,18 @@ export function fmtBytes(n) {
   return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`
 }
 
+/** 网络快照单独刷新(apply 后立即可调;失败静默,卡片保持旧值) */
+export async function refreshNetwork() {
+  try {
+    state.network = await getNetwork()
+  } catch {
+    /* 静默:网络断开时多半就是地址刚切走,等 WS/轮询恢复 */
+  }
+}
+
 export async function refresh() {
   state.loading = true
+  refreshNetwork()                        /* 并行取,不阻塞设备快照 */
   try {
     const d = await getDevice()
     state.data = d

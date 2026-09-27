@@ -136,5 +136,9 @@
   "画面模糊,请保持不动": "Image blurry, hold still",
   "默认密码,请尽快修改": "Default password, please change it soon",
   "验证成功": "Verified",
-  "验证失败": "Verify failed"
+  "验证失败": "Verify failed",
+  "接口": "Interface",
+  "子网掩码": "Subnet Mask",
+  "网关": "Gateway",
+  "模式": "Mode"
 }

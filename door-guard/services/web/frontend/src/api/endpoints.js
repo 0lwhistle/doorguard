@@ -11,6 +11,7 @@ export const PATHS = {
   device: '/api/device',
   logs: '/api/logs',
   ntp: '/api/ntp',
+  network: '/api/network',
   account: '/api/account',
   users: '/api/users',
   usersAdd: '/api/users/add',

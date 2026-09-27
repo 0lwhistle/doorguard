@@ -59,6 +59,10 @@ typedef struct {
     int  web_port;             /**< web 上位机端口(含 OTA 上传端点),1024~65535,默认 8080 */
     char ntp_server[64];       /**< 默认 ntp.aliyun.com(国内部署实测可用) */
     char ota_url[128];         /**< OTA 升级包源地址,可空 */
+    char net_mode[8];          /**< 接口地址来源:"dhcp"(默认)/"static";应用在 modules/net/net_cfg */
+    char net_ip[16];           /**< 静态 IP(net_mode=static 时生效),点分十进制 */
+    char net_mask[16];         /**< 静态子网掩码,点分十进制 */
+    char net_gw[16];           /**< 静态默认网关,空 = 不下发默认路由 */
     /* 硬件参数(json-only;引脚待硬件确认) */
     int  relay_gpio_line;      /**< 开门继电器 GPIO 行号,默认 0 */
     char relay_gpio_chip[32];  /**< GPIO 控制器(sysfs 模式下仅记录) */

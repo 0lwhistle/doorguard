@@ -60,6 +60,10 @@ static const cfg_meta_t META[] = {
     { "ntp_server",           "network.ntp_server",       CK_STR,    0,    63 },
     { "web_port",             "network.web_port",         CK_INT, 1024, 65535 },
     { "ota_url",              "network.ota_url",          CK_STR,    0,   127 },
+    { "net_mode",             "network.net_mode",         CK_STR,    0,     7 },
+    { "net_ip",               "network.net_ip",           CK_STR,    0,    15 },
+    { "net_mask",             "network.net_mask",         CK_STR,    0,    15 },
+    { "net_gw",               "network.net_gw",           CK_STR,    0,    15 },
 };
 
 #define META_N (sizeof(META) / sizeof(META[0]))
@@ -241,6 +245,10 @@ static void defaults_apply(dg_cfg_t *c)
     c->web_port = 8080;
     snprintf(c->ntp_server, sizeof(c->ntp_server), "ntp.aliyun.com");
     c->ota_url[0] = '\0';
+    snprintf(c->net_mode, sizeof(c->net_mode), "dhcp");
+    c->net_ip[0] = '\0';
+    c->net_mask[0] = '\0';
+    c->net_gw[0] = '\0';
     c->relay_gpio_line = 0;
     snprintf(c->relay_gpio_chip, sizeof(c->relay_gpio_chip), "/dev/gpiochip0");
 }
@@ -300,6 +308,14 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
             copy_cstr(c->ntp_server, sizeof(c->ntp_server), item->valuestring);
         else if (!strcmp(m->key, "ota_url"))
             copy_cstr(c->ota_url, sizeof(c->ota_url), item->valuestring);
+        else if (!strcmp(m->key, "net_mode"))
+            copy_cstr(c->net_mode, sizeof(c->net_mode), item->valuestring);
+        else if (!strcmp(m->key, "net_ip"))
+            copy_cstr(c->net_ip, sizeof(c->net_ip), item->valuestring);
+        else if (!strcmp(m->key, "net_mask"))
+            copy_cstr(c->net_mask, sizeof(c->net_mask), item->valuestring);
+        else if (!strcmp(m->key, "net_gw"))
+            copy_cstr(c->net_gw, sizeof(c->net_gw), item->valuestring);
     }
 }
 

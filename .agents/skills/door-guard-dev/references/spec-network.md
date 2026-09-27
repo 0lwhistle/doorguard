@@ -22,6 +22,8 @@
   | POST | `/api/login` | 否 | 账号+口令 → `{token,expires_in,user,pwd_default}` |
   | POST | `/api/logout` | token | 注销当前 token |
   | GET | `/api/device` | token | 版本(固件 git describe)/运行时长(读 `/proc/uptime`)/用户数/日志数/IP/接口名/mDNS 名与地址/账号/默认口令标记/NTP 状态/库占用与分区余量 |
+  | GET | `/api/network` | token | 网络配置快照:`{ifname,ip,netmask,gateway,have_ip,online,mode,configured?}`——实际地址来自 net_info,**未拿到统一 `0.0.0.0`**;mode=dhcp/static(持久化配置),静态时附 `configured`(期望值) |
+  | POST | `/api/network` | token | 应用网络配置:`{mode:"dhcp"}` 或 `{mode:"static",ip,netmask,gateway(可空)}`。校验(点分/连续掩码)→ 持久化 cfg → 回 **202** → 后台线程应用(net_cfg_apply,system 与 dhcpcd 协调);完成后经 WebSocket `net` 事件推新地址。改 IP 会切走本连接,前端必须提示用新地址重访 |
   | GET | `/api/logs` | token | `from,to,user_id,page,page_size(≤100)` 分页 JSON,字段与 access_logs 一致 |
   | POST | `/api/ntp` | token | 异步触发(202),结果经 WebSocket 回 |
   | POST | `/api/account` | token + 旧口令 | 改账号/口令,成功后**吊销全部会话** |
@@ -94,12 +96,14 @@
 
 ## 3. NTP 时间校正
 
-触发时机(三种,全部要求设备已联网):
+触发时机(四种,全部要求设备已联网):
 
-1. **开机自动一次**:后台服务启动即检查 eth0/eth1/wlan0 是否拿到 IP 且外网可达
-   (netlink 监听 + 连通性探测);满足则执行一次,失败不重试到死(记日志)
-2. 菜单页 → 设备管理 → **NTP 时间矫正** 按钮手动触发
-3. web 上位机 → 设备管理 → **NTP 时间矫正** 按钮手动触发
+1. **开机自动**:后台启动即检查 eth0/eth1/wlan0;在线立即执行一次,未在线
+   则每 30s 重试(上限 ~5 分钟),之后仍由"地址变化补同步"兜底
+2. **地址变化补同步**:EV_NET_ADDR(DHCP 拿到地址/应用静态配置)且本次运行
+   从未同步成功过 → 自动补一次(已成功过则不再跟,避免续租刷同步)
+3. 菜单页 → 设备管理 → **NTP 时间矫正** 按钮手动触发
+4. web 上位机 → 设备管理 → **NTP 时间矫正** 按钮手动触发
 
 实现(2026-09-22 起为**应用内 SNTP 客户端**,mongoose `mg_sntp_connect`,跑在
 netcore 统一事件循环):成功 `settimeofday` 步进写系统时间;服务器地址 `ntp_server`
@@ -111,3 +115,26 @@ chrony 是持续 slew,SNTP 是一次步进,门禁场景接受步进(时间回拨
 装配要求(**踩过的坑**,仍然有效):`ntp_service_start()` 必须在 main 的 holder 表里注册。
 只 include 头不初始化时 `s_running=false`,触发请求会被静默丢弃——表现是"按钮点了没反应",
 既不报错也没有结果事件。上位机侧的触发是异步的(POST 立即回 202,结果走 WebSocket)。
+
+## 4. 网络配置(IP/掩码/网关,2026-09-27)
+
+- 配置键:device_config `net_mode`("dhcp" 默认 /"static")+ `net_ip`/`net_mask`/`net_gw`
+  (点分;gw 空串 = 不下发默认路由)。**配置 = 期望值**,实际地址永远以 net_info 读取为准
+- 应用:`modules/net/net_cfg`——静态先 `dhcpcd -x <if>` 释放租约并移出 dhcpcd 管理
+  (否则 dhcpcd 会按租约周期覆盖手动地址),再 `ip addr add ip/plen` + `ip route replace default`;
+  回 DHCP 则清残留后 `dhcpcd -n <if>`(主进程不在才补后台实例)。应用目标接口 =
+  第一个非环回 UP 接口(**不要求已有地址**——静态首次应用/开机恢复恰发生在无地址时,
+  net_info 的 primary 规则要求有 IPv4,那条是展示用的)
+- 装配:main 服务表 `net_cfg`(依赖 config):cfg=static 才开机应用一次;
+  dhcp(默认)不干预——开机配网仍由 rootfs S41dhcpcd 负责
+- 展示兜底:**任何一项取不到统一显示 `0.0.0.0`**(web /api/device、/api/network、
+  主页状态栏、设备管理页弹窗)。主接口无地址时 `net_info_read` 返回 DG_OK 且
+  `have_ip=false`,各展示层直接渲染不再各自兜底
+- 实时性:web loop 内 5s 定时(net_watch)对比地址快照,变化才发布 EV_NET_ADDR →
+  WebSocket `net` 事件(前端立即重取快照)+ NTP 补同步 + UI 设备页;应用静态配置的
+  结果由 apply 线程直接发布同一事件(web apply_worker)。地址没变不推送(续租不刷屏)
+- 设备端 UI:主页网络图标旁小字 IP(调试);设备管理页"网络配置"按钮弹窗显示当前
+  接口/IP/掩码/网关/模式(只读)。**屏幕上不做地址编辑**——数字键盘配 IP 不现实,
+  设置入口在上位机(网络配置卡片:DHCP/静态切换 + 三输入框 + 应用)
+- 测试:`tests/test_net_info.c`(宿主):掩码转前缀判定表、请求校验、net_info_read
+  兜底语义。apply() 会真改宿主网络,不进单测——推板后板上验收

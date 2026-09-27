@@ -95,6 +95,17 @@ target_link_libraries(test_netcore PRIVATE mongoose dg_log pthread)
 add_test(NAME test_netcore COMMAND test_netcore)
 set_tests_properties(test_netcore PROPERTIES TIMEOUT 30)
 
+# net_info/net_cfg:地址快照兜底(0.0.0.0)与配置校验纯逻辑(宿主);
+# apply() 会真改宿主网络,不在单测执行——推板后的板上验收项
+add_executable(test_net_info test_net_info.c
+    ${CMAKE_SOURCE_DIR}/modules/net/net_info.c
+    ${CMAKE_SOURCE_DIR}/modules/net/net_cfg.c)
+target_include_directories(test_net_info PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto ${CMAKE_SOURCE_DIR}/services/config)
+target_link_libraries(test_net_info PRIVATE dg_log dg_config)
+add_test(NAME test_net_info COMMAND test_net_info)
+set_tests_properties(test_net_info PROPERTIES TIMEOUT 30)
+
 # OTA 按需写线程流水线(环形缓冲/校验闭环/断点续传/进度事件;DG_OTA_DIR=临时目录)
 add_executable(test_ota test_ota.c)
 target_include_directories(test_ota PRIVATE

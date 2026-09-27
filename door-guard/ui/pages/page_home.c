@@ -25,6 +25,7 @@ static lv_obj_t *s_facebox = NULL;
 static lv_obj_t *s_hint = NULL;
 static lv_obj_t *s_clock = NULL;
 static lv_obj_t *s_net = NULL;         /* WiFi 图标(绿=在线/红=离线) */
+static lv_obj_t *s_net_ip = NULL;      /* 图标旁 IP(调试便利;无网络=0.0.0.0) */
 static lv_timer_t *s_pump_timer = NULL;
 static lv_timer_t *s_status_timer = NULL;
 
@@ -57,11 +58,17 @@ static void status_timer_cb(lv_timer_t *t)
         /* 「有网络」= 主接口已拿到 IPv4(面板在网内,web/mDNS/上位机可达)。
          * 只读 getifaddrs,无阻塞——外网可达性(ping 会阻塞)不在这条路径上;
          * 只读直调登记:net_info 是唯一「取哪个 IP」规则的所有者 */
-        char ip[64];
-        const bool online =
-            net_info_primary_ipv4(ip, sizeof(ip)) == DG_OK;
+        net_info_addr_t addr;
+        const bool online = (net_info_read(&addr) == DG_OK && addr.have_ip);
         /* 图标颜色已含全部状态语义(绿=在线/红=离线),不再叠红叉图标 */
         lv_obj_set_style_text_color(s_net, online ? DG_COL_OK() : DG_COL_ERR(), 0);
+        if (s_net_ip) {
+            /* 文本没变就不重设(label set_text 会整块重排重绘,1s 一次没必要);
+             * 没拿到地址显示 0.0.0.0——调试时一眼区分「离线」与「地址奇怪」 */
+            const char *cur = lv_label_get_text(s_net_ip);
+            if (!cur || strcmp(cur, addr.ip) != 0)
+                lv_label_set_text(s_net_ip, addr.ip);
+        }
     }
 }
 
@@ -142,6 +149,20 @@ void page_home_create(lv_obj_t *parent)
     lv_obj_align(s_net, LV_ALIGN_TOP_RIGHT, -DG_PAD, DG_PAD);
     lv_obj_clear_flag(s_net, LV_OBJ_FLAG_CLICKABLE);
 
+    /* IP 显示在网络图标左侧(调试便利,spec-ui 主页状态栏扩展):同款 chip,
+     * 小一号字,与图标底对齐 */
+    s_net_ip = lv_label_create(parent);
+    lv_label_set_text(s_net_ip, "0.0.0.0");
+    lv_obj_set_style_text_font(s_net_ip, DG_FONT_CN, 0);
+    lv_obj_set_style_text_color(s_net_ip, DG_COL_BG(), 0);
+    lv_obj_set_style_bg_color(s_net_ip, DG_COL_SCRIM(), 0);
+    lv_obj_set_style_bg_opa(s_net_ip, DG_OPA_SCRIM, 0);
+    lv_obj_set_style_radius(s_net_ip, 8, 0);
+    lv_obj_set_style_pad_hor(s_net_ip, 10, 0);
+    lv_obj_set_style_pad_ver(s_net_ip, 8, 0);
+    lv_obj_align(s_net_ip, LV_ALIGN_TOP_RIGHT, -DG_PAD - 40, DG_PAD);
+    lv_obj_clear_flag(s_net_ip, LV_OBJ_FLAG_CLICKABLE);
+
     s_status_timer = lv_timer_create(status_timer_cb, 1000, NULL);
     status_timer_cb(NULL);              /* 创建即显示当前值,不等 1s */
 
@@ -176,6 +197,7 @@ void page_home_destroy(void)
     s_hint = NULL;
     s_clock = NULL;
     s_net = NULL;
+    s_net_ip = NULL;
 }
 
 /* ---- setter(presenter 渲染入口) ---- */

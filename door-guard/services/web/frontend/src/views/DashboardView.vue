@@ -9,15 +9,18 @@ import { computed, ref } from 'vue'
 import AppCard from '../components/AppCard.vue'
 import AppButton from '../components/AppButton.vue'
 import EventFeed from '../components/EventFeed.vue'
+import NetworkCard from '../components/NetworkCard.vue'
 import StatGrid from '../components/StatGrid.vue'
 import { useClock } from '../composables/useClock'
 import { triggerNtp } from '../api/ntp'
-import { address, device, refreshQuiet, storageText } from '../stores/device'
+import { setNetwork } from '../api/network'
+import { address, device, refreshNetwork, refreshQuiet, storageText } from '../stores/device'
 import { clearFeed, events } from '../stores/events'
 import { toast } from '../stores/toast'
 
 const clock = useClock()
 const ntpBusy = ref(false)
+const netBusy = ref(false)
 
 const statItems = computed(() => {
   const d = device.data || {}
@@ -54,6 +57,24 @@ async function onNtp() {
     }, 1200)
   }
 }
+
+/** 应用网络配置:服务端 202 只代表受理,新地址经 WebSocket/重取快照到位 */
+async function onApplyNetwork(cfg) {
+  if (netBusy.value) return
+  netBusy.value = true
+  try {
+    await setNetwork(cfg)
+    toast.info('已受理:配置保存并开始应用' +
+      (cfg.mode === 'static' ? ';若地址变化请用新地址重新访问' : ''))
+    refreshNetwork()
+  } catch (err) {
+    toast.err(err.message)
+  } finally {
+    setTimeout(() => {
+      netBusy.value = false
+    }, 1500)
+  }
+}
 </script>
 
 <template>
@@ -64,12 +85,21 @@ async function onNtp() {
     <StatGrid :items="statItems" />
   </AppCard>
 
-  <AppCard title="实时门禁事件" :index="1" :badge="events.status === 'open' ? 'LIVE' : ''">
+  <AppCard title="网络配置" :index="1">
+    <NetworkCard
+      :info="device.network"
+      :pending="netBusy"
+      @apply="onApplyNetwork"
+      @refresh="refreshNetwork"
+    />
+  </AppCard>
+
+  <AppCard title="实时门禁事件" :index="2" :badge="events.status === 'open' ? 'LIVE' : ''">
     <EventFeed :items="events.items" />
     <AppButton variant="ghost" size="sm" icon="close" @click="clearFeed">清空</AppButton>
   </AppCard>
 
-  <AppCard title="时间同步" :index="2">
+  <AppCard title="时间同步" :index="3">
     <p class="muted small">{{ ntpText }}</p>
     <p class="clock">{{ clock }}</p>
     <AppButton

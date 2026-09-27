@@ -292,6 +292,7 @@ target_link_libraries(dg_net_info PUBLIC dg_log)
 
 add_library(dg_net STATIC
     modules/net/netcore.c
+    modules/net/net_cfg.c
     services/web/web_server.c
     services/web/web_pages.c
     services/web/web_auth.c

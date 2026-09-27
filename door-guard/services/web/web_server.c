@@ -15,10 +15,16 @@
  *   GET  /api/device      设备信息(版本/运行时长/用户数/日志数/IP/mDNS/账号/NTP)
  *   GET  /api/logs        门禁日志查询(时间段 + 用户 ID + 分页,JSON)
  *   POST /api/ntp         触发一次 NTP 校正(异步,结果走 WebSocket)
+ *   GET  /api/network     网络配置快照(接口/IP/掩码/网关/模式;未拿到=0.0.0.0)
+ *   POST /api/network     应用网络配置(DHCP 或 静态 IP/掩码/网关;持久化+后台应用)
  *   POST /api/account     改账号/口令(需旧口令;成功后所有会话失效)
  *   POST /api/ota/upload  OTA 包流式接收(MG_EV_HTTP_HDRS + MG_EV_READ 喂入,
  *                         按 ota_can_accept() 限流,绝不阻塞 loop;见 ota_service.h)
- *   GET  /api/ws          WebSocket:实时推送认证事件/NTP 结果
+ *   GET  /api/ws          WebSocket:实时推送认证事件/NTP 结果/网络地址变化
+ *
+ * 地址变化监视:loop 里 5s 定时轮询 net_info_read(纯 getifaddrs,无阻塞),
+ * 与上次快照不同才发布 EV_NET_ADDR——DHCP 续租换址/静态应用后,上位机经
+ * WebSocket 实时收到新地址,不用等 30s 轮询。
  *
  * WebSocket 推送模型:总线回调只把消息入队(总线线程绝不碰连接),随后
  * netcore_post 让 loop 线程排空队列并逐连接 mg_ws_send——与旧"civetweb
@@ -36,6 +42,7 @@
 #include "ota/ota_service.h"
 #include "ntp/ntp_service.h"
 #include "net_info.h"
+#include "net_cfg.h"
 #include "mdns/mdns_responder.h"
 #include "netcore.h"
 #include "dg_log.h"
@@ -397,10 +404,11 @@ static void handle_device(struct mg_connection *c, struct mg_http_message *hm)
     log_page_t page = { .logs = &row, .max = 1 };
     db_log_query(&q, &page);
 
-    char ip[64] = "";
+    net_info_addr_t addr;
+    net_info_read(&addr);
     char ifname[32] = "";
-    bool have_ip = (net_info_primary_ipv4(ip, sizeof(ip)) == DG_OK);
-    net_info_primary_ifname(ifname, sizeof(ifname));
+    snprintf(ifname, sizeof(ifname), "%s", addr.ifname);
+    /* have_ip 仍单独给前端(它要把"未联网"与"地址 0.0.0.0"区分展示) */
 
     char host[64] = "", url[128] = "";
     mdns_hostname(host, sizeof(host));
@@ -424,9 +432,9 @@ static void handle_device(struct mg_connection *c, struct mg_http_message *hm)
     cJSON_AddStringToObject(root, "uptime_text", uptext);
     cJSON_AddNumberToObject(root, "users", (double)users);
     cJSON_AddNumberToObject(root, "log_total", (double)page.total);
-    cJSON_AddStringToObject(root, "ip", ip);
+    cJSON_AddStringToObject(root, "ip", addr.ip);
     cJSON_AddStringToObject(root, "ifname", ifname);
-    cJSON_AddBoolToObject(root, "have_ip", have_ip);
+    cJSON_AddBoolToObject(root, "have_ip", addr.have_ip);
     cJSON_AddStringToObject(root, "mdns_host", host);
     cJSON_AddStringToObject(root, "mdns_url", url);
     cJSON_AddBoolToObject(root, "mdns_running", mdns_running());
@@ -604,6 +612,146 @@ static void handle_ntp(struct mg_connection *c, struct mg_http_message *hm)
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "pending", true);
     cJSON_AddStringToObject(root, "note", "结果将经 WebSocket 推送");
+    json_reply(c, 202, root);
+    cJSON_Delete(root);
+}
+
+/* ---- 网络配置(读:实际地址快照;写:持久化 + 后台线程应用) ---- */
+
+/* 把实际地址 + 期望配置拼成对外 JSON;ip/mask/gw 已由 net_info 兜底 0.0.0.0 */
+static void network_json(cJSON *root)
+{
+    net_info_addr_t a;
+    net_info_read(&a);
+    const dg_cfg_t *cfg = cfg_get();
+    const char *mode = (cfg && cfg->net_mode[0]) ? cfg->net_mode : "dhcp";
+
+    cJSON_AddStringToObject(root, "ifname", a.ifname);
+    cJSON_AddStringToObject(root, "ip", a.ip);
+    cJSON_AddStringToObject(root, "netmask", a.mask);
+    cJSON_AddStringToObject(root, "gateway", a.gw);
+    cJSON_AddBoolToObject(root, "have_ip", a.have_ip);
+    cJSON_AddBoolToObject(root, "online", net_info_is_online());
+    cJSON_AddStringToObject(root, "mode", mode);
+    if (cfg && strcmp(mode, "static") == 0) {
+        cJSON *conf = cJSON_AddObjectToObject(root, "configured");
+        cJSON_AddStringToObject(conf, "ip", cfg->net_ip);
+        cJSON_AddStringToObject(conf, "netmask", cfg->net_mask);
+        cJSON_AddStringToObject(conf, "gateway", cfg->net_gw);
+    }
+}
+
+static void handle_network_get(struct mg_connection *c, struct mg_http_message *hm)
+{
+    (void)hm;
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    cJSON *root = cJSON_CreateObject();
+    network_json(root);
+    json_reply(c, 200, root);
+    cJSON_Delete(root);
+}
+
+/* 应用放在独立线程:net_cfg_apply 内部 system()(dhcpcd 交互)会阻塞秒级,
+ * 决不能占住 loop;先睡 300ms 让 200 响应(乃至旧地址上最后的包)先出门 */
+static void *apply_worker(void *arg)
+{
+    net_cfg_req_t *r = arg;
+    usleep(300 * 1000);
+
+    net_info_addr_t got;
+    int rc = net_cfg_apply(r, &got);
+    if (rc != DG_OK) {
+        DG_LOGW(TAG, "网络配置应用失败(%d),配置仍已持久化", rc);
+    } else {
+        /* 广播新地址:WS 推送、NTP 补同步、mDNS 重通告(mdns 自轮询)都挂
+         * 在这条事件上;apply_worker 是独立线程,publish 线程安全 */
+        ev_net_addr_t ev;
+        memset(&ev, 0, sizeof(ev));
+        snprintf(ev.ifname, sizeof(ev.ifname), "%s", got.ifname);
+        snprintf(ev.ip, sizeof(ev.ip), "%s", got.ip);
+        snprintf(ev.mask, sizeof(ev.mask), "%s", got.mask);
+        snprintf(ev.gw, sizeof(ev.gw), "%s", got.gw);
+        ev.have_ip = got.have_ip;
+        EVENT_BUS_PUBLISH(EV_NET_ADDR, &ev);
+    }
+    free(r);
+    return NULL;
+}
+
+static void handle_network_set(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    char body[512] = { 0 };
+    if (!body_copy(hm, body, sizeof(body))) {
+        json_msg(c, 400, "坏请求");
+        return;
+    }
+    cJSON *req = cJSON_Parse(body);
+    if (!req) {
+        json_msg(c, 400, "JSON 解析失败");
+        return;
+    }
+    const cJSON *jmode = cJSON_GetObjectItemCaseSensitive(req, "mode");
+    const char *mode = cJSON_IsString(jmode) ? jmode->valuestring : "";
+
+    net_cfg_req_t r;
+    memset(&r, 0, sizeof(r));
+    if (strcmp(mode, "dhcp") == 0) {
+        r.is_static = false;
+    } else if (strcmp(mode, "static") == 0) {
+        r.is_static = true;
+        const cJSON *v;
+        if ((v = cJSON_GetObjectItemCaseSensitive(req, "ip")) && cJSON_IsString(v))
+            snprintf(r.ip, sizeof(r.ip), "%s", v->valuestring);
+        if ((v = cJSON_GetObjectItemCaseSensitive(req, "netmask")) && cJSON_IsString(v))
+            snprintf(r.mask, sizeof(r.mask), "%s", v->valuestring);
+        if ((v = cJSON_GetObjectItemCaseSensitive(req, "gateway")) && cJSON_IsString(v))
+            snprintf(r.gw, sizeof(r.gw), "%s", v->valuestring);
+    } else {
+        cJSON_Delete(req);
+        json_msg(c, 400, "mode 应为 dhcp 或 static");
+        return;
+    }
+    if (net_cfg_validate(&r) != DG_OK) {
+        cJSON_Delete(req);
+        json_msg(c, 400, "地址不合法:IP/掩码须为合法点分格式且掩码连续,网关可为空");
+        return;
+    }
+
+    /* 先持久化再应用:应用失败(接口暂不可用)配置仍在,重启/插线后由
+     * 开机装配或再次手动应用接管 */
+    cfg_set_str("net_mode", r.is_static ? "static" : "dhcp");
+    if (r.is_static) {
+        cfg_set_str("net_ip", r.ip);
+        cfg_set_str("net_mask", r.mask);
+        cfg_set_str("net_gw", r.gw);
+    }
+    cfg_flush();
+
+    net_cfg_req_t *job = malloc(sizeof(r));
+    if (!job) {
+        cJSON_Delete(req);
+        json_msg(c, 500, "内存不足");
+        return;
+    }
+    *job = r;
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, apply_worker, job) == 0)
+        pthread_detach(tid);
+    else
+        free(job);                           /* 罕见:配置已存,提示手动重启生效 */
+
+    cJSON_Delete(req);
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "pending", true);
+    cJSON_AddStringToObject(root, "note",
+                            "已受理:配置已保存并开始应用;若地址变化,请用新地址重新访问");
     json_reply(c, 202, root);
     cJSON_Delete(root);
 }
@@ -1386,6 +1534,8 @@ static const route_t s_routes[] = {
     { "POST", "/api/logout",  "注销接口只接受 POST",   handle_logout },
     { "GET",  "/api/device",  "设备信息只接受 GET",    handle_device },
     { "GET",  "/api/logs",    "日志查询只接受 GET",    handle_logs },
+    { "GET",  "/api/network", "网络配置只接受 GET",    handle_network_get },
+    { "POST", "/api/network", "网络配置只接受 POST",   handle_network_set },
     { "POST", "/api/ntp",     "时间校正只接受 POST",   handle_ntp },
     { "POST", "/api/account", "账号修改只接受 POST",   handle_account },
     { "GET",  "/api/users",            "用户列表只接受 GET",    handle_users_list },
@@ -1550,6 +1700,69 @@ static int on_ntp_result(const event_t *e, void *ud)
     return 0;
 }
 
+/* ---- 地址变化监视(loop 5s 定时)与 EV_NET_ADDR → WebSocket ---- */
+
+/* 上次推送的地址快照(loop 线程私有);变化才推送,续租同址不刷屏 */
+static net_info_addr_t s_last_addr;
+static bool s_last_addr_valid = false;
+
+static int on_net_addr(const event_t *e, void *ud)
+{
+    (void)ud;
+    const ev_net_addr_t *a = (const ev_net_addr_t *)e->data;
+    s_last_addr_valid = true;
+    snprintf(s_last_addr.ifname, sizeof(s_last_addr.ifname), "%s", a->ifname);
+    snprintf(s_last_addr.ip, sizeof(s_last_addr.ip), "%s", a->ip);
+    snprintf(s_last_addr.mask, sizeof(s_last_addr.mask), "%s", a->mask);
+    snprintf(s_last_addr.gw, sizeof(s_last_addr.gw), "%s", a->gw);
+    s_last_addr.have_ip = a->have_ip;
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "net");
+    cJSON_AddStringToObject(root, "ifname", a->ifname);
+    cJSON_AddStringToObject(root, "ip", a->ip);
+    cJSON_AddStringToObject(root, "netmask", a->mask);
+    cJSON_AddStringToObject(root, "gateway", a->gw);
+    cJSON_AddBoolToObject(root, "have_ip", a->have_ip);
+    cJSON_AddStringToObject(root, "msg", a->have_ip ? "设备地址已更新"
+                                                    : "设备已无网络地址");
+    char *s = cJSON_PrintUnformatted(root);
+    if (s) {
+        ws_enqueue(s);
+        ws_push_async();
+        free(s);
+    }
+    cJSON_Delete(root);
+    return 0;
+}
+
+/* loop 线程定时回调:地址与上次不同(含"拿到/丢失地址")才发布事件。
+ * net_info_read 纯 getifaddrs+/proc 读取,无阻塞,可安全待在 loop */
+static void net_watch_cb(void *arg)
+{
+    (void)arg;
+    net_info_addr_t now;
+    if (net_info_read(&now) != DG_OK)
+        return;
+    if (s_last_addr_valid &&
+        strcmp(now.ifname, s_last_addr.ifname) == 0 &&
+        strcmp(now.ip, s_last_addr.ip) == 0 &&
+        strcmp(now.mask, s_last_addr.mask) == 0 &&
+        strcmp(now.gw, s_last_addr.gw) == 0 &&
+        now.have_ip == s_last_addr.have_ip)
+        return;
+
+    ev_net_addr_t ev;
+    memset(&ev, 0, sizeof(ev));
+    snprintf(ev.ifname, sizeof(ev.ifname), "%s", now.ifname);
+    snprintf(ev.ip, sizeof(ev.ip), "%s", now.ip);
+    snprintf(ev.mask, sizeof(ev.mask), "%s", now.mask);
+    snprintf(ev.gw, sizeof(ev.gw), "%s", now.gw);
+    ev.have_ip = now.have_ip;
+    EVENT_BUS_PUBLISH(EV_NET_ADDR, &ev);
+    /* s_last_addr 由 on_net_addr 统一更新(订阅在同一进程,必达) */
+}
+
 /* ---- 设备页 ↔ net:web 账号状态与设置 ---- */
 
 static void publish_web_state(void)
@@ -1604,6 +1817,8 @@ static void web_setup(void *arg)
         DG_LOGE(TAG, "web 启动失败(端口 %d 被占?)", s_port);
     else
         DG_LOGI(TAG, "web 上位机就绪 :%d(版本 %s)", s_port, DG_FW_VERSION);
+    mg_timer_add(netcore_mgr(), 5000, MG_TIMER_REPEAT, net_watch_cb, NULL);
+    net_watch_cb(NULL);                  /* 起服即记录基线地址(变化才推) */
 }
 
 static void web_teardown(void *arg)
@@ -1658,6 +1873,7 @@ int web_server_start(void)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_NTP_RESULT, on_ntp_result, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_WEB_STATE_REQ, on_web_state_req, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_WEB_SET, on_web_set, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_ADDR, on_net_addr, NULL);
 
     netcore_post(web_setup, NULL);           /* 监听注册在 loop 线程执行 */
     publish_web_state();

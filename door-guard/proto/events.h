@@ -62,6 +62,7 @@ extern "C" {
 #define EV_NET_WEB_STATE     EV_DEF(DG_MODULE_ID_NET, 0x0006)    /**< net→UI:web 运行状态快照 */
 #define EV_NET_WEB_SET       EV_DEF(DG_MODULE_ID_NET, 0x0007)    /**< UI→net:改账号/口令请求 */
 #define EV_NET_WEB_SET_RESULT EV_DEF(DG_MODULE_ID_NET, 0x0008)   /**< net→UI:改账号/口令结果 */
+#define EV_NET_ADDR          EV_DEF(DG_MODULE_ID_NET, 0x0009)    /**< 主接口地址变化(DHCP 续租/应用静态配置) */
 
 /* HAL:硬件事件(HAL → 服务) */
 #define EV_FINGER_STATUS     EV_DEF(DG_MODULE_ID_HAL, 0x0001)    /**< 指纹按压/释放/错误 */
@@ -198,6 +199,15 @@ typedef struct {
     int32_t err;                          /**< 失败时 dg_err_t */
     int64_t synced_ts;                    /**< 成功时校正后的 unix 秒 */
 } ev_ntp_result_t;
+
+/** EV_NET_ADDR:主接口地址快照(变化时发布;web 推送/NTP 补同步/UI 刷新共用) */
+typedef struct {
+    char ifname[16];                      /**< 接口名;无主接口时为空串 */
+    char ip[16];                          /**< 未拿到地址时为 "0.0.0.0" */
+    char mask[16];                        /**< 同上 */
+    char gw[16];                          /**< 无默认路由时为 "0.0.0.0" */
+    bool have_ip;                         /**< true = 已拿到非链路本地 IPv4 */
+} ev_net_addr_t;
 
 /** EV_NET_OTA_PROGRESS */
 typedef struct {
@@ -355,6 +365,7 @@ _Static_assert(sizeof(ev_enroll_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_enrol
 _Static_assert(sizeof(ev_net_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_state_t 超限");
 _Static_assert(sizeof(ev_ntp_trigger_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ntp_trigger_t 超限");
 _Static_assert(sizeof(ev_ntp_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ntp_result_t 超限");
+_Static_assert(sizeof(ev_net_addr_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_addr_t 超限");
 _Static_assert(sizeof(ev_ota_progress_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ota_progress_t 超限");
 _Static_assert(sizeof(ev_web_set_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_set_t 超限");
 _Static_assert(sizeof(ev_web_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_state_t 超限");

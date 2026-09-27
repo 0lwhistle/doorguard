@@ -31,6 +31,7 @@
 #include "liveness_service.h"
 #include "mdns/mdns_responder.h"
 #include "net/netcore.h"
+#include "net/net_cfg.h"
 #include "ntp/ntp_service.h"
 #include "registry.h"
 #include "web/web_server.h"
@@ -210,6 +211,13 @@ static int mod_mdns(void)
     return mdns_start();
 }
 
+/* 网络配置装配:cfg 记的是静态地址则开机应用一次(DHCP 交给 S41dhcpcd)。
+ * 阻塞数百 ms(dhcpcd 交互)发生在装配期,业务尚未起来,无影响 */
+static int mod_net_cfg(void)
+{
+    return net_cfg_apply_saved();
+}
+
 /* UI 失败仅告警(板上 web 上位机路径照常) */
 static int mod_ui(void)
 {
@@ -253,6 +261,7 @@ static registry_err_t register_services(void)
         { "enroll",         mod_enroll,         false, DEP_TASKER_ONLY, 1, NULL },
         { "liveness",       mod_liveness,       false, DEP_TASKER_ONLY, 1, NULL },
         { "ntp",            mod_ntp,            false, DEP_EVENT_BUS,   1, NULL },
+        { "net_cfg",        mod_net_cfg,        false, DEP_CONFIG,      1, NULL },
         { "web",            mod_web,            false, DEP_WEB,         2,
           web_server_heartbeat_ms },
         { "mdns",           mod_mdns,           false, DEP_MDNS,        2, NULL },
