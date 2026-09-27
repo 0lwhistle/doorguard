@@ -4,6 +4,22 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-27(续八)IC 引脚定案 + AS608 指纹模组方案设计(仅文档)
+
+**做了什么**:①ICCARD_PROTOCOL 按 IC 模组实际引脚(SDA/SCK/MOSI/MISO/RQ/RST)定案:
+SDA=SPI 片选(RC522 命名惯例,非 I2C)、**RQ=中断线 → §10 中断路线关闭开放项 3**、
+RST 归驱动内部时序。②新 `docs/tech/FINGERPRINT_AS608.md`——AS608(UART,引脚
+3V3/TXD/RXD/GND/WAK/VTI)方案设计 v1 待确认:WAK=触摸感应事件源(EPOLLPRI 边沿
+等待,VTI 不接是 WAK 失效装配坑);**决策 A** 模板存模组内 PageID+DB 加密副本
+(纯主控 1:N 不可行);**决策 B** users 表幂等迁移加 finger_page_id 列;
+**决策 C** 新错误码 DG_ERR_FINGER_FULL=-36(模组库典型 1000 < 用户上限 2000,硬约束);
+分层复用 uart_hal(注释本就预留"指纹/读卡等手册,不臆造"),协议层 fp_as608 纯函数+
+fp_provider 持线程发 EV_FINGER_MATCH_1N/VERIFY_11(HAL 域新契约 2 个);
+录入两次按压且**查重插在第一次按压后**、取消回滚 DeletChar 防孤儿模板;指纹天然离散
+(WAK 一次按压一次判定),IC 防重窗退化为按住不放只判一次。**下一步**:用户对决策
+A/B/C 拍板 + 提供随机手册后冻结 FINGERPRINT_PROTOCOL.md;IC 驱动按协议文档实现中。
+
+---
 ## 2026-09-27(续七)web 触摸端"按下变大"根因修复 + API 全量验收(四套全绿)
 
 **做了什么**:①修前端"按钮/选项一按就变大"——全仓排查确认应用内**无任何按下放大
