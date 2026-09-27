@@ -25,7 +25,7 @@ LVGL 改 direct+原位补丁;dg_preview 控件双模(plane/软渲染自动降级
 详见 DEV_HANDBOOK §2;排查坑与验收数据见 DEVLOG 2026-09-22(深夜)。⑤f 后记:同日深夜发现 LVGL8.3 透明层"擦除语义缺失"(人脸框残影堆积、待机不透明
 黑底不落 fb),修复三轮未果,已按授权回退显示架构至 full_refresh(27fps 无残影基线
 恢复);video plane 全套实现保留 git f519b1e,**LVGL9.5 迁移方案已立**
-(docs/superpowers/specs/2026-09-22-lvgl95-migration-plan.md),迁移后重启。⑤g **2026-09-23 LVGL9.5 迁移:C1/C2 [DONE]、C3 过半 [WIP]**(全程
+(docs/superpowers/specs/2026-09-22-lvgl95-migration-plan.md),迁移后重启。⑦ **2026-09-27(LVGL9.5 迁移完成 + 六项问题闭环,31/31 绿,板上 a4d8b9d)**:**三 bug 定案**(core 取证链全打通):管理员认证被在场闸挡死(d15e70f 删)、点带头像用户编辑页段错误(v9 lv_color_t=3B 与 cf=XRGB8888 不一致,cf 改 RGB888)、拍摄页点完成崩(navigator 销毁顺序改 destroy→删树 7e09fa7);**拍摄头像改取景框直裁**(ddcae64,屏中央 400² 四角括号+等比裁剪入库,弃对齐 warp,黑边/过小/填充从机制消除);**录入查重阈值 0.9→0.75 + 查重分数日志 + web 可调**(f74d06a,真机确认拦截;S8 测试锁 update 排除自身语义 a221f28);**Web 上位机全功能**(a275a1f:用户 CRUD/系统设置/记录查询,与设备端同源校验,API 验收 28/28 脚本入库 tests/web/api_test.sh);**字体四档化**(b4b909e,16→26/30/40,theme token);**UI 文案改造**(a4d8b9d:简短明确/术语统一「NTP 校时」「密码」/标点规范,语言表 138 键同步)。⑤g **2026-09-23 LVGL9.5 迁移:C1/C2 [DONE]、C3 过半 [WIP]**(全程
 见 docs/lvgl9-migration-LOG.md):9.5 vendored 为 door-guard/third_party/lvgl9,
 开关(默认 ON,OFF=回退 8.3);板上=v9 内置 DRM atomic 后端(fps 27~30 vs 基线 27),
 sim=自写 SDL;ui/ 全量迁移+v9 image 描述符(magic+stride)+字体 v9 工具重生成;
