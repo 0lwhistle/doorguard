@@ -4,6 +4,24 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-27(续六)IC 卡 SPI 读头:驱动-应用层协议设计定稿(仅文档,未动码)
+
+**做了什么**:新 `docs/tech/ICCARD_PROTOCOL.md`——SPI 读卡器 Linux 驱动与 door-guard
+应用层的接口契约。要点:①设备节点 `/dev/dg_iccard0` 独占打开,24B 二进制帧
+(magic/uid_len/card_type/seq/uid),read 一次一整帧,poll+阻塞读事件驱动,close 唤醒;
+②ioctl FLUSH(模式切换防旧卡串扰)/STATS;③卡号字符串化=按读出字节序大写 HEX 不反序
+(DB/事件/日志/web 全链路口径),显示掩码 `********`+末4;④驱动内 IRQ 优先、无 IRQ 线
+可退化内部周期寻卡,协议不变;**不用 DMA**(帧 ≤24B);驱动不做业务去重;
+⑤应用层:drv/iccard 薄封装(含 sim 后端)+ verify/ic/card_provider 持线程发 EV_IC_CARD,
+同卡防重窗(door_open_ms);⑥FSM 分支表(ST_NORMAL 开门/管理员查卡进菜单/弹窗阶段忽略
+不落日志/v_ic 1:1/录卡态走 enroll 查重 DG_ERR_DUP_IC 排除自身);
+⑦auth_provider.h 属 v2 前草案(user_id uint32_t),接入前需按现行字符串契约修订;
+⑧default.json 新键 iccard.dev_path;测试清单 test_iccard_proto/dedup/enroll_ic/fsm_ic。
+**结论**:契约已预留大半(EV_IC_CARD/db_find_by_ic/DG_ERR_DUP_IC/v_ic 子步/method=4),
+本次为"填空"定位;对用户预想两处修正=「停止识别」实为 FSM 分支切换(线程不停,v_ic
+恰恰要读卡)+ 必须同卡防重窗。**下一步**:用户写驱动(按 §2~§6/§10);应用侧可先行
+drv/iccard+sim 后端跑通全链路宿主测试。
+
 ## 2026-09-27(续五)UI 六项:实时刷新/设备端网络设置/编辑页统一导航
 
 **做了什么**(宿主 32/32 绿、零告警、已推板 baseline-59):
