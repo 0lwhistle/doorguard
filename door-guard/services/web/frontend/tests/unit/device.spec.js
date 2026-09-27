@@ -23,10 +23,34 @@ const SAMPLE = {
   ntp: { ok: true, last_ok_at: '2026-09-18 10:00:00' },
 }
 
+/* refresh() 并行拉 /api/device 与 /api/network 两个快照,fetch 桩按路径分发 */
+const NETWORK_SAMPLE = {
+  ifname: 'eth0',
+  ip: '192.168.2.95',
+  netmask: '255.255.255.0',
+  gateway: '192.168.2.1',
+  have_ip: true,
+  online: true,
+  mode: 'dhcp',
+}
+
+const okJson = (body) => ({ status: 200, ok: true, json: async () => body })
+
+function isNetworkUrl(input) {
+  return String((input && input.url) || input).includes('/api/network')
+}
+
+/* 设备快照打补丁,网络快照保持默认 */
+function mockDevice(override = {}) {
+  global.fetch.mockImplementation(async (input) =>
+    isNetworkUrl(input) ? okJson(NETWORK_SAMPLE) : okJson({ ...SAMPLE, ...override }),
+  )
+}
+
 beforeEach(async () => {
   vi.resetModules()
   sessionStorage.clear()
-  global.fetch = vi.fn()
+  global.fetch = vi.fn(async (input) => (isNetworkUrl(input) ? okJson(NETWORK_SAMPLE) : okJson(SAMPLE)))
   deviceStore = await import('../../src/stores/device')
 })
 
@@ -58,7 +82,6 @@ describe('stores/events(与 device 同文件的轻量检查)', () => {
 
 describe('stores/device', () => {
   it('refresh 拉取快照并同步会话里的账号/默认口令标记', async () => {
-    global.fetch.mockResolvedValueOnce({ status: 200, ok: true, json: async () => SAMPLE })
     await deviceStore.refresh()
     expect(deviceStore.device.data.version).toBe('v1.2.3')
     const session = await import('../../src/stores/session')
@@ -67,33 +90,29 @@ describe('stores/device', () => {
   })
 
   it('地址文案:有 mDNS 时名字在前、IP 在后', async () => {
-    global.fetch.mockResolvedValueOnce({ status: 200, ok: true, json: async () => SAMPLE })
     await deviceStore.refresh()
     expect(deviceStore.address.value).toBe('http://doorguard.local:8080  ·  192.168.2.95:8080')
   })
 
+  it('默认 80 端口的地址文案免带端口', async () => {
+    mockDevice({ web_port: 80 })
+    await deviceStore.refresh()
+    expect(deviceStore.address.value).toBe('http://doorguard.local  ·  192.168.2.95')
+  })
+
   it('无 IP 时地址文案说明未联网(mDNS 名字也不展示)', async () => {
-    global.fetch.mockResolvedValueOnce({
-      status: 200,
-      ok: true,
-      json: async () => ({ ...SAMPLE, have_ip: false, ip: '' }),
-    })
+    mockDevice({ have_ip: false, ip: '' })
     await deviceStore.refresh()
     expect(deviceStore.address.value).toBe('设备未联网')
   })
 
   it('mDNS 未运行时只给 IP 形式', async () => {
-    global.fetch.mockResolvedValueOnce({
-      status: 200,
-      ok: true,
-      json: async () => ({ ...SAMPLE, mdns_running: false }),
-    })
+    mockDevice({ mdns_running: false })
     await deviceStore.refresh()
     expect(deviceStore.address.value).toBe('192.168.2.95:8080')
   })
 
   it('存储文案:库大小 + 分区余量,字节按 KB/MB/GB 递进', async () => {
-    global.fetch.mockResolvedValueOnce({ status: 200, ok: true, json: async () => SAMPLE })
     await deviceStore.refresh()
     expect(deviceStore.storageText.value).toBe('4.0 KB / 余 2.0 GB')
     expect(deviceStore.fmtBytes(0)).toBe('—')
@@ -101,7 +120,8 @@ describe('stores/device', () => {
   })
 
   it('refreshQuiet 吞掉错误(轮询失败不弹提示)', async () => {
-    global.fetch.mockRejectedValueOnce(new TypeError('offline'))
+    /* 两个快照请求都失败,静默路径才走得到底 */
+    global.fetch.mockRejectedValue(new TypeError('offline'))
     await expect(deviceStore.refreshQuiet()).resolves.toBeUndefined()
     expect(deviceStore.device.data).toBeNull()
   })
