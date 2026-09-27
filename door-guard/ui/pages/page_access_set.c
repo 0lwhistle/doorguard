@@ -53,6 +53,7 @@ MAKE_PICKER(lockn, "pwd_fail_lock_n", lockn_opts, _("密码连错锁定"))
 MAKE_PICKER(locks, "pwd_fail_lock_s", locks_opts, _("锁定秒数"))
 
 static lv_obj_t *s_row_btns[3];
+static lv_timer_t *s_timer;
 
 static void refresh_labels(void)
 {
@@ -64,6 +65,13 @@ static void refresh_labels(void)
     dg_btn_set_label(s_row_btns[1], t);
     snprintf(t, sizeof(t), "%s: %ds", _("锁定秒数"), c->pwd_fail_lock_s);
     dg_btn_set_label(s_row_btns[2], t);
+}
+
+/* 1s 跟随刷新:配置可被 web 端/他处修改,当前值实时对齐不误导 */
+static void refresh_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    refresh_labels();
 }
 
 void page_access_set_create(lv_obj_t *parent)
@@ -98,14 +106,21 @@ void page_access_set_create(lv_obj_t *parent)
     }
     refresh_labels();
 
+    /* 统一导航:返回固定左上角(本页 choice 即点即存,无保存概念) */
     lv_obj_t *back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));
-    lv_obj_set_size(back, 200, DG_BTN_H);
-    lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 0, -DG_PAD);
+    lv_obj_set_size(back, 150, 64);
+    lv_obj_align(back, LV_ALIGN_TOP_LEFT, DG_PAD, 16);
     lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);
+
+    s_timer = lv_timer_create(refresh_timer_cb, 1000, NULL);
 }
 
 void page_access_set_destroy(void)
 {
+    if (s_timer) {
+        lv_timer_del(s_timer);
+        s_timer = NULL;
+    }
     s_row_btns[0] = s_row_btns[1] = s_row_btns[2] = NULL;
     DG_LOGI("[ACCESS_SET]", "page destroy");
 }

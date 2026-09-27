@@ -30,6 +30,14 @@ static lv_obj_t *s_status = NULL;
 static lv_obj_t *s_url = NULL;
 static lv_obj_t *s_user = NULL;
 static lv_obj_t *s_warn = NULL;
+static lv_timer_t *s_poll = NULL;
+
+/* 2s 跟随刷新:状态经 EV_NET_WEB_STATE 回执渲染(page_web_set_show) */
+static void poll_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    bridge_web_state_req();
+}
 
 /* 待改的账号:空串 = 保持当前账号(只改口令) */
 static char s_new_user[32] = "";
@@ -188,16 +196,23 @@ void page_web_set_create(lv_obj_t *parent)
     lv_obj_set_style_text_color(hint, DG_COL_TEXT(), 0);
 
     lv_obj_t *back = dg_btn_create_light(parent, NULL, _("返回"));
-    lv_obj_set_size(back, 200, DG_BTN_H);
-    lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 0, -DG_PAD);
+    lv_obj_set_size(back, 150, 64);
+    lv_obj_align(back, LV_ALIGN_TOP_LEFT, DG_PAD, 16);
     lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);
 
     /* 页面刚打开时先请求一次状态(避免显示空) */
     bridge_web_state_req();
+
+    /* 2s 跟随刷新:状态来自 net 回执,轮询请求保持页面与设备一致 */
+    s_poll = lv_timer_create(poll_timer_cb, 2000, NULL);
 }
 
 void page_web_set_destroy(void)
 {
+    if (s_poll) {
+        lv_timer_del(s_poll);
+        s_poll = NULL;
+    }
     DG_LOGI("[WEBSET]", "page destroy");
     s_status = s_url = s_user = s_warn = NULL;
     s_pending = 0;

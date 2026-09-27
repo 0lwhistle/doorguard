@@ -1,12 +1,14 @@
 /*
  * page_user_edit.c — 用户编辑页(添加/编辑同一模板,2026-09-21 用户反馈重做)
  *
- * 一页看清并编辑用户的全部信息:ID / 姓名 / 权限 / 密码 / 人脸 / 指纹 / IC 卡。
- * 没有的项显示“无”;指纹与 IC 卡硬件未接入,点击明确提示(不静默)。
- * 所有文案经 _() 走多语言;动作弹窗全部带取消。
+ * 2026-09-27 编辑模式统一(spec-ui 反馈):返回左上 / 保存右上;EDIT 的
+ * 姓名/权限/密码改为**草稿**——右上「保存」才落库,有未保存修改时返回
+ * 弹「保存退出/直接退出」确认(dg_edit_nav);特征(人脸/指纹/IC)录入
+ * 动作本身即落库,不计入 dirty。特征按钮按状态显示「修改/录入」。
+ * 「删除用户」移到编辑列表最下,作为一个选项。
  *
  * 两种模式:
- *   EDIT:行点击进入(带 uid),每项改动即时落库;
+ *   EDIT:行点击进入(带 uid),字段改动攒草稿,「保存」提交;
  *   ADD :列表页“添加”输入 ID 后进入,密码/姓名先攒在页内,
  *         [保存] 才建用户(硬规则:新用户必须设密码,否则禁止添加);
  *         人脸/指纹/IC 在保存前不可录入(用户还不存在,特征无处挂)。
@@ -23,6 +25,7 @@
 #include "valid_ui.h"
 #include "widgets/dg_avatar.h"
 #include "widgets/dg_btn.h"
+#include "widgets/dg_edit_nav.h"
 #include "widgets/dg_popup.h"
 
 #include <stdio.h>
@@ -35,11 +38,19 @@ static char  s_pending_name[DG_NAME_LEN];
 static bool  s_pending_has_pwd;       /* ADD:是否已输入密码 */
 static char  s_pending_pwd[DG_PWD_MAX_LEN];
 
+/* EDIT 草稿(保存才落库) */
+static char  s_draft_name[DG_NAME_LEN];
+static int32_t s_draft_role;
+static char  s_draft_pwd[DG_PWD_MAX_LEN];   /* 空 = 不修改密码 */
+static bool  s_dirty;
+
 static lv_obj_t *s_title;
 static lv_obj_t *s_val_name, *s_val_role, *s_val_pwd, *s_val_face,
                *s_val_finger, *s_val_ic;
 static lv_obj_t *s_img_face;                    /* 人脸行头像预览 */
-static lv_obj_t *s_btn_pwd, *s_btn_face, *s_btn_save, *s_btn_del;
+static lv_obj_t *s_btn_pwd, *s_btn_face;
+static lv_obj_t *s_btn_finger, *s_btn_ic;
+static lv_obj_t *s_row_del;                     /* 「删除用户」行(EDIT 才显示) */
 
 /* 错误码 → 文案(UI 唯一映射点;修正旧版把 DUP_UID 映射成“该卡已绑定”的错误) */
 static const char *err_text(int rc)
@@ -160,13 +171,15 @@ static void refresh(void)
         val_set(s_val_finger, _("无"));
         val_set(s_val_ic, _("无"));
         if (s_btn_pwd)
-            dg_btn_set_label(s_btn_pwd, _("设置"));
+            dg_btn_set_label(s_btn_pwd, s_pending_has_pwd ? _("修改") : _("设置"));
         if (s_btn_face)
             lv_obj_add_flag(s_btn_face, LV_OBJ_FLAG_HIDDEN);
-        if (s_btn_save)
-            lv_obj_clear_flag(s_btn_save, LV_OBJ_FLAG_HIDDEN);
-        if (s_btn_del)
-            lv_obj_add_flag(s_btn_del, LV_OBJ_FLAG_HIDDEN);
+        if (s_btn_finger)
+            dg_btn_set_label(s_btn_finger, _("录入"));
+        if (s_btn_ic)
+            dg_btn_set_label(s_btn_ic, _("录入"));
+        if (s_row_del)
+            lv_obj_add_flag(s_row_del, LV_OBJ_FLAG_HIDDEN);
         return;
     }
 
@@ -177,12 +190,16 @@ static void refresh(void)
         val_set(s_val_name, _("用户不存在"));
         return;
     }
-    val_set(s_val_name, rec.user_name[0] ? rec.user_name : _("无"));
-    val_set(s_val_role, role_name(rec.role));
-    val_set(s_val_pwd, _("已设置"));
+    val_set(s_val_name, s_draft_name[0] ? s_draft_name : _("无"));
+    val_set(s_val_role, role_name(s_draft_role));
+    val_set(s_val_pwd, s_draft_pwd[0] ? _("已修改") : _("已设置"));
+    /* 特征按钮:已录入=「修改」,未录入=「录入」 */
     val_set(s_val_face, rec.face_vec_len > 0 ? _("已录入") : _("无"));
+    dg_btn_set_label(s_btn_face, rec.face_vec_len > 0 ? _("修改") : _("录入"));
     val_set(s_val_finger, rec.finger_vec_len > 0 ? _("已录入") : _("无"));
-    val_set(s_val_ic, _("无"));
+    dg_btn_set_label(s_btn_finger, rec.finger_vec_len > 0 ? _("修改") : _("录入"));
+    val_set(s_val_ic, rec.ic_card[0] ? _("已录入") : _("无"));
+    dg_btn_set_label(s_btn_ic, rec.ic_card[0] ? _("修改") : _("录入"));
     /* 头像预览:有人脸才有头像(同一生命周期);人脸行加高到 128,预览 96×96 */
     if (s_img_face) {
         const lv_image_dsc_t *av = dg_avatar_get(s_uid, DG_AVATAR_FULL);
@@ -195,32 +212,20 @@ static void refresh(void)
     }
     if (s_btn_pwd)
         dg_btn_set_label(s_btn_pwd, _("修改"));
-    if (s_btn_face)
-        lv_obj_clear_flag(s_btn_face, LV_OBJ_FLAG_HIDDEN);
-    if (s_btn_save)
-        lv_obj_add_flag(s_btn_save, LV_OBJ_FLAG_HIDDEN);
-    if (s_btn_del)
-        lv_obj_clear_flag(s_btn_del, LV_OBJ_FLAG_HIDDEN);
+    if (s_row_del)
+        lv_obj_clear_flag(s_row_del, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* ---- 动作:姓名 / 权限 / 密码 / 人脸 / 指纹 / IC / 保存 / 删除 ---- */
 
-static void apply_name(void *ud, const char *text)
+static void draft_name(void *ud, const char *text)
 {
     (void)ud;
-    if (s_add_mode) {
+    snprintf(s_draft_name, sizeof(s_draft_name), "%s", text);
+    if (s_add_mode)
         snprintf(s_pending_name, sizeof(s_pending_name), "%s", text);
-    } else {
-        user_rec_t rec;
-        if (db_user_get(s_uid, &rec) != DG_OK)
-            return;
-        snprintf(rec.user_name, sizeof(rec.user_name), "%s", text);
-        int rc = db_user_update(&rec);
-        if (rc != DG_OK) {
-            dg_popup_fail(err_text(rc), 2000, NULL, NULL);
-            return;
-        }
-    }
+    else
+        s_dirty = true;
     refresh();
 }
 
@@ -231,31 +236,24 @@ static void on_name(lv_event_t *e)
         .title = _("姓名"),
         .start_alpha = true,
         .max_len = DG_NAME_LEN - 1,
+        .initial = s_add_mode ? s_pending_name : s_draft_name,
         .validate = dg_ui_valid_name,
-        .on_confirm = apply_name,
+        .on_confirm = draft_name,
     };
     dg_popup_input(&cfg);               /* 弹窗自带取消(spec 修复后) */
 }
 
-static void apply_pwd(void *ud, const char *pwd)
+static void draft_pwd(void *ud, const char *pwd)
 {
     (void)ud;
     if (s_add_mode) {
         snprintf(s_pending_pwd, sizeof(s_pending_pwd), "%s", pwd);
         s_pending_has_pwd = pwd[0] != '\0';
-        refresh();
-        return;
+    } else {
+        snprintf(s_draft_pwd, sizeof(s_draft_pwd), "%s", pwd);
+        s_dirty = true;
     }
-    user_rec_t rec;
-    if (db_user_get(s_uid, &rec) != DG_OK)
-        return;
-    int rc = db_user_set_password(&rec, pwd);
-    if (rc == DG_OK)
-        rc = db_user_update(&rec);      /* set_password 只算哈希,落库要 update */
-    if (rc == DG_OK)
-        dg_popup_success(_("已保存"), 800, NULL, NULL);
-    else
-        dg_popup_fail(err_text(rc), 2000, NULL, NULL);
+    refresh();
 }
 
 static void on_pwd(lv_event_t *e)
@@ -266,22 +264,20 @@ static void on_pwd(lv_event_t *e)
         .mask_text = true,
         .start_alpha = false,
         .max_len = DG_PWD_MAX_LEN - 1,
+        .initial = s_add_mode ? s_pending_pwd : s_draft_pwd,
         .validate = dg_ui_valid_pwd,
-        .on_confirm = apply_pwd,
+        .on_confirm = draft_pwd,
     };
     dg_popup_input(&cfg);
 }
 
-static void apply_role(void *ud, int idx)
+static void draft_role(void *ud, int idx)
 {
     (void)ud;
-    user_rec_t rec;
-    if (db_user_get(s_uid, &rec) != DG_OK)
-        return;
-    rec.role = idx;
-    int rc = db_user_update(&rec);
-    if (rc != DG_OK)
-        dg_popup_fail(err_text(rc), 2000, NULL, NULL);
+    if (s_add_mode)
+        return;                          /* ADD 权限固定普通,入口已拦 */
+    s_draft_role = (int32_t)idx;
+    s_dirty = true;
     refresh();
 }
 
@@ -293,7 +289,7 @@ static void on_role(lv_event_t *e)
         return;
     }
     const char *const opts[] = { _("普通"), _("管理员"), _("黑名单") };
-    dg_popup_choice(_("权限"), opts, 3, apply_role, NULL, NULL);
+    dg_popup_choice(_("权限"), opts, 3, draft_role, NULL, NULL);
 }
 
 static void apply_face_pick(void *ud, int idx);   /* on_face 先用后定义 */
@@ -341,31 +337,65 @@ static void on_ic(lv_event_t *e)
     dg_popup_fail(_("读卡器未接入"), 1500, NULL, NULL);
 }
 
-static void on_save(lv_event_t *e)
+/* 保存(右上按钮 / 「保存退出」共用):ADD 建用户;EDIT 提交草稿。
+ * 返回 true = 成功(dg_edit_nav 据此执行「保存退出」的返回) */
+static bool save(void)
 {
-    (void)e;
-    if (!s_pending_has_pwd) {
-        dg_popup_fail(_("请先设置密码"), 1500, NULL, NULL);   /* 硬规则:新用户必设密码 */
-        return;
+    if (s_add_mode) {
+        if (!s_pending_has_pwd) {
+            dg_popup_fail(_("请先设置密码"), 1500, NULL, NULL);
+            return false;
+        }
+        user_rec_t rec;
+        memset(&rec, 0, sizeof(rec));
+        snprintf(rec.user_id, sizeof(rec.user_id), "%s", s_uid);
+        snprintf(rec.user_name, sizeof(rec.user_name), "%s", s_pending_name);
+        rec.role = DG_ROLE_NORMAL;
+        rec.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
+        int rc = db_user_set_password(&rec, s_pending_pwd);
+        if (rc == DG_OK)
+            rc = db_user_add(&rec);
+        if (rc != DG_OK) {
+            dg_popup_fail(err_text(rc), 2000, NULL, NULL);
+            return false;
+        }
+        /* 建好即转编辑模式:人脸/指纹/IC 从这里开始可录 */
+        s_add_mode = false;
+        memset(s_pending_pwd, 0, sizeof(s_pending_pwd));
+        dg_popup_success(_("已保存"), 800, NULL, NULL);
+        refresh();
+        return true;
+    }
+
+    /* EDIT:草稿校验 → 新取库值(只覆写字段,特征不动)→ 落库 */
+    if (dg_ui_valid_name(s_draft_name)) {
+        dg_popup_fail(_("姓名不合法"), 1500, NULL, NULL);
+        return false;
     }
     user_rec_t rec;
-    memset(&rec, 0, sizeof(rec));
-    snprintf(rec.user_id, sizeof(rec.user_id), "%s", s_uid);
-    snprintf(rec.user_name, sizeof(rec.user_name), "%s", s_pending_name);
-    rec.role = DG_ROLE_NORMAL;
-    rec.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
-    int rc = db_user_set_password(&rec, s_pending_pwd);
-    if (rc == DG_OK)
-        rc = db_user_add(&rec);
+    if (db_user_get(s_uid, &rec) != DG_OK) {
+        dg_popup_fail(_("用户不存在"), 1500, NULL, NULL);
+        return false;
+    }
+    snprintf(rec.user_name, sizeof(rec.user_name), "%s", s_draft_name);
+    rec.role = s_draft_role;
+    int rc = DG_OK;
+    if (s_draft_pwd[0]) {
+        rc = db_user_set_password(&rec, s_draft_pwd);
+        if (rc == DG_OK)
+            rc = db_user_update(&rec);  /* set_password 只算哈希,落库要 update */
+    } else {
+        rc = db_user_update(&rec);
+    }
     if (rc != DG_OK) {
         dg_popup_fail(err_text(rc), 2000, NULL, NULL);
-        return;
+        return false;
     }
-    /* 建好即转编辑模式:人脸/指纹/IC 从这里开始可录 */
-    s_add_mode = false;
-    memset(s_pending_pwd, 0, sizeof(s_pending_pwd));
+    s_draft_pwd[0] = '\0';
+    s_dirty = false;
     dg_popup_success(_("已保存"), 800, NULL, NULL);
     refresh();
+    return true;
 }
 
 static void apply_del(void *ud, int idx)
@@ -390,11 +420,17 @@ static void on_del(lv_event_t *e)
     dg_popup_choice(_("确认删除该用户"), opts, 1, apply_del, NULL, NULL);
 }
 
-static void on_back(lv_event_t *e)
+/* ---- 统一编辑导航(左上返回 + 右上保存 + 未保存退出确认) ---- */
+
+static bool nav_is_dirty(void)
 {
-    (void)e;
-    navigator_back();
+    return s_dirty;
 }
+
+static const dg_edit_nav_ops_t s_nav_ops = {
+    .is_dirty = nav_is_dirty,
+    .save = save,
+};
 
 /* ---- 录入结果回执(桥转发,UI 线程;人脸录入的回执由拍摄页处理,这里只管清除/删除) ---- */
 
@@ -434,12 +470,14 @@ void page_user_edit_create(lv_obj_t *parent)
 {
     s_title = page_create_(parent, s_add_mode ? _("添加用户") : _("用户编辑"));
 
+    /* 统一编辑导航:左上返回(带未保存确认)+ 右上保存 */
+
     lv_obj_t *col = lv_obj_create(parent);
     lv_obj_remove_style_all(col);
-    lv_obj_set_size(col, DG_SCREEN_W, DG_SCREEN_H - 320);
-    lv_obj_align(col, LV_ALIGN_TOP_MID, 0, 80);
+    lv_obj_set_size(col, DG_SCREEN_W, DG_SCREEN_H - 100);
+    lv_obj_align(col, LV_ALIGN_TOP_MID, 0, 84);
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(col, 12, 0);
+    lv_obj_set_style_pad_row(col, 10, 0);
     lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *v;
@@ -474,25 +512,17 @@ void page_user_edit_create(lv_obj_t *parent)
     lv_obj_add_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
 
     row = row_create(col, _("指纹"), &s_val_finger, NULL);
-    row_action_btn_label(row, _("录入"), on_finger);
+    s_btn_finger = row_action_btn_label(row, _("录入"), on_finger);
 
     row = row_create(col, _("IC卡"), &s_val_ic, NULL);
-    row_action_btn_label(row, _("绑定"), on_ic);
+    s_btn_ic = row_action_btn_label(row, _("录入"), on_ic);
 
-    s_btn_save = dg_btn_create(parent, NULL, _("保存"));
-    lv_obj_set_size(s_btn_save, 180, DG_BTN_H);
-    lv_obj_align(s_btn_save, LV_ALIGN_BOTTOM_LEFT, DG_PAD, -DG_PAD);
-    lv_obj_add_event_cb(s_btn_save, on_save, LV_EVENT_CLICKED, NULL);
+    /* 删除用户:编辑列表最下一项(仅 EDIT;ADD 无此选项) */
+    s_row_del = dg_btn_create_light(col, LV_SYMBOL_TRASH, _("删除用户"));
+    lv_obj_set_size(s_row_del, DG_SCREEN_W - 2 * DG_PAD, 88);
+    lv_obj_add_event_cb(s_row_del, on_del, LV_EVENT_CLICKED, NULL);
 
-    s_btn_del = dg_btn_create(parent, NULL, _("删除"));
-    lv_obj_set_size(s_btn_del, 180, DG_BTN_H);
-    lv_obj_align(s_btn_del, LV_ALIGN_BOTTOM_LEFT, DG_PAD, -DG_PAD);
-    lv_obj_add_event_cb(s_btn_del, on_del, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *back = dg_btn_create_light(parent, NULL, _("返回"));
-    lv_obj_set_size(back, 180, DG_BTN_H);
-    lv_obj_align(back, LV_ALIGN_BOTTOM_RIGHT, -DG_PAD, -DG_PAD);
-    lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);
+    dg_edit_nav_create(parent, &s_nav_ops, true);
 
     refresh();
 }
@@ -502,7 +532,9 @@ void page_user_edit_destroy(void)
     s_title = s_val_name = s_val_role = s_val_pwd = NULL;
     s_val_face = s_val_finger = s_val_ic = NULL;
     s_img_face = NULL;
-    s_btn_pwd = s_btn_face = s_btn_save = s_btn_del = NULL;
+    s_btn_pwd = s_btn_face = NULL;
+    s_btn_finger = s_btn_ic = NULL;
+    s_row_del = NULL;
     memset(s_pending_pwd, 0, sizeof(s_pending_pwd));
 }
 
@@ -518,8 +550,16 @@ void page_user_edit_open(const char *uid)
     if (uid && uid[0] && db_user_get(uid, &rec) == DG_OK) {
         s_add_mode = false;
         snprintf(s_uid, sizeof(s_uid), "%s", uid);
+        /* 草稿 = 当前库值;保存才落库 */
+        snprintf(s_draft_name, sizeof(s_draft_name), "%s", rec.user_name);
+        s_draft_role = rec.role;
+        s_draft_pwd[0] = '\0';
     } else {
         s_add_mode = true;
         snprintf(s_uid, sizeof(s_uid), "%s", uid ? uid : "");
+        s_draft_name[0] = '\0';
+        s_draft_role = DG_ROLE_NORMAL;
+        s_draft_pwd[0] = '\0';
     }
+    s_dirty = false;
 }

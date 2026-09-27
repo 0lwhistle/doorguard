@@ -655,10 +655,17 @@ static void handle_network_get(struct mg_connection *c, struct mg_http_message *
 }
 
 /* 应用放在独立线程:net_cfg_apply 内部 system()(dhcpcd 交互)会阻塞秒级,
- * 决不能占住 loop;先睡 300ms 让 200 响应(乃至旧地址上最后的包)先出门 */
+ * 决不能占住 loop;先睡 300ms 让 200 响应(乃至旧地址上最后的包)先出门。
+ * notify_ui=true(设备端屏幕发起)时额外发 EV_NET_CFG_RESULT 供屏幕弹窗回执 */
+typedef struct {
+    net_cfg_req_t cfg;
+    bool notify_ui;
+} net_apply_job_t;
+
 static void *apply_worker(void *arg)
 {
-    net_cfg_req_t *r = arg;
+    net_apply_job_t *job = arg;
+    const net_cfg_req_t *r = &job->cfg;
     usleep(300 * 1000);
 
     net_info_addr_t got;
@@ -677,8 +684,63 @@ static void *apply_worker(void *arg)
         ev.have_ip = got.have_ip;
         EVENT_BUS_PUBLISH(EV_NET_ADDR, &ev);
     }
-    free(r);
+    if (job->notify_ui) {
+        ev_net_cfg_result_t res;
+        memset(&res, 0, sizeof(res));
+        res.ok = (rc == DG_OK);
+        res.err = rc;
+        snprintf(res.ip, sizeof(res.ip), "%s", got.ip);
+        EVENT_BUS_PUBLISH(EV_NET_CFG_RESULT, &res);
+    }
+    free(job);
     return NULL;
+}
+
+/* 公共入口:持久化 + 起应用线程。HTTP 与设备端事件两路共用。
+ * 返回 DG_OK = 已受理(异步应用);DG_ERR_PARAM = 地址不合法 */
+static int network_request(const net_cfg_req_t *r, bool notify_ui)
+{
+    if (net_cfg_validate(r) != DG_OK)
+        return DG_ERR_PARAM;
+
+    /* 先持久化再应用:应用失败(接口暂不可用)配置仍在,重启/插线后由
+     * 开机装配或再次手动应用接管 */
+    cfg_set_str("net_mode", r->is_static ? "static" : "dhcp");
+    if (r->is_static) {
+        cfg_set_str("net_ip", r->ip);
+        cfg_set_str("net_mask", r->mask);
+        cfg_set_str("net_gw", r->gw);
+    }
+    cfg_flush();
+
+    net_apply_job_t *job = malloc(sizeof(*job));
+    if (!job)
+        return DG_ERR_IO;
+    job->cfg = *r;
+    job->notify_ui = notify_ui;
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, apply_worker, job) == 0)
+        pthread_detach(tid);
+    else {
+        free(job);                           /* 罕见:配置已存,提示手动重启生效 */
+        return DG_ERR_IO;
+    }
+    return DG_OK;
+}
+
+/* 设备端屏幕设置(总线事件入口):UI 不碰 net_cfg,发事件由网络族落地 */
+static int on_net_cfg_set(const event_t *e, void *ud)
+{
+    (void)ud;
+    const ev_net_cfg_set_t *req = (const ev_net_cfg_set_t *)e->data;
+    net_cfg_req_t r;
+    memset(&r, 0, sizeof(r));
+    r.is_static = req->is_static;
+    snprintf(r.ip, sizeof(r.ip), "%s", req->ip);
+    snprintf(r.mask, sizeof(r.mask), "%s", req->mask);
+    snprintf(r.gw, sizeof(r.gw), "%s", req->gw);
+    network_request(&r, true);
+    return 0;
 }
 
 static void handle_network_set(struct mg_connection *c, struct mg_http_message *hm)
@@ -724,28 +786,11 @@ static void handle_network_set(struct mg_connection *c, struct mg_http_message *
         return;
     }
 
-    /* 先持久化再应用:应用失败(接口暂不可用)配置仍在,重启/插线后由
-     * 开机装配或再次手动应用接管 */
-    cfg_set_str("net_mode", r.is_static ? "static" : "dhcp");
-    if (r.is_static) {
-        cfg_set_str("net_ip", r.ip);
-        cfg_set_str("net_mask", r.mask);
-        cfg_set_str("net_gw", r.gw);
-    }
-    cfg_flush();
-
-    net_cfg_req_t *job = malloc(sizeof(r));
-    if (!job) {
+    if (network_request(&r, false) != DG_OK) {
         cJSON_Delete(req);
-        json_msg(c, 500, "内存不足");
+        json_msg(c, 500, "受理失败(地址不合法或内存不足)");
         return;
     }
-    *job = r;
-    pthread_t tid;
-    if (pthread_create(&tid, NULL, apply_worker, job) == 0)
-        pthread_detach(tid);
-    else
-        free(job);                           /* 罕见:配置已存,提示手动重启生效 */
 
     cJSON_Delete(req);
     cJSON *root = cJSON_CreateObject();
@@ -1874,6 +1919,7 @@ int web_server_start(void)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_WEB_STATE_REQ, on_web_state_req, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_WEB_SET, on_web_set, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_ADDR, on_net_addr, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_CFG_SET, on_net_cfg_set, NULL);
 
     netcore_post(web_setup, NULL);           /* 监听注册在 loop 线程执行 */
     publish_web_state();

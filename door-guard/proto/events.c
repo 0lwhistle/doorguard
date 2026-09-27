@@ -29,6 +29,8 @@ static const struct {
     { EV_NET_NTP_TRIGGER,  "NET_NTP_TRIGGER" },
     { EV_NET_OTA_PROGRESS, "NET_OTA_PROGRESS" },
     { EV_NET_ADDR,         "NET_ADDR" },
+    { EV_NET_CFG_SET,      "NET_CFG_SET" },
+    { EV_NET_CFG_RESULT,   "NET_CFG_RESULT" },
     { EV_FINGER_STATUS,    "FINGER_STATUS" },
     { EV_IC_CARD,          "IC_CARD" },
     { EV_DOOR_STATE,       "DOOR_STATE" },

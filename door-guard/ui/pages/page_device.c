@@ -1,12 +1,14 @@
 /*
- * page_device.c — 设备管理(spec-ui §3.3):语言切换 / NTP 矫正 / 网络配置
+ * page_device.c — 设备管理(spec-ui §3.3):语言切换 / NTP 校时 / 网络配置入口
+ *
+ * 2026-09-27:当前时间与超时行改 1s 实时刷新(配置被 web 等他处修改时
+ * 跟随变化,不再显示过期值误导用户);「网络配置」改为进设置页(可编辑)。
  */
 #include "cfg.h"
 #include "event_bus.h"
 #include "events.h"
 #include "dg_log.h"
 #include "i18n.h"
-#include "modules/net/net_info.h"
 #include "navigator/navigator.h"
 #include "theme.h"
 #include "widgets/dg_btn.h"
@@ -52,25 +54,13 @@ static void on_ntp(lv_event_t *e)
 static void on_net(lv_event_t *e)
 {
     (void)e;
-    /* 展示当前实际生效的网络信息(地址设置入口在 web 上位机——屏幕上
-     * 点数字键盘配 IP 不现实,这里让调试时能一眼核对);没拿到的项
-     * net_info 已统一给 0.0.0.0,不再各写兜底 */
-    net_info_addr_t a;
-    net_info_read(&a);
-    const dg_cfg_t *c = cfg_get();
-    char buf[192];
-    snprintf(buf, sizeof(buf), "%s: %s\nIP: %s\n%s: %s\n%s: %s\n%s: %s",
-             _("接口"), a.ifname[0] ? a.ifname : "-",
-             a.ip,
-             _("子网掩码"), a.mask,
-             _("网关"), a.gw,
-             _("模式"), c ? c->net_mode : "dhcp");
-    dg_popup_success(buf, 5000, NULL, NULL);
+    navigator_push("net_set");          /* 设置入口:模式/IP/掩码/网关可编辑 */
 }
 
 /* ---- 秒数选择项(待机超时/菜单超时;choice 比自由输入防呆,与门禁设置页同款) ---- */
 
 static lv_obj_t *s_lb_standby, *s_lb_menu;   /* 两行按钮上的「当前值」标签 */
+static lv_obj_t *s_time;                     /* 当前时间(1s 刷新) */
 
 static void refresh_rows(void *ud)
 {
@@ -85,6 +75,25 @@ static void refresh_rows(void *ud)
         snprintf(t, sizeof(t), "%s: %ds", _("菜单超时"), c->menu_timeout_s);
         lv_label_set_text(s_lb_menu, t);
     }
+}
+
+/* 1s 实时刷新:时间 + 各配置当前值(cfg 可被 web/他页修改,跟随变化) */
+static void refresh_time(void)
+{
+    if (!s_time)
+        return;
+    time_t now = time(NULL);
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    char buf[24];
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmv);
+    lv_label_set_text(s_time, buf);
+}
+
+static void status_timer_cb(lv_timer_t *t)
+{
+    refresh_time();
+    refresh_rows(t->user_data);
 }
 
 static const int standby_opts[] = { 15, 30, 45, 60 };
@@ -139,6 +148,8 @@ static void on_web(lv_event_t *e)
     navigator_push("web_set");
 }
 
+static lv_timer_t *s_timer;
+
 void page_device_create(lv_obj_t *parent)
 {
     DG_LOGI("[DEVICE]", "page create");
@@ -151,17 +162,18 @@ void page_device_create(lv_obj_t *parent)
     lv_obj_set_style_text_color(title, DG_COL_TEXT(), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 24);
 
-    /* 设备信息(只读):当前时间 */
-    time_t now = time(NULL);
-    struct tm tmv;
-    localtime_r(&now, &tmv);
-    char tbuf[64];
-    strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
-    lv_obj_t *info = lv_label_create(parent);
-    lv_label_set_text(info, tbuf);
-    lv_obj_set_style_text_font(info, DG_FONT_CN, 0);
-    lv_obj_set_style_text_color(info, DG_COL_TEXT(), 0);
-    lv_obj_align(info, LV_ALIGN_TOP_MID, 0, 90);
+    /* 左上返回(本页选项即点即存,无保存概念) */
+    lv_obj_t *back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));
+    lv_obj_set_size(back, 150, 64);
+    lv_obj_align(back, LV_ALIGN_TOP_LEFT, DG_PAD, 16);
+    lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);
+
+    /* 设备信息(只读):当前时间,1s 刷新(NTP 校时/时区变化即时可见) */
+    s_time = lv_label_create(parent);
+    lv_obj_set_style_text_font(s_time, DG_FONT_CN, 0);
+    lv_obj_set_style_text_color(s_time, DG_COL_TEXT(), 0);
+    lv_obj_align(s_time, LV_ALIGN_TOP_MID, 0, 90);
+    refresh_time();
 
     lv_obj_t *lang = dg_btn_create(parent, LV_SYMBOL_REFRESH, _("语言"));
     lv_obj_set_size(lang, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
@@ -205,14 +217,16 @@ void page_device_create(lv_obj_t *parent)
     lv_obj_set_style_text_color(s_lb_menu, DG_COL_BG(), 0);
     refresh_rows(NULL);
 
-    lv_obj_t *back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));
-    lv_obj_set_size(back, 200, DG_BTN_H);
-    lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 0, -DG_PAD);
-    lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);
+    s_timer = lv_timer_create(status_timer_cb, 1000, NULL);
 }
 
 void page_device_destroy(void)
 {
+    if (s_timer) {
+        lv_timer_del(s_timer);
+        s_timer = NULL;
+    }
     s_lb_standby = s_lb_menu = NULL;
+    s_time = NULL;
     DG_LOGI("[DEVICE]", "page destroy");
 }

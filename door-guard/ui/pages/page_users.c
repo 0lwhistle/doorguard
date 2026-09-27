@@ -139,9 +139,10 @@ void page_users_create(lv_obj_t *parent)
     lv_obj_align(add, LV_ALIGN_BOTTOM_LEFT, DG_PAD, -DG_PAD);
     lv_obj_add_event_cb(add, on_add, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *back = dg_btn_create_light(parent, NULL, _("返回"));
-    lv_obj_set_size(back, 180, DG_BTN_H);
-    lv_obj_align(back, LV_ALIGN_BOTTOM_RIGHT, -DG_PAD, -DG_PAD);
+    /* 统一导航:返回固定左上角 */
+    lv_obj_t *back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));
+    lv_obj_set_size(back, 150, 64);
+    lv_obj_align(back, LV_ALIGN_TOP_LEFT, DG_PAD, 16);
     lv_obj_add_event_cb(back, on_back_page, LV_EVENT_CLICKED, NULL);
 
     refresh_list();

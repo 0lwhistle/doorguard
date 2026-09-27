@@ -150,6 +150,7 @@ add_library(dg_ui STATIC
     ui/port.c
     ui/i18n.c
     ui/valid_ui.c
+    ui/widgets/dg_edit_nav.c
     ui/navigator/navigator.c
     ui/bridge/bridge.c
     ui/pages/page_home.c
@@ -162,6 +163,7 @@ add_library(dg_ui STATIC
     ui/pages/page_access_set.c
     ui/pages/page_logs.c
     ui/pages/page_web_set.c
+    ui/pages/page_net_set.c
     ui/presenters/presenter_home.c
     ui/presenters/presenter_standby.c
     ui/presenters/presenter_menu.c
@@ -172,6 +174,7 @@ add_library(dg_ui STATIC
     ui/presenters/presenter_access_set.c
     ui/presenters/presenter_logs.c
     ui/presenters/presenter_web_set.c
+    ui/presenters/presenter_net_set.c
     ui/ui_events.c
     ui/font/dg_font_cn_16.c
     ui/font/dg_font_cn_26.c

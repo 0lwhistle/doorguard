@@ -196,6 +196,18 @@ static int on_enroll_result(const event_t *e, void *ud)
     return 0;
 }
 
+/* 网络配置应用结果 → 网络配置页弹窗 */
+static int on_net_cfg_result(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_NET_CFG_RESULT;
+    evt.net_cfg_result = *(const ev_net_cfg_result_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
 void bridge_init(void)
 {
     event_bus_subscribe(EV_VISION_FACE_BOX, on_face_box, NULL);
@@ -214,7 +226,8 @@ void bridge_init(void)
     event_bus_subscribe(EV_NET_WEB_SET_RESULT, on_web_set_result, NULL);
     event_bus_subscribe(EV_ENROLL_RESULT, on_enroll_result, NULL);
     event_bus_subscribe(EV_VISION_QUALITY, on_vision_quality, NULL);
-    DG_LOGI("[BRIDGE]", "事件桥就绪(15 订阅)");
+    event_bus_subscribe(EV_NET_CFG_RESULT, on_net_cfg_result, NULL);
+    DG_LOGI("[BRIDGE]", "事件桥就绪(16 订阅)");
 }
 
 void bridge_btn(const ev_ui_btn_t *btn)

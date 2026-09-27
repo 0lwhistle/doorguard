@@ -63,6 +63,8 @@ extern "C" {
 #define EV_NET_WEB_SET       EV_DEF(DG_MODULE_ID_NET, 0x0007)    /**< UI→net:改账号/口令请求 */
 #define EV_NET_WEB_SET_RESULT EV_DEF(DG_MODULE_ID_NET, 0x0008)   /**< net→UI:改账号/口令结果 */
 #define EV_NET_ADDR          EV_DEF(DG_MODULE_ID_NET, 0x0009)    /**< 主接口地址变化(DHCP 续租/应用静态配置) */
+#define EV_NET_CFG_SET       EV_DEF(DG_MODULE_ID_NET, 0x000A)    /**< UI→net:应用网络配置(设备端屏幕设置) */
+#define EV_NET_CFG_RESULT    EV_DEF(DG_MODULE_ID_NET, 0x000B)    /**< net→UI:网络配置应用结果 */
 
 /* HAL:硬件事件(HAL → 服务) */
 #define EV_FINGER_STATUS     EV_DEF(DG_MODULE_ID_HAL, 0x0001)    /**< 指纹按压/释放/错误 */
@@ -208,6 +210,21 @@ typedef struct {
     char gw[16];                          /**< 无默认路由时为 "0.0.0.0" */
     bool have_ip;                         /**< true = 已拿到非链路本地 IPv4 */
 } ev_net_addr_t;
+
+/** EV_NET_CFG_SET:设备端屏幕发起的网络配置(与 web POST /api/network 同一落地) */
+typedef struct {
+    bool is_static;                       /**< false = DHCP */
+    char ip[16];
+    char mask[16];
+    char gw[16];                          /**< 空串 = 不下发默认路由 */
+} ev_net_cfg_set_t;
+
+/** EV_NET_CFG_RESULT */
+typedef struct {
+    bool    ok;
+    int32_t err;                          /**< 失败时 dg_err_t */
+    char    ip[16];                       /**< 应用后的实际地址(展示/核对) */
+} ev_net_cfg_result_t;
 
 /** EV_NET_OTA_PROGRESS */
 typedef struct {
@@ -366,6 +383,8 @@ _Static_assert(sizeof(ev_net_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_state
 _Static_assert(sizeof(ev_ntp_trigger_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ntp_trigger_t 超限");
 _Static_assert(sizeof(ev_ntp_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ntp_result_t 超限");
 _Static_assert(sizeof(ev_net_addr_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_addr_t 超限");
+_Static_assert(sizeof(ev_net_cfg_set_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_cfg_set_t 超限");
+_Static_assert(sizeof(ev_net_cfg_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_cfg_result_t 超限");
 _Static_assert(sizeof(ev_ota_progress_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ota_progress_t 超限");
 _Static_assert(sizeof(ev_web_set_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_set_t 超限");
 _Static_assert(sizeof(ev_web_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_state_t 超限");

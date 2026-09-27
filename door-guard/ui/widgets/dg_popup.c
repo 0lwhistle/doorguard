@@ -239,14 +239,18 @@ void dg_popup_input(const dg_popup_input_cfg_t *cfg)
     s_input.on_cancel = cfg->on_cancel;
     s_input.ud = cfg->ud;
     s_input.max_len = cfg->max_len;
-    s_input.buf[0] = '\0';
+    /* 预填(编辑现值):同步进键盘缓冲与 textarea,确认取到的才是完整文本 */
+    if (cfg->initial && cfg->initial[0])
+        snprintf(s_input.buf, sizeof(s_input.buf), "%s", cfg->initial);
+    else
+        s_input.buf[0] = '\0';
 
     msg_create(card, cfg->title);
 
     s_input.ta = lv_textarea_create(card);
     lv_textarea_set_one_line(s_input.ta, true);
     lv_textarea_set_password_mode(s_input.ta, cfg->mask_text);
-    lv_textarea_set_text(s_input.ta, "");
+    lv_textarea_set_text(s_input.ta, s_input.buf);
     lv_textarea_set_max_length(s_input.ta,
                                cfg->max_len ? cfg->max_len : INPUT_BUF_MAX - 1);
     lv_obj_set_style_text_font(s_input.ta, DG_FONT_CN, 0);
