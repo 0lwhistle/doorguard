@@ -1,5 +1,9 @@
 # 2026-09-27 坑:Windows 工作区 CRLF 的 S60doorguard 被 scp 上板,
-# shebang "#!/bin/sh" 无法执行 → 重启后应用起不来。板上/WSL 消费的脚本一律 LF。
+# shebang "#!/bin/sh" 无法执行 → 重启后应用起不来。板上/WSL 消费的脚本一律 LF。
+# 2026-09-27 补:属性只管「之后」的检出——规则生效前已检出的老副本仍是
+# CRLF(git 不会回头重写),需 rm + checkout 强制重检;*.py 同理(raw2png
+# 等带 shebang,在 Linux 直接执行时 \r 同样致命)。
 *.sh text eol=lf
+*.py text eol=lf
 env/bin/* text eol=lf
 board/rootfs-overlay/** text eol=lf
