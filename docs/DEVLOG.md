@@ -41,6 +41,12 @@ user_data,从未设置恒 NULL → 切页无效;改存 root)/字母页「删除�
 就是空白按钮;label 改「空格」,键值仍为 " ")。②mDNS 实测已通:Windows 解析
 doorguard.local→192.168.137.100,HTTP 200——无需新做,用法与展示位补充说明。
 
+**续修四**:web 默认端口 8080→80(用户反馈:URL 免带端口)。板上 root 绑 80
+无权限问题;非 root 环境(PC 模拟器)绑定失败自动回退 8080 并经新增的
+mdns_set_port() 同步通告;mdns_url/前端 address/OTA 脚本对 80 省略端口显示。
+板上实测:http://doorguard.local/ 200,API 同端口可用。test_cfg 默认值断言随动。
+注意:dg-build 链接失败时 build/door-guard 保持旧产物——推板前核对 md5/版本串。
+
 **下一步**:板上人工走查六项(用户编辑草稿/退出确认/网络配置设置/各页刷新);
 web 前端 NetworkCard 与设备端双入口并发修改的一致性观察。
 
