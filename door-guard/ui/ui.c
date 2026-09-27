@@ -34,6 +34,7 @@ extern void presenter_access_set_register(void);
 extern void presenter_logs_register(void);
 extern void presenter_web_set_register(void);
 extern void presenter_net_set_register(void);
+extern void presenter_face_set_register(void);
 
 static lv_obj_t *s_page_root = NULL;
 
@@ -87,6 +88,7 @@ int ui_init(const dg_ui_args_t *args)
     presenter_logs_register();
     presenter_web_set_register();
     presenter_net_set_register();
+    presenter_face_set_register();
 
     bridge_init();
     /* 触摸按下沿 → EV_UI_TOUCH:任何页面的触摸都算「有操作」

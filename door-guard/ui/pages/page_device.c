@@ -57,6 +57,13 @@ static void on_net(lv_event_t *e)
     navigator_push("net_set");          /* 设置入口:模式/IP/掩码/网关可编辑 */
 }
 
+/* 人脸识别阈值(检测/识别/活体滑条,即改即存;2026-09-27 用户需求) */
+static void on_face_set(lv_event_t *e)
+{
+    (void)e;
+    navigator_push("face_set");
+}
+
 /* ---- 秒数选择项(待机超时/菜单超时;choice 比自由输入防呆,与门禁设置页同款) ---- */
 
 static lv_obj_t *s_lb_standby, *s_lb_menu;   /* 两行按钮上的「当前值」标签 */
@@ -206,25 +213,31 @@ void page_device_create(lv_obj_t *parent)
     lv_obj_align(ntp, LV_ALIGN_TOP_MID, 0, 180 + DG_BTN_H + DG_PAD);
     lv_obj_add_event_cb(ntp, on_ntp, LV_EVENT_CLICKED, NULL);
 
+    lv_obj_t *faceset = dg_btn_create(parent, LV_SYMBOL_SETTINGS,
+                                      _("人脸识别"));
+    lv_obj_set_size(faceset, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
+    lv_obj_align(faceset, LV_ALIGN_TOP_MID, 0, 180 + 2 * (DG_BTN_H + DG_PAD));
+    lv_obj_add_event_cb(faceset, on_face_set, LV_EVENT_CLICKED, NULL);
+
     lv_obj_t *net = dg_btn_create(parent, LV_SYMBOL_WIFI, _("网络配置"));
     lv_obj_set_size(net, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
-    lv_obj_align(net, LV_ALIGN_TOP_MID, 0, 180 + 2 * (DG_BTN_H + DG_PAD));
+    lv_obj_align(net, LV_ALIGN_TOP_MID, 0, 180 + 3 * (DG_BTN_H + DG_PAD));
     lv_obj_add_event_cb(net, on_net, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *web = dg_btn_create(parent, LV_SYMBOL_SETTINGS, _("Web 管理"));
     lv_obj_set_size(web, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
-    lv_obj_align(web, LV_ALIGN_TOP_MID, 0, 180 + 3 * (DG_BTN_H + DG_PAD));
+    lv_obj_align(web, LV_ALIGN_TOP_MID, 0, 180 + 4 * (DG_BTN_H + DG_PAD));
     lv_obj_add_event_cb(web, on_web, LV_EVENT_CLICKED, NULL);
 
     /* 设备级超时(2026-09-21 自门禁设置页迁来 + 新增):待机超时/菜单超时 */
     lv_obj_t *standby = dg_btn_create(parent, LV_SYMBOL_EYE_OPEN, "");
     lv_obj_set_size(standby, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
-    lv_obj_align(standby, LV_ALIGN_TOP_MID, 0, 180 + 4 * (DG_BTN_H + DG_PAD));
+    lv_obj_align(standby, LV_ALIGN_TOP_MID, 0, 180 + 5 * (DG_BTN_H + DG_PAD));
     lv_obj_add_event_cb(standby, on_standby, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *menuto = dg_btn_create(parent, LV_SYMBOL_SETTINGS, "");
     lv_obj_set_size(menuto, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
-    lv_obj_align(menuto, LV_ALIGN_TOP_MID, 0, 180 + 5 * (DG_BTN_H + DG_PAD));
+    lv_obj_align(menuto, LV_ALIGN_TOP_MID, 0, 180 + 6 * (DG_BTN_H + DG_PAD));
     lv_obj_add_event_cb(menuto, on_menu_timeout, LV_EVENT_CLICKED, NULL);
 
     /* 重启设备(2026-09-27):破坏性操作=红色;web 同款能力走
@@ -232,7 +245,7 @@ void page_device_create(lv_obj_t *parent)
     lv_obj_t *reboot = dg_btn_create_danger(parent, LV_SYMBOL_REFRESH,
                                             _("重启设备"));
     lv_obj_set_size(reboot, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
-    lv_obj_align(reboot, LV_ALIGN_TOP_MID, 0, 180 + 6 * (DG_BTN_H + DG_PAD));
+    lv_obj_align(reboot, LV_ALIGN_TOP_MID, 0, 180 + 7 * (DG_BTN_H + DG_PAD));
     lv_obj_add_event_cb(reboot, on_reboot, LV_EVENT_CLICKED, NULL);
 
     /* 按钮内追加「当前值」label(与门禁设置页同款手法:btn>row>label) */
