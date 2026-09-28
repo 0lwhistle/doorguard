@@ -52,7 +52,7 @@ drv 做总线级薄封装;holder 管 modules / registry 管 services 的双注�
 │ drv/       总线级薄封装(可替换;PC 模拟器同接口 sim 后端)     │
 │   i2c  spi  uart  gpio  pwm  npu                           │
 ├──────────────────────────────────────────────────────────┤
-│ components/ 核心机制:tasker event_bus holder registry logger│
+│ components/ 核心机制:tasker event_bus holder registry logger timeutil│
 ├──────────────────────────────────────────────────────────┤
 │ proto/      跨层契约:events types valid err(唯一横切层)     │
 └──────────────────────────────────────────────────────────┘
@@ -340,7 +340,7 @@ capture 帧 ─→ vision:检测 → 质量闸门(评分达标才有资格) → 
 **② 目录形态**(v2 五层栈,`ls door-guard`):
 
 - 应有:`app ui proto components drv modules services configs models tests sim tools third_party`;
-  components 下有 `tasker event_bus holder registry logger`;
+  components 下有 `tasker event_bus holder registry logger timeutil`;
   services 下有 `capture vision liveness verify access enroll config web ota mdns ntp`;
   modules 下只有 `camera display sqlite net`;
   **drv 下 `npu/` 已填**(`npu_model.c` rknn 薄封装 + `npu_pre.c` RGA letterbox;

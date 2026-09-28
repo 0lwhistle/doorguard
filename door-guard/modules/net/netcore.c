@@ -19,6 +19,7 @@
 #include <time.h>
 
 #include "dg_log.h"
+#include "timeutil.h"
 
 static const char *TAG = "[NETCORE]";
 
@@ -42,15 +43,9 @@ static int s_dropped = 0;
 static atomic_bool s_running = false;
 static atomic_llong s_hb_ms = 0;
 
-/* 项目心跳约定 = CLOCK_REALTIME 纪元毫秒:main 看门狗的 now_ms 即
- * REALTIME(旧 web 推送线程心跳同此)。换 MONOTONIC 会与看门狗相差
- * 整个纪元基数,心跳必然被判"超龄"(板上实测每次启动误报重启) */
-static int64_t now_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
+/* 项目心跳约定 = CLOCK_REALTIME 纪元毫秒(timeutil 的 now_ms):
+ * main 看门狗同基。换 MONOTONIC 会与看门狗相差整个纪元基数,心跳必然
+ * 被判"超龄"(板上实测每次启动误报重启)——两时钟语义已显式分名 */
 
 /* loop 线程内:排空闭包队列。轮数上界防"闭包再投闭包"饿死 loop;
  * 剩余的下一轮定时器接着排 */

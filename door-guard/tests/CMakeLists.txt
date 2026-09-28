@@ -96,7 +96,7 @@ add_executable(test_netcore test_netcore.c
 target_include_directories(test_netcore PRIVATE
     ${CMAKE_SOURCE_DIR}/modules/net ${CMAKE_SOURCE_DIR}/third_party/mongoose
     ${CMAKE_SOURCE_DIR}/proto ${CMAKE_SOURCE_DIR}/components/logger)
-target_link_libraries(test_netcore PRIVATE mongoose dg_log pthread)
+target_link_libraries(test_netcore PRIVATE mongoose dg_log dg_timeutil pthread)
 add_test(NAME test_netcore COMMAND test_netcore)
 set_tests_properties(test_netcore PROPERTIES TIMEOUT 30)
 
@@ -178,3 +178,6 @@ set_tests_properties(test_touch_evdev PROPERTIES TIMEOUT 60)
 
 # 继电器模块(A4:宿主降级路径——装配/脉冲/参数边界/复位)
 dg_add_test(test_relay dg_relay)
+
+# 公共时基(C2:单调性/两种时钟语义)
+dg_add_test(test_timeutil dg_timeutil)

@@ -70,6 +70,10 @@ add_library(dg_registry STATIC components/registry/registry.c)
 target_include_directories(dg_registry PUBLIC ${CMAKE_SOURCE_DIR}/components/registry)
 target_link_libraries(dg_registry PUBLIC dg_log)
 
+# timeutil:公共时基(C2 收口:REALTIME/MONOTONIC 显式分名,零依赖叶子)
+add_library(dg_timeutil STATIC components/timeutil/timeutil.c)
+target_include_directories(dg_timeutil PUBLIC ${CMAKE_SOURCE_DIR}/components/timeutil)
+
 # proto 契约层:错误码/数据结构/业务事件/字段合法性(头在 proto/ 根)
 add_library(dg_proto STATIC
     proto/types.c
@@ -202,7 +206,7 @@ target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker dg_relay)
 add_library(dg_vision STATIC services/vision/vision_service.c)
 target_include_directories(dg_vision PUBLIC ${CMAKE_SOURCE_DIR}/services/vision)
 # 服务层要注入 storage 查重比较器 + 登记特征口径(device_config),并读 cfg
-target_link_libraries(dg_vision PUBLIC dg_proto dg_storage dg_config dg_jpeg)
+target_link_libraries(dg_vision PUBLIC dg_proto dg_storage dg_config dg_jpeg dg_timeutil)
 # 测试构建走 sim 后端:测试是宿主 gcc 无 rockiva 头/库(板上后端只在交叉编译里编)
 if(DG_SIM OR DG_BUILD_TESTS)
     target_sources(dg_vision PRIVATE services/vision/vision_sim.c)
@@ -292,7 +296,7 @@ endif()
 # liveness:动作活体(B7 留口 on_face/pass;B8 状态机)
 add_library(dg_liveness STATIC services/liveness/liveness_service.c)
 target_include_directories(dg_liveness PUBLIC ${CMAKE_SOURCE_DIR}/services/liveness)
-target_link_libraries(dg_liveness PUBLIC dg_proto dg_config)
+target_link_libraries(dg_liveness PUBLIC dg_proto dg_config dg_timeutil)
 
 # mongoose:第三方网络库(GPLv2/商业双许可,单文件 vendored;本项目按 GPLv2 开源路线使用)
 # 统一网络层的唯一传输引擎(web/OTA/NTP/mDNS 全走 modules/net 的 netcore 事件循环;
@@ -325,7 +329,7 @@ target_include_directories(dg_net PUBLIC ${CMAKE_SOURCE_DIR}/services
                                          ${CMAKE_SOURCE_DIR}/modules)
 target_link_libraries(dg_net PUBLIC dg_net_info)
 # crypto:web_auth(PBKDF2)/web_session(RAND)依赖;mongoose 自带 SHA1 无需 shim
-target_link_libraries(dg_net PUBLIC dg_access dg_storage mongoose crypto)
+target_link_libraries(dg_net PUBLIC dg_access dg_storage mongoose crypto dg_timeutil)
 
 # 固件版本号:git describe 注入(上位机"设备概览"与 /api/device 显示)。
 # 无 git / 无 tag 时退化为 unknown——不能因为版本号取不到就让编译失败。
@@ -435,7 +439,7 @@ add_executable(door-guard app/main.c)
 target_link_libraries(door-guard PRIVATE
     -Wl,--start-group
     dg_event_bus dg_tasker dg_holder dg_registry dg_proto dg_storage dg_config
-    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_relay dg_uart dg_net dg_sysctl dg_display dg_camera
+    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_relay dg_timeutil dg_uart dg_net dg_sysctl dg_display dg_camera
     -Wl,--end-group)
 
 if(DG_SIM)

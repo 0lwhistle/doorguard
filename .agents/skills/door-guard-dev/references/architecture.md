@@ -88,6 +88,6 @@ FreeRTOS 依赖被隔离在 port 层,移植 = 实现对应 pthread port,不动�
 
 `app/` 装配启动 · `ui/` 界面 · `services/{capture,vision,liveness,verify,access,enroll,config,web,ota,mdns,ntp,sysctl}` ·
 `modules/{camera,display,sqlite,jpeg,net(net_info+netcore),sysctl,relay(开门继电器,包装 drv/gpio,2026-09-28 A4)}` · `drv/{uart,gpio,npu}` ·
-`components/{tasker,event_bus,holder,logger}` · `proto/` 消息与事件契约 ·
+`components/{tasker,event_bus,holder,logger,timeutil}` · `proto/` 消息与事件契约 ·
 `configs/default.json` · `tests/` · `tools/` · `third_party/`
 (职责细表见 door-guard/README.md;目标形态与迁移映射见 docs/architecture-v2-proposal.md)

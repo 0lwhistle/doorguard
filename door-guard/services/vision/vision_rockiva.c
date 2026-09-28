@@ -24,6 +24,7 @@
 #include "vision_service.h"
 #include "vision_backend.h"
 #include "dg_log.h"
+#include "timeutil.h"
 #include "event_bus.h"
 #include "events.h"
 #include "storage.h"
@@ -70,12 +71,6 @@ static struct {
     char uid[DG_UID_LEN];
 } s_target = { .mtx = PTHREAD_MUTEX_INITIALIZER };
 
-static int64_t now_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
 
 /* 万分比矩形(原图 w×h)→ 像素 → 旋转 90° 后的竖屏坐标(RGA ROT_90 顺时针:
  * 显示点 = (H-1-y, x);若实测脸框镜像,换 ROT_270 公式并在 README 记录) */
@@ -157,7 +152,7 @@ static void on_det(const RockIvaFaceDetResult *result,
     }
 
     static int64_t last_ms;
-    int64_t now = now_ms();
+    int64_t now = now_mono_ms();
     if (now - last_ms < 150)
         return;
     last_ms = now;
@@ -268,7 +263,7 @@ static void search_1n(const char *feat, uint16_t flen)
     /* 最高分节流日志:板上调 face_match_threshold 的唯一依据(先看分再改值) */
     static int64_t last_log_ms;
     static float last_score = -1.0f;
-    int64_t t = now_ms();
+    int64_t t = now_mono_ms();
     if (t - last_log_ms >= IVA_SCORE_LOG_MS &&
         (score != last_score || score >= cfg_get()->face_match_threshold * 0.8f)) {
         last_log_ms = t;
@@ -339,7 +334,7 @@ static void on_analyse(const RockIvaFaceCapResults *result,
         pthread_mutex_lock(&s_cap.mtx);
         memcpy(s_cap.data, feat, flen);
         s_cap.len = flen;
-        s_cap.ms = now_ms();
+        s_cap.ms = now_mono_ms();
         pthread_mutex_unlock(&s_cap.mtx);
 
         if (mode == DG_VMODE_VERIFY_11)
@@ -367,7 +362,7 @@ static int on_capture_req(const event_t *e, void *ud)
     const ev_capture_req_t *r = (const ev_capture_req_t *)e->data;
 
     pthread_mutex_lock(&s_cap.mtx);
-    int64_t age = now_ms() - s_cap.ms;
+    int64_t age = now_mono_ms() - s_cap.ms;
     uint16_t len = s_cap.len;
     uint8_t buf[DG_FEATURE_MAX];
     if (len && age <= IVA_CAPTURE_FRESH_MS)

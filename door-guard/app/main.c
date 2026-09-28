@@ -38,6 +38,7 @@
 #include "web/web_server.h"
 #include "storage.h"
 #include "tasker.h"
+#include "timeutil.h"
 #include "ui.h"
 #include "vision_backend.h"
 #include "vision_service.h"
@@ -68,7 +69,6 @@
  * 一样卡死(管不了自己)。独立线程盯主循环心跳,超龄即退出进程——
  * 表现为"画面冻在某一帧"的主循环卡死,转成 3s 内被 S60 拉起重启 */
 #define WD_LOOP_STALE_MS 10000
-static int64_t now_ms(void);
 static volatile int64_t s_loop_beat_ms;
 static volatile bool s_loop_started;
 
@@ -95,13 +95,6 @@ static const char *s_def_path;      /* 出厂模板(只读) */
 static const char *s_cur_path;      /* 现用配置(首启自动生成) */
 static dg_ui_args_t s_ui_args;
 static const char *s_camera_dir;
-
-static int64_t now_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
 
 /* ---- holder:基础设施与 modules 层 ---- */
 

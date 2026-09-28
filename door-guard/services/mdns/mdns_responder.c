@@ -29,6 +29,7 @@
 #include "cfg.h"
 #include "storage.h"
 #include "dg_log.h"
+#include "timeutil.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -85,12 +86,6 @@ static bool s_timer_added = false;             /* 节拍定时器只注册一次
 
 /* ---- 工具 ---- */
 
-static int64_t now_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
 
 /* 取名字/端口快照(锁内拷贝):重名改名发生在探测期,与 READY 应答并发,
  * 不锁就读 s_host 会读到半截字符串。
@@ -430,7 +425,7 @@ static void mdns_tick(void *arg)
     (void)arg;
     if (!s_udp)
         return;
-    int64_t t = now_ms();
+    int64_t t = now_mono_ms();
     if (t < s_next_action)
         return;
     s_next_action = t + TICK_MS;
@@ -528,7 +523,7 @@ static void mdns_setup(void *arg)
     s_state = ST_PROBING;
     s_step = 0;
     pthread_mutex_unlock(&s_mtx);
-    s_next_action = now_ms();
+    s_next_action = now_mono_ms();
 
     char host[96];
     uint16_t port;

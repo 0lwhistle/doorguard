@@ -8,6 +8,7 @@
 #include "liveness_service.h"
 #include "cfg.h"
 #include "dg_log.h"
+#include "timeutil.h"
 
 #include <pthread.h>
 #include <time.h>
@@ -23,12 +24,6 @@ static struct {
 } s_last;
 static bool s_warned;                    /* "已启用但未实现"只告警一次 */
 
-static int64_t now_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
 
 int liveness_service_start(void)
 {
@@ -44,7 +39,7 @@ int liveness_service_on_face(const dg_face_pt_t *pts, uint32_t n, int32_t qualit
 
     pthread_mutex_lock(&s_mtx);
     s_last.has = true;
-    s_last.ms = now_ms();
+    s_last.ms = now_mono_ms();
     s_last.n = pts ? n : 0;
     s_last.quality = quality;
     pthread_mutex_unlock(&s_mtx);
@@ -74,5 +69,5 @@ int64_t liveness_service_last_face_age_ms(void)
     has = s_last.has;
     ms = s_last.ms;
     pthread_mutex_unlock(&s_mtx);
-    return has ? now_ms() - ms : -1;
+    return has ? now_mono_ms() - ms : -1;
 }

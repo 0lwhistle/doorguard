@@ -36,6 +36,7 @@
 #include "vision_service.h"
 #include "vision_backend.h"
 #include "dg_log.h"
+#include "timeutil.h"
 #include "event_bus.h"
 #include "events.h"
 #include "liveness_service.h"
@@ -168,12 +169,6 @@ static const char *env_or(const char *k, const char *dflt)
     return (v && v[0]) ? v : dflt;
 }
 
-static int64_t now_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
 
 static void pub_face_lost(void)
 {
@@ -225,7 +220,7 @@ static void pub_quality(int32_t verdict, int32_t face_px)
 {
     static int32_t last_v = FQ_ERR_PARAM;
     static int64_t last_ms;
-    const int64_t now = now_ms();
+    const int64_t now = now_mono_ms();
     if (verdict != last_v || now - last_ms >= RKNN_Q_PUB_MS) {
         last_v = verdict;
         last_ms = now;
@@ -390,7 +385,7 @@ static void search_1n(const float *feat)
     /* 最高分节流日志:板上调 face.match_threshold 的唯一依据 */
     static int64_t last_log;
     static float last_score = -1.0f;
-    const int64_t t = now_ms();
+    const int64_t t = now_mono_ms();
     if (t - last_log >= RKNN_SCORE_LOG_MS &&
         (best != last_score || best >= cfg_get()->face_match_threshold * 0.8f)) {
         last_log = t;
@@ -508,7 +503,7 @@ static bool recognize(const uint8_t *nv12, int w, int h,
         if (v != FQ_OK) {
             /* 节流日志:板上标定阈值的依据(先看实测值再改配置) */
             static int64_t last_log;
-            const int64_t t = now_ms();
+            const int64_t t = now_mono_ms();
             if (t - last_log >= 2000) {
                 last_log = t;
                 DG_LOGI(TAG, "质量闸门拦下(%s):脸 %dpx 清晰度 %.0f 检测分 %.2f"
@@ -597,7 +592,7 @@ static void antispoof_run(const uint8_t *nv12, int w, int h,
             npu_model_output_f32((npu_model_t *)models[i], 0, prob, 3, &n) != DG_OK ||
             n != 3) {
             static int64_t last_err;
-            const int64_t t = now_ms();
+            const int64_t t = now_mono_ms();
             if (t - last_err >= 2000) {
                 last_err = t;
                 DG_LOGE(TAG, "反欺骗模型 %d 推理失败(2s 节流)", i);
@@ -610,7 +605,7 @@ static void antispoof_run(const uint8_t *nv12, int w, int h,
 
     /* 标定日志:阈值 face.antispoof_threshold 的唯一依据 */
     static int64_t last_log;
-    const int64_t t = now_ms();
+    const int64_t t = now_mono_ms();
     if (t - last_log >= 2000) {
         last_log = t;
         DG_LOGI(TAG, "反欺骗 real=%.3f(阈值 %.2f %s)", s_spoof_real,
@@ -743,11 +738,11 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
          * 脸框闪烁——lost_hold_ms 内保持最后位置不发,超时才判定"人走了"。
          * 时长走配置(出厂 200ms):调小框跟手但易闪,调大稳但"框滞后于人" */
         if (s_face_present &&
-            now_ms() - s_last_det_ms > (int64_t)cfg_get()->face_lost_hold_ms)
+            now_mono_ms() - s_last_det_ms > (int64_t)cfg_get()->face_lost_hold_ms)
             pub_face_lost();
         return;
     }
-    s_last_det_ms = now_ms();
+    s_last_det_ms = now_mono_ms();
 
     /* 全部候选逆映射到预览/屏幕域(框与关键点一并):录入选脸要按屏幕域
      * 的取景框比较,脸框事件也恒等发布(检测域=显示域,见文件头) */
@@ -803,7 +798,7 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
     const rknn_face_t src = s_cand[best];
 
     /* ---- 识别(节流;要读旋转帧,须在归还缓冲前) ---- */
-    const int64_t t = now_ms();
+    const int64_t t = now_mono_ms();
     if (!enroll_ok) {
         /* 与识别同节奏:发布具体原因 + 作废缓存(拍摄按钮已被质量事件
          * 禁用,这里是不依赖 UI 的后端兜底) */
@@ -897,7 +892,7 @@ static int on_capture_req(const event_t *e, void *ud)
     bool has_snap = false;
 
     pthread_mutex_lock(&s_cap_mtx);
-    const int64_t age = now_ms() - s_cap.ms;
+    const int64_t age = now_mono_ms() - s_cap.ms;
     uint16_t len = s_cap.len;
     if (len && age <= 3000) {
         memcpy(buf, s_cap.data, len);
