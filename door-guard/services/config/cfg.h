@@ -62,7 +62,7 @@ typedef struct {
     int  menu_timeout_s;       /**< 菜单页无操作自动回主页,5~120s,默认 15 */
     char language[16];         /**< zh-CN / en-US,默认 zh-CN */
     /* 网络(spec-network) */
-    int  web_port;             /**< web 上位机端口(含 OTA 上传端点),1024~65535,默认 8080 */
+    int  web_port;             /**< web 上位机端口(含 OTA 上传端点),默认 80;PC 模拟器等非 root 绑定失败自动回退 8080 */
     char ntp_server[64];       /**< 默认 ntp.aliyun.com(国内部署实测可用) */
     char ota_url[128];         /**< OTA 升级包源地址,可空 */
     char net_mode[8];          /**< 接口地址来源:"dhcp"(默认)/"static";应用在 modules/net/net_cfg */

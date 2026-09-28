@@ -218,6 +218,10 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 ';手工推文件一律先 tr -d '
 '。推板后务必重启一次验证 S60 可执行
 - git bash 的 /tmp 与 WSL 的 /tmp 是两个目录;跨侧中转文件放 /mnt/c 真实路径
+- **ssh 远端禁跑 `S60doorguard restart`**:stop 分支末尾的 `killall S60doorguard`
+  兜底会误杀命令行含该字样的远端 shell(把你的 ssh 会话一起 TERM,start 执行
+  不到)。恢复/重启一律走板上脚本文件(如 /root/rt.sh 内容调 restart)或
+  分开跑 stop、start 两条
 - dg-build 链接失败时 build/door-guard 保持旧产物,推板前核对版本串/md5
 
 ### 7.2 局域网访问(2026-09-27 定版)

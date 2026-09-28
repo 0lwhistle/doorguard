@@ -1943,8 +1943,11 @@ static int on_web_set(const event_t *e, void *ud)
 /* ---- 生命周期 ---- */
 
 /* loop 线程(netcore_post 闭包):建监听。注册动作与 poll 同线程,无并发。
- * 默认 80(HTTP 标准端口,URL 免带端口);绑定失败(非 root 环境如 PC 模拟器)
- * 自动回退 8080 并同步 mDNS 通告端口 */
+ * 默认 80(HTTP 标准端口,URL 免带端口)。绑定失败先异步重试 5 次 ×1s——
+ * 重启窗口里上一实例可能尚未完全退出(EADDRINUSE 是暂态);仍失败才回退
+ * 8080(非 root 环境如 PC 模拟器)并同步 mDNS 通告端口 */
+static int s_bind_retry;
+
 static void web_setup(void *arg)
 {
     (void)arg;
@@ -1952,12 +1955,19 @@ static void web_setup(void *arg)
     snprintf(url, sizeof(url), "http://0.0.0.0:%d", s_port);
     s_lsn = mg_http_listen(netcore_mgr(), url, http_handler, NULL);
     if (!s_lsn && s_port == 80) {
-        DG_LOGW(TAG, "80 端口绑定失败(需要 root),回退 8080");
+        if (++s_bind_retry <= 5) {
+            DG_LOGW(TAG, "80 端口绑定失败(%d/5,上实例退出中?),1s 后重试",
+                    s_bind_retry);
+            mg_timer_add(netcore_mgr(), 1000, MG_TIMER_ONCE, web_setup, NULL);
+            return;
+        }
+        DG_LOGW(TAG, "80 端口绑定持续失败,回退 8080");
         s_port = 8080;
         mdns_set_port(s_port);
         snprintf(url, sizeof(url), "http://0.0.0.0:%d", s_port);
         s_lsn = mg_http_listen(netcore_mgr(), url, http_handler, NULL);
     }
+    s_bind_retry = 0;
     if (!s_lsn)
         DG_LOGE(TAG, "web 启动失败(端口 %d 被占?)", s_port);
     else
@@ -2006,7 +2016,10 @@ int web_server_start(void)
     }
 
     const dg_cfg_t *cfg = cfg_get();
-    s_port = (cfg && cfg->web_port > 0) ? cfg->web_port : 8080;
+    /* 配置缺省也是 80:出厂模板/用户预期都是 80(URL 免带端口);
+     * 只有配置显式写了非正值才落到这个兜底(8080 由 web_setup 绑定
+     * 失败时的回退分支接管) */
+    s_port = (cfg && cfg->web_port > 0) ? cfg->web_port : 80;
 
     s_started = true;
     pthread_mutex_lock(&s_ws_mtx);
