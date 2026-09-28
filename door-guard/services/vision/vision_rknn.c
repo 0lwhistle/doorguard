@@ -72,6 +72,8 @@ static const char *TAG = "[VISION]";
 #define RKNN_BOX_LOG_MS     2000        /* 检出分数日志节流(调阈值用) */
 #define RKNN_SCORE_LOG_MS   2000        /* 1:N 最高分日志节流 */
 #define RKNN_REC_MS         300         /* 识别节流(录入缓存新鲜度 ≤300ms) */
+#define RKNN_STANDBY_IDLE_MS 10000      /* B1:DETECT_ONLY 持续无人此时长后降帧 */
+#define RKNN_STANDBY_FRAME_MS 100       /* B1:降帧期推理间隔(~10fps) */
 #define RKNN_ROI_MAX        256         /* ROI 裁剪输出上限(边长) */
 /* ROI 相对关键点外扩系数。112/160 对齐画布映射回源图约要关键点外接框的
  * 2.5~3 倍,1.5 会让 warp 采样越出 ROI(头像四角发黑、下巴/额头被裁);
@@ -96,7 +98,8 @@ static npu_letterbox_t s_lb;
 static int s_lb_src_w, s_lb_src_h;
 static bool s_face_present;            /* worker 写;on_mode_changed(总线线程)置
                                           false 仅单字写,读侧滞后一帧无实义 */
-static int64_t s_last_det_ms;          /* 最近一次检出的时刻:LOST 滞回用 */
+static int64_t s_last_det_ms;          /* 最近一次检出时刻:LOST 滞回 + B1 降帧静置基线(0=开机起未见人) */
+static int64_t s_last_proc_ms;         /* 降帧期最近一次推理时刻(B1;worker 独占) */
 
 /* 最近一次质量测量与判定:供日志标定 + 拍摄页实时提示(下一班接入 UI) */
 static face_quality_t s_last_q;
@@ -665,10 +668,26 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
 {
     /* IDLE/坏帧 → 立即归还(否则 4 缓冲耗尽,相机永久断流)。
      * (IDLE 可能在帧入箱后才发生——worker 这里再查一次,模式切换即时生效) */
-    if (vision_service_get_mode() == DG_VMODE_IDLE || w <= 0 || h <= 0) {
+    const dg_vision_mode_t mode0 = vision_service_get_mode();
+    if (mode0 == DG_VMODE_IDLE || w <= 0 || h <= 0) {
         camera_nv12_release(frame_id);
         return;
     }
+
+    /* ---- 待机降帧(B1):DETECT_ONLY(待机/菜单)且持续无人 ≥10s → 检测
+     * 降到 ~10fps(门禁一生大多在待机,检测是 CPU 大头)。任何人脸检出
+     * (s_last_det_ms 刷新)或模式切走(DETECT_1N/VERIFY_11,触摸唤醒
+     * 即走这条路)立即满速,唤醒延迟上界 = 一个降帧间隔,无可感。
+     * s_last_det_ms=0(开机起未见人)同样计入静置时长。时间戳全部
+     * worker 线程访问,无锁;只省检测推理,取流/预览/video plane 时序不动 */
+    const int64_t now0 = now_mono_ms();
+    if (mode0 == DG_VMODE_DETECT_ONLY &&
+        now0 - s_last_det_ms >= RKNN_STANDBY_IDLE_MS &&
+        now0 - s_last_proc_ms < RKNN_STANDBY_FRAME_MS) {
+        camera_nv12_release(frame_id);
+        return;
+    }
+    s_last_proc_ms = now0;
 
     /* 旋到预览同向:横置摄像头的原始帧里人是躺着的,检测模型只在正立脸的
      * 域内可靠(板上实测:喂原始帧时分数 0.999→0.5~0.7、关键点/框回归
