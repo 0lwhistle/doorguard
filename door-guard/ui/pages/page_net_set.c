@@ -12,8 +12,8 @@
 #include "page_net_set.h"
 #include "cfg.h"
 #include "dg_log.h"
-#include "event_bus.h"
 #include "events.h"
+#include "bridge/bridge.h"
 #include "i18n.h"
 #include "modules/net/net_info.h"
 #include "theme.h"
@@ -204,13 +204,7 @@ static bool apply_cfg(void)
             return false;
         }
     }
-    ev_net_cfg_set_t ev;
-    memset(&ev, 0, sizeof(ev));
-    ev.is_static = s_is_static;
-    snprintf(ev.ip, sizeof(ev.ip), "%s", s_ip);
-    snprintf(ev.mask, sizeof(ev.mask), "%s", s_mask);
-    snprintf(ev.gw, sizeof(ev.gw), "%s", s_gw);
-    EVENT_BUS_PUBLISH(EV_NET_CFG_SET, &ev);
+    bridge_net_cfg_set(s_is_static, s_ip, s_mask, s_gw);   /* C4:出站统一经桥 */
     s_busy = true;
     if (s_btn_apply) {
         dg_btn_set_label(s_btn_apply, _("应用中…"));

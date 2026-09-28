@@ -12,6 +12,8 @@
 #ifndef DG_BRIDGE_H
 #define DG_BRIDGE_H
 
+#include <stdbool.h>
+
 #include "i18n.h"          /* _(label) 取文案(未命中回退原文) */
 #include "ui_events.h"
 #include "events.h"        /* ev_ui_btn_t / ev_goto_page_t 等契约结构 */
@@ -23,7 +25,8 @@ extern "C" {
 /* ---- 初始化:订阅后端事件 → ui_events 队列(一次即可) ---- */
 void bridge_init(void);
 
-/* ---- 动作(→ event_bus,服务层统一决策) ---- */
+/* ---- 动作(→ event_bus,服务层统一决策) ----
+ * C4 收口(2026-09-28):页面零 EVENT_BUS_PUBLISH,出站一律经本层 */
 void bridge_btn(const ev_ui_btn_t *btn);      /* 页面按钮请求(返回/验证…) */
 void bridge_touch(void);                      /* 待机页触摸唤醒请求 */
 
@@ -32,6 +35,18 @@ void bridge_uid_submit(const char *uid);      /* ID 输入框确认 */
 void bridge_pwd_submit(const char *uid, const char *pwd); /* 密码框确认 */
 void bridge_method_pick(int32_t method);      /* 方式选择 */
 void bridge_cancel(void);                     /* 弹窗取消 → 放弃当前验证流程 */
+
+/* 设备管理页:手动 NTP 校时 / 设备重启(延迟 ms,让提示先落地) */
+void bridge_ntp_sync(void);
+void bridge_reboot(int32_t delay_ms);
+
+/** 网络配置应用(静态/DHCP + IP/掩码/网关;结果经 UI_EVT_NET_CFG 回流) */
+void bridge_net_cfg_set(bool is_static, const char *ip, const char *mask,
+                        const char *gw);
+
+/** 录入请求(拍摄页「拍摄」=DG_ENROLL_FACE;编辑页「删除用户」=
+ *  DG_ENROLL_DELETE;seq 由桥生成,回执经 UI_EVT_ENROLL_RESULT 回流) */
+void bridge_enroll_request(const char *uid, int32_t kind);
 
 /* Web 管理页:状态查询 + 账号/口令修改。
  * 凭据只由 net 模块读写(UI 不碰存储),动作走事件、结果经

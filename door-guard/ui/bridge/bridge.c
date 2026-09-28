@@ -13,6 +13,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 static int on_face_box(const event_t *e, void *ud)
 {
@@ -286,4 +287,40 @@ void bridge_web_set(const char *user, const char *pwd)
     snprintf(req.user, sizeof(req.user), "%s", user ? user : "");
     snprintf(req.pwd, sizeof(req.pwd), "%s", pwd ? pwd : "");
     EVENT_BUS_PUBLISH(EV_NET_WEB_SET, &req);
+}
+
+/* ---- 设备/网络/录入动作(C4 收口:页面零 EVENT_BUS_PUBLISH) ---- */
+
+void bridge_ntp_sync(void)
+{
+    ev_ntp_trigger_t ev = { .manual = true };
+    EVENT_BUS_PUBLISH(EV_NET_NTP_TRIGGER, &ev);
+}
+
+void bridge_reboot(int32_t delay_ms)
+{
+    const ev_sys_reboot_t ev = { .delay_ms = delay_ms };
+    EVENT_BUS_PUBLISH(EV_SYS_REBOOT, &ev);
+}
+
+void bridge_net_cfg_set(bool is_static, const char *ip, const char *mask,
+                        const char *gw)
+{
+    ev_net_cfg_set_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.is_static = is_static;
+    snprintf(ev.ip, sizeof(ev.ip), "%s", ip ? ip : "");
+    snprintf(ev.mask, sizeof(ev.mask), "%s", mask ? mask : "");
+    snprintf(ev.gw, sizeof(ev.gw), "%s", gw ? gw : "");
+    EVENT_BUS_PUBLISH(EV_NET_CFG_SET, &ev);
+}
+
+void bridge_enroll_request(const char *uid, int32_t kind)
+{
+    ev_enroll_request_t ev;
+    memset(&ev, 0, sizeof(ev));
+    snprintf(ev.user_id, sizeof(ev.user_id), "%s", uid ? uid : "");
+    ev.kind = kind;
+    ev.seq = (uint32_t)time(NULL);       /* 进程内唯一即可(与原页面语义同) */
+    EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
 }

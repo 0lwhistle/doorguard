@@ -3,7 +3,7 @@
  */
 #include "dg_log.h"
 #include "events.h"
-#include "event_bus.h"
+#include "bridge/bridge.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
 #include "theme.h"
@@ -13,8 +13,8 @@ static void on_back(lv_event_t *e)
 {
     (void)e;
     /* 返回请求发服务(access FSM 统一决策,会经 EV_UI_GOTO_PAGE 切页) */
-    ev_ui_btn_t b = { .btn = DG_BTN_BACK };
-    EVENT_BUS_PUBLISH(EV_UI_BTN, &b);
+    const ev_ui_btn_t b = { .btn = DG_BTN_BACK };
+    bridge_btn(&b);                  /* C4:出站统一经桥 */
 }
 
 static void on_users(lv_event_t *e)

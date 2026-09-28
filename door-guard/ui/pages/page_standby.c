@@ -3,7 +3,6 @@
  * 触摸/人脸唤醒(TOUCH 事件经 FSM;本页点击也喂 FSM_EV_TOUCH)
  */
 #include "dg_log.h"
-#include "event_bus.h"
 #include "events.h"
 #include "bridge/bridge.h"
 #include "theme.h"

@@ -8,7 +8,10 @@
 入:后端 event_bus → bridge/(入 ui_events 队列)→ ui.c 全局泵(LVGL 线程,主循环 5ms 节拍;预览泵 20ms)
       ├─ UI_EVT_GOTO_PAGE → navigator_switch(切页)
       └─ 其余 → navigator_dispatch_evt → 当前页 presenter.on_evt → pages setter 渲染
-出:pages 点击 → bridge_btn/bridge_touch → event_bus → 服务层(FSM 决策后回流切页)
+出:pages 点击 → bridge_btn/bridge_touch/bridge_ntp_sync/bridge_reboot/
+bridge_net_cfg_set/bridge_enroll_request → event_bus → 服务层(FSM 决策后
+回流切页)。**出站只认 bridge 动作函数**(C4 收口;新动作 = 桥里加类型化
+API,页面不得直发)。
 ```
 
 服务层请求 UI 动作的事件契约(验证流程全靠这几条;UI 只渲染,不判断能不能):
@@ -36,9 +39,9 @@ reason→文案映射、键盘与输入校验见 spec-ui §6。
 |---|---|---|
 | `ui.c` | 引导装配(theme→i18n→navigator→presenters→bridge→泵→首页)+ 全局事件泵 | 业务逻辑 |
 | `navigator/` | 页面注册表 + 栈 + on_enter/on_exit/on_evt 生命周期 + reload(语言热切) | 业务 |
-| `bridge/` | 唯一后端入口:事件入站编组、动作出站、_( ) 文案;只有本层 include 后端头 | 总线线程调 LVGL |
+| `bridge/` | 唯一后端入口:事件入站编组、动作出站(**收发都经 bridge**,2026-09-28 C4 收口后页面零 `EVENT_BUS_PUBLISH`/零 `event_bus.h`)、_( ) 文案;只有本层 include 后端头 | 总线线程调 LVGL |
 | `presenters/` | 每页一个 presenter:注册页面、on_evt 渲染内容、弹窗文案、导航决策 | — |
-| `pages/` | 纯视图:建控件 + setter;点击转 bridge 动作 | include 后端头 |
+| `pages/` | 纯视图:建控件 + setter;点击转 bridge 动作 | include 后端头;直碰 event_bus |
 | `widgets/` | 通用控件 dg_btn/dg_popup/dg_kbd(数字+字母两页)/dg_list | 页面私有逻辑 |
 | `valid_ui.c` | 输入校验的文案包装(规则在 proto/valid.h,文案走 _()) | 规则本身 |
 | `theme.h` | 色值/字号/间距 token(spec-ui §1;全项目唯一色值来源) | — |

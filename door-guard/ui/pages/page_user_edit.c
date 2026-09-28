@@ -17,8 +17,8 @@
 #include "dg_log.h"
 #include "enroll_service.h"
 #include "err.h"
-#include "event_bus.h"
 #include "events.h"
+#include "bridge/bridge.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
 #include "presenters/presenter_capture.h"
@@ -437,12 +437,8 @@ static void apply_del(void *ud, int idx)
     if (idx != 0)
         return;
     dg_avatar_invalidate(s_uid);        /* 用户即删:头像缓存同步作废 */
-    ev_enroll_request_t ev;
-    memset(&ev, 0, sizeof(ev));
-    snprintf(ev.user_id, sizeof(ev.user_id), "%s", s_uid);
-    ev.kind = DG_ENROLL_DELETE;         /* 经 enroll 服务:DB+视觉特征库一起删 */
-    ev.seq = (uint32_t)time(NULL);
-    EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
+    /* DG_ENROLL_DELETE:经 enroll 服务,DB+视觉特征库一起删 */
+    bridge_enroll_request(s_uid, DG_ENROLL_DELETE);   /* C4:出站统一经桥 */
     navigator_back();
 }
 

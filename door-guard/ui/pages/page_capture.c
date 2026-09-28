@@ -17,9 +17,9 @@
 #include "dg_log.h"
 #include "err.h"
 #include "enroll_service.h"
-#include "event_bus.h"
 #include "events.h"
 #include "face_quality.h"
+#include "bridge/bridge.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
 #include "theme.h"
@@ -176,12 +176,7 @@ static void on_shot(lv_event_t *e)
     (void)e;
     if (!s_shot_enabled || s_review)
         return;
-    ev_enroll_request_t ev;
-    memset(&ev, 0, sizeof(ev));
-    snprintf(ev.user_id, sizeof(ev.user_id), "%s", s_uid);
-    ev.kind = DG_ENROLL_FACE;
-    ev.seq = (uint32_t)time(NULL);
-    EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
+    bridge_enroll_request(s_uid, DG_ENROLL_FACE);   /* C4:出站统一经桥 */
     wait_start();
     lv_obj_add_state(s_btn_shot, LV_STATE_DISABLED);
 }

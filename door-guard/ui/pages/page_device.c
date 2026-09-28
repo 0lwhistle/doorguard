@@ -5,9 +5,9 @@
  * 跟随变化,不再显示过期值误导用户);「网络配置」改为进设置页(可编辑)。
  */
 #include "cfg.h"
-#include "event_bus.h"
 #include "events.h"
 #include "dg_log.h"
+#include "bridge/bridge.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
 #include "theme.h"
@@ -46,8 +46,7 @@ static void on_ntp(lv_event_t *e)
     (void)e;
     /* 真触发一次校正(用配置里的 ntp_server),结果经 EV_NET_NTP_RESULT 回来;
      * 不再弹输入框——服务器地址属设备配置,不该让门禁面板上的人现填 */
-    ev_ntp_trigger_t ev = { .manual = true };
-    EVENT_BUS_PUBLISH(EV_NET_NTP_TRIGGER, &ev);
+    bridge_ntp_sync();               /* C4:出站统一经桥 */
     dg_popup_success(_("NTP 校时中…"), 1000, NULL, NULL);
 }
 
@@ -163,8 +162,7 @@ static void apply_reboot(void *ud, int idx)
     (void)ud;
     if (idx != 0)
         return;
-    const ev_sys_reboot_t ev = { .delay_ms = 1500 };
-    EVENT_BUS_PUBLISH(EV_SYS_REBOOT, &ev);
+    bridge_reboot(1500);             /* C4:出站统一经桥 */
     dg_popup_success(_("正在重启,设备即将关闭"), 1500, NULL, NULL);
 }
 
