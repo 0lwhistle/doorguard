@@ -26,7 +26,6 @@
 #include "enroll_service.h"
 #include "event_bus.h"
 #include "events.h"
-#include "gpio_hal.h"
 #include "holder.h"
 #include "liveness_service.h"
 #include "mdns/mdns_responder.h"
@@ -34,6 +33,7 @@
 #include "net/net_cfg.h"
 #include "ntp/ntp_service.h"
 #include "registry.h"
+#include "relay.h"
 #include "sysctl/sysctl_service.h"
 #include "web/web_server.h"
 #include "storage.h"
@@ -133,6 +133,12 @@ static int mod_config(void)
 static int mod_camera(void)
 {
     return camera_init(s_camera_dir, NULL, NULL);
+}
+
+/* 继电器(A4):引脚号从配置传入;宿主/硬件缺失由模块内部降级(恒 READY) */
+static int mod_relay(void)
+{
+    return relay_module_init(cfg_get()->relay_gpio_line);
 }
 
 /* ---- registry:services 层(包装函数与原 holder 版本一致) ---- */
@@ -304,6 +310,7 @@ static int register_modules(void)
         { "tasker",    mod_tasker,    true,  DEP_EVENT_BUS, 1 },
         { "storage",   mod_storage,   true,  DEP_TASKER,    1 },
         { "config",    mod_config,    true,  DEP_STORAGE,   1 },
+        { "relay",     mod_relay,     false, DEP_CONFIG,    1 },
         { "camera",    mod_camera,    false, DEP_CONFIG,    1 },
         { "netcore",   mod_netcore,   false, NULL,          0 },
     };
@@ -333,14 +340,12 @@ static void publish_service_state(const char *name, registry_state_t st)
     EVENT_BUS_PUBLISH(EV_SYS_SERVICE_STATE, &ev);
 }
 
-/* 安全停机:继电器先复位到断开态(电平直设,不走开门脉冲),退出交 S60 重拉 */
+/* 安全停机:继电器先复位到断开态(走 relay 模块,电平直设+回收引脚),
+ * 退出交 S60 重拉 */
 static void safe_shutdown(const char *reason)
 {
     DG_LOGE("[MAIN]", "必需服务不可恢复(%s):安全停机,继电器复位", reason);
-    if (gpio_hal_line() >= 0) {
-        (void)gpio_hal_set_level(0);
-        gpio_hal_deinit();
-    }
+    (void)relay_reset();
     fprintf(stderr, "door-guard 必需服务不可恢复(%s),安全停机(S60 将拉起重试)\n",
             reason);
     exit(1);

@@ -1,5 +1,9 @@
 # gpio_hal — 门控 GPIO(sysfs)
 
+> 2026-09-28 A4 起业务上层不再直调本 HAL:开门继电器包成 modules/relay
+> (access_service 开门脉冲、main 安全停机都走 relay 接口);本 HAL 是它的
+> 底座,接口/语义不变。
+
 ## 实现
 
 B4 rootfs **无 libgpiod/gpiod CLI**(实测),采用内核 sysfs 接口:

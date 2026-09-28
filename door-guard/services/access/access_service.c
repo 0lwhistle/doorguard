@@ -14,11 +14,11 @@
  */
 #include "access_service.h"
 #include "auth_fsm.h"
-#include "drv/gpio/gpio_hal.h"
 #include "cfg.h"
 #include "dg_log.h"
 #include "event_bus.h"
 #include "events.h"
+#include "relay.h"
 #include "storage.h"
 #include "tasker.h"
 #include "vision_service.h"
@@ -203,14 +203,9 @@ static void *door_pulse_thread(void *arg)
 {
     const uint32_t ms = (uint32_t)(uintptr_t)arg;
 
-    static bool gpio_ready = false;
-    if (!gpio_ready) {
-        if (gpio_hal_init(cfg_get()->relay_gpio_line) == DG_OK)
-            gpio_ready = true;
-        else
-            DG_LOGW(TAG, "gpio 初始化失败,门控仅事件可观测");
-    }
-    if (gpio_ready && gpio_hal_door_pulse(ms) != DG_OK)
+    /* 继电器走 modules/relay(A4):宿主/硬件缺失的降级在模块内消化,
+     * 开门语义由下方 EV_AUTH_DOOR_OPEN 事件承载 */
+    if (relay_door_pulse(ms) != DG_OK)
         DG_LOGE(TAG, "开门脉冲失败");
     ev_door_state_t ev = { .open = true };
     EVENT_BUS_PUBLISH(EV_AUTH_DOOR_OPEN, &ev);

@@ -196,7 +196,7 @@ add_library(dg_access STATIC
 )
 target_include_directories(dg_access PUBLIC ${CMAKE_SOURCE_DIR}/services/access
                                             ${CMAKE_SOURCE_DIR}/services/vision)
-target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker dg_gpio)
+target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker dg_relay)
 
 # vision:视觉服务(槽位/模式/后端注册表 + sim mock / rockiva 板上后端)
 add_library(dg_vision STATIC services/vision/vision_service.c)
@@ -243,6 +243,12 @@ add_library(dg_gpio STATIC drv/gpio/gpio_hal.c)
 target_include_directories(dg_gpio PUBLIC ${CMAKE_SOURCE_DIR}/drv/gpio
                                           ${CMAKE_SOURCE_DIR}/proto)
 target_link_libraries(dg_gpio PUBLIC dg_log)
+
+# relay:开门继电器模块(A4:services 不直落 drv,包装 gpio_hal;
+# 降级态支持宿主无 GPIO)
+add_library(dg_relay STATIC modules/relay/relay.c)
+target_include_directories(dg_relay PUBLIC ${CMAKE_SOURCE_DIR}/modules/relay)
+target_link_libraries(dg_relay PUBLIC dg_gpio)
 
 # uart:串口框架(mock 回环 / termios)
 add_library(dg_uart STATIC drv/uart/uart_hal.c)
@@ -429,7 +435,7 @@ add_executable(door-guard app/main.c)
 target_link_libraries(door-guard PRIVATE
     -Wl,--start-group
     dg_event_bus dg_tasker dg_holder dg_registry dg_proto dg_storage dg_config
-    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_gpio dg_uart dg_net dg_sysctl dg_display dg_camera
+    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_relay dg_uart dg_net dg_sysctl dg_display dg_camera
     -Wl,--end-group)
 
 if(DG_SIM)

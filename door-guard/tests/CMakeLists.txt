@@ -175,3 +175,6 @@ else()
 endif()
 add_test(NAME test_touch_evdev COMMAND test_touch_evdev)
 set_tests_properties(test_touch_evdev PROPERTIES TIMEOUT 60)
+
+# 继电器模块(A4:宿主降级路径——装配/脉冲/参数边界/复位)
+dg_add_test(test_relay dg_relay)
