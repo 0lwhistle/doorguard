@@ -527,12 +527,9 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
                 back_to_normal(fsm);                 /* 内含清提示 */
             }
             DG_LOGI(TAG, "验证流程取消(%s)", from_admin ? "回管理员认证" : "回普通模式");
-        } else if (fsm->state == ST_ADMIN_AUTH) {
-            /* 管理员认证态主动放弃(左上返回键,2026-09-28):不再干等 5s 超时 */
-            cancel_timers(fsm);
-            back_to_normal(fsm);
-            DG_LOGI(TAG, "管理员认证取消,回普通模式");
         }
+        /* ST_ADMIN_AUTH 不响应 BACK:认证窗口仅 5s,超时自动回普通模式,
+         * 专门做取消入口是噪音(2026-09-28 用户拍板) */
         return;
 
     case FSM_EV_UID_SUBMIT:
