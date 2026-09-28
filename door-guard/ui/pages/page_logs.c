@@ -3,10 +3,11 @@
  * 列表分页:时间/ID/姓名/方式/结果
  */
 #include "dg_log.h"
+#include "enroll_service.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
-#include "storage.h"
 #include "theme.h"
+#include "types.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_list.h"
 #include "widgets/dg_popup.h"
@@ -59,7 +60,7 @@ static void refresh_logs(void)
 
     access_log_t rows[LOGS_PAGE_SIZE];
     log_page_t page = { .logs = rows, .max = LOGS_PAGE_SIZE };
-    if (db_log_query(&s_q, &page) != DG_OK) {
+    if (enroll_service_log_query(&s_q, &page) != DG_OK) {
         if (s_title)
             lv_label_set_text(s_title, _("记录查询"));
         return;

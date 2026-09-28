@@ -13,6 +13,7 @@
 #define DG_ENROLL_SERVICE_H
 
 #include "err.h"
+#include "types.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -24,6 +25,43 @@ extern "C" {
 
 int enroll_service_start(void);
 void enroll_service_stop(void);
+
+/* ---- 用户生命周期读/写(2026-09-28 A1 收口:UI 三页不再直写 SQLite)----
+ * 编辑/列表/记录页原直调 db_user_* 与 db_log_query,越层写路径未登记;
+ * 现统一收进本服务(它本就管草稿/删除/清脸,是事实上的用户生命周期服务)。
+ * 错误码原样透传 storage,UI 侧 err_text() 映射不变;同步保存要同步返回码
+ * 做弹窗回显与「保存退出」衔接,故登记为直调例外而非事件往返
+ * (docs/architecture-v2-proposal §1)。 */
+
+/** 单用户读取(编辑页刷新/保存前置;透传 db_user_get) */
+int enroll_service_user_get(const char *user_id, user_rec_t *out);
+
+/** 列表页单行投影(不含特征/密码;头像走 dg_avatar 独立链路) */
+typedef struct {
+    char    user_id[DG_UID_LEN];
+    char    user_name[DG_NAME_LEN];
+    int32_t role;
+} enroll_user_row_t;
+
+/** 分页读取上限(user_id 字典序取前 cap 行;UI 页容量 6,留裕量) */
+#define ENROLL_USER_PAGE_MAX 16
+
+/** 列表页一次取齐:字典序 cap 行 + 用户总数(替代 UI 的
+ *  count+list_ids+逐行 get 三连调)。rows 调用方分配;out_n 实际行数 */
+int enroll_service_user_page(enroll_user_row_t *rows, uint32_t cap,
+                             uint32_t *out_n, uint32_t *out_total);
+
+/** 门禁日志分页查询(记录查询页数据源;q/out 由调用方提供,透传 db_log_query) */
+int enroll_service_log_query(const log_query_t *q, log_page_t *out);
+
+/** 用户生命周期保存(编辑页「保存」唯一入口;字段+密码一次落库):
+ *  uid 不存在 = 建用户:密码必填(空 → DG_ERR_NO_PASSWORD),auth_flags
+ *  固定 FACE|PWD——指纹/IC 事件两端未接硬件,放开只会让用户白录白验
+ *  (机制见 spec-auth-business「验证方式开关」);
+ *  已存在   = 覆写姓名/权限;pwd 非空才改密(空/NULL = 保持原密码)。
+ *  @return DG_OK;失败码透传 storage(DUP_UID/NO_PASSWORD/BAD_NAME/…) */
+int enroll_service_user_save(const char *user_id, const char *name,
+                             int32_t role, const char *pwd);
 
 /* ---- 人脸草稿(单槽;UI 线程直调,登记见 docs/architecture-v2-proposal §1) ---- */
 

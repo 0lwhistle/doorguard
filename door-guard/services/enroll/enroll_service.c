@@ -190,6 +190,81 @@ int enroll_service_clear_face(const char *user_id)
     return DG_OK;
 }
 
+/* ---- 用户生命周期读/写(A1 收口;登记见 enroll_service.h 与 proposal §1)---- */
+
+int enroll_service_user_get(const char *user_id, user_rec_t *out)
+{
+    return db_user_get(user_id, out);
+}
+
+int enroll_service_user_page(enroll_user_row_t *rows, uint32_t cap,
+                             uint32_t *out_n, uint32_t *out_total)
+{
+    if (!rows || !out_n || !out_total || !cap || cap > ENROLL_USER_PAGE_MAX)
+        return DG_ERR_PARAM;
+    char ids[ENROLL_USER_PAGE_MAX][DG_UID_LEN];
+    uint32_t n = 0;
+    int rc = db_user_list_ids(ids, cap, &n);
+    if (rc != DG_OK)
+        return rc;
+    for (uint32_t i = 0; i < n; i++) {
+        user_rec_t rec;
+        memset(&rec, 0, sizeof(rec));
+        if (db_user_get(ids[i], &rec) != DG_OK)
+            continue;                /* 枚举与读取间被并发删除:跳过该行 */
+        snprintf(rows[i].user_id, sizeof(rows[i].user_id), "%s", rec.user_id);
+        snprintf(rows[i].user_name, sizeof(rows[i].user_name), "%s", rec.user_name);
+        rows[i].role = rec.role;
+    }
+    *out_n = n;
+    return db_user_count(out_total);
+}
+
+int enroll_service_log_query(const log_query_t *q, log_page_t *out)
+{
+    return db_log_query(q, out);
+}
+
+int enroll_service_user_save(const char *user_id, const char *name,
+                             int32_t role, const char *pwd)
+{
+    if (!user_id || !user_id[0])
+        return DG_ERR_PARAM;
+
+    user_rec_t existing;
+    const int grc = db_user_get(user_id, &existing);
+    if (grc != DG_OK && grc != DG_ERR_NOT_FOUND)
+        return grc;                  /* DB 异常不能误判成"不存在"去建用户 */
+
+    if (grc == DG_OK) {
+        /* EDIT:完整库记录为基线覆写——db_user_update 对 ic_card/auth_flags
+         * 是覆盖语义(空=解绑/0=清空),零基线会把没动过的字段顺手清掉 */
+        user_rec_t rec = existing;
+        snprintf(rec.user_name, sizeof(rec.user_name), "%s", name ? name : "");
+        rec.role = role;
+        if (pwd && pwd[0]) {
+            const int prc = db_user_set_password(&rec, pwd);
+            if (prc != DG_OK)
+                return prc;
+        }
+        return db_user_update(&rec);
+    }
+
+    /* ADD:密码必设(硬规则,禁静默建无密用户);默认只开人脸+密码 */
+    if (!pwd || !pwd[0])
+        return DG_ERR_NO_PASSWORD;
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    snprintf(rec.user_id, sizeof(rec.user_id), "%s", user_id);
+    snprintf(rec.user_name, sizeof(rec.user_name), "%s", name ? name : "");
+    rec.role = role;
+    rec.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
+    const int prc = db_user_set_password(&rec, pwd);
+    if (prc != DG_OK)
+        return prc;
+    return db_user_add(&rec);
+}
+
 static void publish_result(const char *uid, int32_t kind, uint32_t seq, int err)
 {
     ev_enroll_result_t ev;

@@ -15,15 +15,15 @@
  *         人脸/指纹/IC 在保存前不可录入(用户还不存在,特征无处挂)。
  */
 #include "dg_log.h"
+#include "enroll_service.h"
 #include "err.h"
 #include "event_bus.h"
 #include "events.h"
-#include "enroll_service.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
 #include "presenters/presenter_capture.h"
-#include "storage.h"
 #include "theme.h"
+#include "types.h"
 #include "valid_ui.h"
 #include "widgets/dg_avatar.h"
 #include "widgets/dg_btn.h"
@@ -189,7 +189,7 @@ static void refresh(void)
     lv_label_set_text(s_title, _("用户编辑"));
     user_rec_t rec;
     memset(&rec, 0, sizeof(rec));
-    if (db_user_get(s_uid, &rec) != DG_OK) {
+    if (enroll_service_user_get(s_uid, &rec) != DG_OK) {
         val_set(s_val_name, _("用户不存在"));
         return;
     }
@@ -320,7 +320,7 @@ static void on_face(lv_event_t *e)
 {
     (void)e;
     user_rec_t rec;
-    if (db_user_get(s_uid, &rec) != DG_OK)
+    if (enroll_service_user_get(s_uid, &rec) != DG_OK)
         return;
     if (rec.face_vec_len > 0 || enroll_service_draft_active(s_uid)) {
         /* 已有(库内或草稿):重录 / 清除(清除=红色,弹窗带取消) */
@@ -344,7 +344,7 @@ static void apply_face_pick(void *ud, int idx)
     enroll_service_discard_draft(s_uid);
     user_rec_t rec;
     memset(&rec, 0, sizeof(rec));
-    if (db_user_get(s_uid, &rec) == DG_OK && rec.face_vec_len > 0) {
+    if (enroll_service_user_get(s_uid, &rec) == DG_OK && rec.face_vec_len > 0) {
         s_face_clear_pending = true;
         s_dirty = true;
     }
@@ -372,15 +372,8 @@ static bool save(void)
             dg_popup_fail(_("请先设置密码"), 1500, NULL, NULL);
             return false;
         }
-        user_rec_t rec;
-        memset(&rec, 0, sizeof(rec));
-        snprintf(rec.user_id, sizeof(rec.user_id), "%s", s_uid);
-        snprintf(rec.user_name, sizeof(rec.user_name), "%s", s_pending_name);
-        rec.role = DG_ROLE_NORMAL;
-        rec.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
-        int rc = db_user_set_password(&rec, s_pending_pwd);
-        if (rc == DG_OK)
-            rc = db_user_add(&rec);
+        int rc = enroll_service_user_save(s_uid, s_pending_name,
+                                          DG_ROLE_NORMAL, s_pending_pwd);
         if (rc != DG_OK) {
             dg_popup_fail(err_text(rc), 2000, NULL, NULL);
             return false;
@@ -393,26 +386,19 @@ static bool save(void)
         return true;
     }
 
-    /* EDIT:草稿校验 → 新取库值(只覆写字段)→ 落库 → 特征草稿提交 */
+    /* EDIT:草稿校验 → 存在性前置(user_save 对不存在的 uid 会走建用户
+     * 分支,编辑页语义必须报「用户不存在」)→ 字段+密码一次落库 → 特征草稿提交 */
     if (dg_ui_valid_name(s_draft_name)) {
         dg_popup_fail(_("姓名不合法"), 1500, NULL, NULL);
         return false;
     }
     user_rec_t rec;
-    if (db_user_get(s_uid, &rec) != DG_OK) {
+    if (enroll_service_user_get(s_uid, &rec) != DG_OK) {
         dg_popup_fail(_("用户不存在"), 1500, NULL, NULL);
         return false;
     }
-    snprintf(rec.user_name, sizeof(rec.user_name), "%s", s_draft_name);
-    rec.role = s_draft_role;
-    int rc = DG_OK;
-    if (s_draft_pwd[0]) {
-        rc = db_user_set_password(&rec, s_draft_pwd);
-        if (rc == DG_OK)
-            rc = db_user_update(&rec);  /* set_password 只算哈希,落库要 update */
-    } else {
-        rc = db_user_update(&rec);
-    }
+    int rc = enroll_service_user_save(s_uid, s_draft_name, s_draft_role,
+                                      s_draft_pwd[0] ? s_draft_pwd : NULL);
     if (rc != DG_OK) {
         dg_popup_fail(err_text(rc), 2000, NULL, NULL);
         return false;
@@ -622,7 +608,7 @@ void page_user_edit_open(const char *uid)
     /* 按“用户是否存在”自判模式:存在 = 编辑;不存在 = 添加(ID 为待创建)。
      * 列表页因此不需要知道模式语义——传入 ID 进来就是同一个入口。 */
     user_rec_t rec;
-    if (uid && uid[0] && db_user_get(uid, &rec) == DG_OK) {
+    if (uid && uid[0] && enroll_service_user_get(uid, &rec) == DG_OK) {
         s_add_mode = false;
         snprintf(s_uid, sizeof(s_uid), "%s", uid);
         /* 草稿 = 当前库值;保存才落库 */

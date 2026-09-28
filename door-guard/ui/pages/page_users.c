@@ -6,10 +6,10 @@
  * 旧的行内二级菜单(权限/删除)与三步入库流已并入编辑页。
  */
 #include "dg_log.h"
+#include "enroll_service.h"
 #include "err.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
-#include "storage.h"
 #include "theme.h"
 #include "presenters/presenter_user_edit.h"
 #include "widgets/dg_avatar.h"
@@ -26,6 +26,7 @@
 static lv_obj_t *s_list = NULL;
 static lv_obj_t *s_title = NULL;
 static char s_row_uids[USERS_PAGE_SIZE][DG_UID_LEN];  /* 行→uid(页容量定长池) */
+static enroll_user_row_t s_rows[USERS_PAGE_SIZE];     /* 本页行数据(服务回填) */
 
 static void refresh_list(void);
 static void on_row_click(lv_event_t *e);
@@ -45,26 +46,20 @@ static void refresh_list(void)
         return;
     dg_list_clear(s_list);
 
-    uint32_t total = 0;
-    if (db_user_count(&total) != DG_OK)
-        return;
-    /* 列表来自真实枚举(字典序,取本页容量),不再按 1..2000 探测数字 ID——
-     * 字母/前导零/超界 ID 的合法用户此前永远不显示,计数却正常 */
-    static char ids[USERS_PAGE_SIZE][DG_UID_LEN];
-    uint32_t n = 0;
-    if (db_user_list_ids(ids, USERS_PAGE_SIZE, &n) != DG_OK)
+    /* 列表数据一次取齐(user_id 字典序本页 + 总数);行数据不再逐个
+     * db_user_get——此前 UI 三连调 count/list_ids/get 的读路径已收口
+     * 进 enroll 服务(A1,登记见 docs/architecture-v2-proposal §1) */
+    uint32_t n = 0, total = 0;
+    if (enroll_service_user_page(s_rows, USERS_PAGE_SIZE, &n, &total) != DG_OK)
         return;
     for (uint32_t i = 0; i < n; i++) {
-        user_rec_t rec;
-        if (db_user_get(ids[i], &rec) != DG_OK)
-            continue;
         char rowtxt[DG_UID_LEN + DG_NAME_LEN + 16];
-        snprintf(rowtxt, sizeof(rowtxt), "%s %s [%s]", rec.user_id, rec.user_name,
-                 role_name(rec.role));
-        snprintf(s_row_uids[i], sizeof(s_row_uids[i]), "%s", rec.user_id);
+        snprintf(rowtxt, sizeof(rowtxt), "%s %s [%s]", s_rows[i].user_id,
+                 s_rows[i].user_name, role_name(s_rows[i].role));
+        snprintf(s_row_uids[i], sizeof(s_row_uids[i]), "%s", s_rows[i].user_id);
         /* 行首头像缩略图(40×40,libjpeg 1/4 缩放解码 + 控件内缓存);
          * 无头像传 NULL,行为与旧列表一致 */
-        lv_obj_t *row = dg_list_add_row(s_list, dg_avatar_get(rec.user_id, DG_AVATAR_THUMB),
+        lv_obj_t *row = dg_list_add_row(s_list, dg_avatar_get(s_rows[i].user_id, DG_AVATAR_THUMB),
                                         rowtxt, on_row_click);
         lv_obj_set_user_data(row, s_row_uids[i]);
         /* 编辑入口必须「看得见」:行点击=编辑是无形交互,用户找不到怎么改
@@ -82,7 +77,8 @@ static void refresh_list(void)
         snprintf(t, sizeof(t), "%s (%u)", _("用户管理"), total);
         lv_label_set_text(s_title, t);
     }
-    DG_LOGI("[USERS]", "list rows=%u/%u first=%s", n, total, n ? ids[0] : "-");
+    DG_LOGI("[USERS]", "list rows=%u/%u first=%s", n, total,
+            n ? s_rows[0].user_id : "-");
 }
 
 static void on_row_click(lv_event_t *e)

@@ -14,7 +14,7 @@
  *
  * 覆盖:采集→草稿(DB 不变)/ commit 落库(特征+头像)/ 重采→discard /
  * clear_face 同步清除 / 对不存在用户采集(当场失败)/ 删除连带丢草稿 /
- * 无草稿 commit 拒绝。
+ * 无草稿 commit 拒绝 / user_save 建用户与覆写语义(A1 UI「保存」收口)。
  */
 #include "dg_test.h"
 #include "event_bus.h"
@@ -230,6 +230,56 @@ int main(void)
     DG_CHECK(user_face_len("10001") == -1);
     DG_CHECK(user_avatar_len("10001") == -1);   /* 用户即删,头像随之消失 */
     DG_CHECK(!enroll_service_draft_active("10001"));
+
+    /* ---- ⑧ user_save 语义(A1:编辑页「保存」收口进 enroll 服务)----
+     * ADD 建用户(密码必设/auth_flags=FACE|PWD)/ EDIT 覆写字段(密码
+     * NULL=保持、ic_card 等未动字段不解绑)/ 错误码透传 / user_page 分页读 */
+    DG_CHECK(enroll_service_user_save("20001", "李四", DG_ROLE_NORMAL, NULL)
+             == DG_ERR_NO_PASSWORD);                 /* 无密码禁止建用户 */
+    DG_CHECK(enroll_service_user_get("20001", &rec) == DG_ERR_NOT_FOUND);
+    DG_CHECK(enroll_service_user_save("20001", "李四", DG_ROLE_NORMAL,
+                                      "abcd1234") == DG_OK);
+    DG_CHECK(enroll_service_user_get("20001", &rec) == DG_OK);
+    DG_CHECK(rec.auth_flags == (DG_AUTH_FACE | DG_AUTH_PWD)); /* 指纹/IC 不放开 */
+    DG_CHECK(db_verify_password("20001", "abcd1234", &rec) == DG_OK);
+
+    /* EDIT:覆写姓名/权限;密码 NULL = 保持;ic_card 以库内记录为基线不解绑 */
+    snprintf(rec.ic_card, sizeof(rec.ic_card), "CARD-20001");
+    DG_CHECK(db_user_update(&rec) == DG_OK);         /* 造绑卡基线(仅测内) */
+    DG_CHECK(enroll_service_user_save("20001", "李四丰", DG_ROLE_ADMIN, NULL)
+             == DG_OK);
+    DG_CHECK(enroll_service_user_get("20001", &rec) == DG_OK);
+    DG_CHECK(rec.role == DG_ROLE_ADMIN);
+    DG_CHECK(strcmp(rec.user_name, "李四丰") == 0);
+    DG_CHECK(strcmp(rec.ic_card, "CARD-20001") == 0); /* 零基线覆写会解绑卡 */
+    DG_CHECK(db_verify_password("20001", "abcd1234", &rec) == DG_OK);
+    DG_CHECK(enroll_service_user_save("20001", "李四丰", DG_ROLE_ADMIN,
+                                      "xyz98765") == DG_OK);          /* EDIT 改密 */
+    DG_CHECK(db_verify_password("20001", "xyz98765", &rec) == DG_OK);
+    DG_CHECK(db_verify_password("20001", "abcd1234", &rec)
+             == DG_ERR_WRONG_PASSWORD);
+    /* 错误码透传:已存在 uid = EDIT 覆写语义(不报重号);空姓名走
+     * db_user_add 权威校验,storage 码原样冒出 */
+    DG_CHECK(enroll_service_user_save("29999", "", DG_ROLE_NORMAL, "pass1234")
+             == DG_ERR_PARAM);
+    DG_CHECK(enroll_service_user_get("29999", &rec) == DG_ERR_NOT_FOUND);
+
+    DG_CHECK(enroll_service_user_save("20002", "王五", DG_ROLE_NORMAL,
+                                      "pass1234") == DG_OK);
+    DG_CHECK(enroll_service_user_save("20003", "赵六", DG_ROLE_BLACKLIST,
+                                      "pass1234") == DG_OK);
+    {
+        enroll_user_row_t rows[2];
+        uint32_t n = 0, total = 0;
+        DG_CHECK(enroll_service_user_page(rows, 2, &n, &total) == DG_OK);
+        DG_CHECK(n == 2 && total == 3);              /* 字典序首页 + 全量计数 */
+        DG_CHECK(strcmp(rows[0].user_id, "20001") == 0);
+        DG_CHECK(strcmp(rows[1].user_id, "20002") == 0);
+        DG_CHECK(strcmp(rows[0].user_name, "李四丰") == 0);
+        DG_CHECK(rows[0].role == DG_ROLE_ADMIN);
+        DG_CHECK(enroll_service_user_page(rows, ENROLL_USER_PAGE_MAX + 1,
+                                          &n, &total) == DG_ERR_PARAM);
+    }
 
     cleanup();
     DG_TEST_EXIT();

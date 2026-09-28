@@ -87,7 +87,12 @@ drv 做总线级薄封装;holder 管 modules / registry 管 services 的双注�
   - `page_user_edit` → `enroll_service` 人脸草稿读写(draft_active/draft_avatar/
     commit_draft/discard_draft/clear_face;2026-09-27 两段式草稿:保存动作在
     UI 同步路径里完成反馈,事件往返会把「保存退出」拆成两段交互;单槽 +
-    mutex,拍/提交不同时在飞的使用约定见 enroll_service.h)。
+    mutex,拍/提交不同时在飞的使用约定见 enroll_service.h);
+  - `page_user_edit`/`page_users`/`page_logs` → `enroll_service` 用户生命周期
+    读写(user_get/user_save/user_page/log_query;2026-09-28 A1 收口:UI 三页
+    不再直写 SQLite,全部改经 enroll 服务,错误码透传、UI err_text() 映射不变;
+    理由同上——保存回显与「保存退出」衔接需要同步返回码,事件往返会把一次
+    保存拆成两段交互)。
 
 ---
 
