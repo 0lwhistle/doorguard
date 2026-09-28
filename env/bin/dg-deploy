@@ -97,6 +97,9 @@ done
 
 echo "==> md5 核对(本地产物 vs 板上新槽)"
 local_md5=$(md5sum "$bin" | cut -d' ' -f1)
+# GNU md5sum 对含反斜杠的文件名(Windows 路径直传)按转义规范整行加 "\" 前缀,
+# cut 取第一列会把前缀带进哈希造成"传输损坏"误报(2026-09-28 Windows 侧推板实测)
+local_md5=${local_md5#\\}
 board_md5=$(sshx "md5sum /root/$new_slot" | cut -d' ' -f1)
 if [ "$local_md5" != "$board_md5" ]; then
     echo "md5 不一致!本地 $local_md5 板上 $board_md5 —— 传输损坏,请重推"
