@@ -16,7 +16,9 @@
 #include <string.h>
 #include <time.h>
 
-#define LOGS_PAGE_SIZE 8
+/* 一页条数按铺满屏算:列表高 ~1064,行高 60(font30+pad24)+行距 8,14 行恰好
+ * 一屏不滚动(2026-09-28 用户反馈:一页太短) */
+#define LOGS_PAGE_SIZE 14
 
 typedef enum {
     RANGE_1H = 0,
@@ -162,7 +164,9 @@ void page_logs_create(lv_obj_t *parent)
     lv_obj_align(s_title, LV_ALIGN_TOP_MID, 0, 20);
 
     s_list = dg_list_create(parent);
-    lv_obj_set_size(s_list, DG_SCREEN_W - 2 * DG_PAD, 760);
+    /* 高度铺满:标题带(80)到底部按钮区(DG_BTN_H+2*DG_PAD)之间全部给列表 */
+    lv_obj_set_size(s_list, DG_SCREEN_W - 2 * DG_PAD,
+                    DG_SCREEN_H - 80 - (DG_BTN_H + 2 * DG_PAD) - 8);
     lv_obj_align(s_list, LV_ALIGN_TOP_MID, 0, 80);
 
     lv_obj_t *range = dg_btn_create(parent, LV_SYMBOL_LIST, _("时间"));
