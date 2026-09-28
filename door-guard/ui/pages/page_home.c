@@ -131,13 +131,15 @@ void page_home_create(lv_obj_t *parent)
      * 主页不放返回键:管理员认证阶段仅数秒,5s 超时即回普通模式,取消通道
      * 是噪音(2026-09-28 用户拍板);验证流程的退出走弹窗自带「取消」 */
     s_clock = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_clock, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(s_clock, DG_FONT_TITLE, 0);
+    /* 尺寸随文字自适应:背景 chip 永远包得住当前字号,调字体档位不用再改魔数 */
+    lv_obj_set_size(s_clock, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_text_color(s_clock, DG_COL_BG(), 0);
     lv_obj_set_style_bg_color(s_clock, DG_COL_SCRIM(), 0);
     lv_obj_set_style_bg_opa(s_clock, DG_OPA_SCRIM, 0);
     lv_obj_set_style_radius(s_clock, DG_RADIUS, 0);
-    lv_obj_set_style_pad_hor(s_clock, 10, 0);
-    lv_obj_set_style_pad_ver(s_clock, 4, 0);
+    lv_obj_set_style_pad_hor(s_clock, 20, 0);
+    lv_obj_set_style_pad_ver(s_clock, 8, 0);
     lv_obj_align(s_clock, LV_ALIGN_TOP_LEFT, DG_PAD, DG_PAD);
     lv_obj_clear_flag(s_clock, LV_OBJ_FLAG_CLICKABLE);
 
@@ -162,7 +164,7 @@ void page_home_create(lv_obj_t *parent)
     lv_obj_set_style_radius(s_net_ip, DG_RADIUS, 0);
     lv_obj_set_style_pad_hor(s_net_ip, 10, 0);
     lv_obj_set_style_pad_ver(s_net_ip, 8, 0);
-    lv_obj_align(s_net_ip, LV_ALIGN_TOP_RIGHT, -DG_PAD - 40, DG_PAD);
+    lv_obj_align(s_net_ip, LV_ALIGN_TOP_RIGHT, -DG_PAD - 65, DG_PAD);
     lv_obj_clear_flag(s_net_ip, LV_OBJ_FLAG_CLICKABLE);
 
     s_status_timer = lv_timer_create(status_timer_cb, 1000, NULL);
