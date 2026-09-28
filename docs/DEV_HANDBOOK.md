@@ -268,3 +268,4 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 | ~~触摸输入:无输入节点~~ **已解决(2026-09-18)**:touch_evdev 接入,当前屏 fts_ts 工作正常;仅剩方向/灵敏度人工校验(偏转配 DG_TOUCH_* env) | 已闭环 | — |
 | 门控 GPIO:继电器引脚未确认(勿在未知引脚写 direction,已致板挂起一次) | 待硬件确认 | 引脚确认后 gpio_hal 对拍 |
 | /dev/fb0(rockchipdrmfb)mmap EBUSY | 已绕行 | 显示走 DRM dumb-buffer(lv_drivers) |
+| web 监听端口重启后 80/8080 不定(80 绑定失败即回退 8080,mongoose 启动竞态) | 待查 | 绑定重试或固定端口;web_test/文档端口以设备实际为准 |
