@@ -149,6 +149,7 @@ typedef struct {
     lv_obj_t *ta;
     lv_obj_t *err;                       /* 合法性提示行(红字,默认隐藏) */
     const char *(*validate)(const char *);
+    void (*format)(char *buf, size_t cap);
     void (*on_confirm)(void *, const char *);
     void (*on_cancel)(void *);
     void *ud;
@@ -158,8 +159,11 @@ typedef struct {
 
 static input_ctx_t s_input;
 
+/* 每次缓冲变化后:跑格式化钩子(点号固定类输入)→ 同步 textarea */
 static void input_sync(void)
 {
+    if (s_input.format)
+        s_input.format(s_input.buf, sizeof(s_input.buf));
     lv_textarea_set_text(s_input.ta, s_input.buf);
 }
 
@@ -235,15 +239,19 @@ void dg_popup_input(const dg_popup_input_cfg_t *cfg)
     /* 输入弹窗要放下键盘(数字 4 行 / 字母 4 行 + 页脚),卡片放宽到 660 */
     lv_obj_set_width(card, 660);
     s_input.validate = cfg->validate;
+    s_input.format = cfg->format;
     s_input.on_confirm = cfg->on_confirm;
     s_input.on_cancel = cfg->on_cancel;
     s_input.ud = cfg->ud;
     s_input.max_len = cfg->max_len;
-    /* 预填(编辑现值):同步进键盘缓冲与 textarea,确认取到的才是完整文本 */
+    /* 预填(编辑现值):同步进键盘缓冲与 textarea,确认取到的才是完整文本;
+     * 带格式钩子时预填也过一遍(如点号固定输入的补零形态) */
     if (cfg->initial && cfg->initial[0])
         snprintf(s_input.buf, sizeof(s_input.buf), "%s", cfg->initial);
     else
         s_input.buf[0] = '\0';
+    if (s_input.format)
+        s_input.format(s_input.buf, sizeof(s_input.buf));
 
     msg_create(card, cfg->title);
 

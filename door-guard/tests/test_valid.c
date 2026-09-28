@@ -7,6 +7,7 @@
 #include "dg_test.h"
 #include "valid.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static void t_uid(void)
@@ -69,11 +70,66 @@ static void t_hint(void)
     DG_CHECK(strcmp(dg_valid_hint(0), "取值非法") != 0 || 1);   /* 未知码不崩 */
 }
 
+static void t_ipv4(void)
+{
+    char buf[16];
+
+    printf("[V5] 点分 IPv4:4 段 0~255、段长 ≤3、无空段/缺段/多段\n");
+    DG_CHECK(dg_valid_ipv4("192.168.1.10") == DG_OK);
+    DG_CHECK(dg_valid_ipv4("255.255.255.255") == DG_OK);
+    DG_CHECK(dg_valid_ipv4("0.0.0.0") == DG_OK);          /* 形态合法(语义另判) */
+    DG_CHECK(dg_valid_ipv4("192.168.001.010") == DG_OK);  /* 前导零放行 */
+    DG_CHECK(dg_valid_ipv4("256.1.1.1") == DG_ERR_PARAM); /* 段值越界 */
+    DG_CHECK(dg_valid_ipv4("1.2.3") == DG_ERR_PARAM);     /* 缺段 */
+    DG_CHECK(dg_valid_ipv4("1.2.3.4.5") == DG_ERR_PARAM); /* 多段 */
+    DG_CHECK(dg_valid_ipv4("1..2.3") == DG_ERR_PARAM);    /* 空段 */
+    DG_CHECK(dg_valid_ipv4("1.2.3.") == DG_ERR_PARAM);    /* 尾点=空段 */
+    DG_CHECK(dg_valid_ipv4("1234.1.1.1") == DG_ERR_PARAM);/* 段长 >3 */
+    DG_CHECK(dg_valid_ipv4("a.b.c.d") == DG_ERR_PARAM);   /* 非数字 */
+    DG_CHECK(dg_valid_ipv4("") == DG_ERR_PARAM);
+    DG_CHECK(dg_valid_ipv4(NULL) == DG_ERR_PARAM);
+
+    printf("[V6] 规范化:去段内前导零;非法输入不动 out\n");
+    DG_CHECK(dg_ipv4_normalize("192.168.001.010", buf, sizeof(buf)) &&
+             strcmp(buf, "192.168.1.10") == 0);
+    DG_CHECK(dg_ipv4_normalize("0.0.0.0", buf, sizeof(buf)) &&
+             strcmp(buf, "0.0.0.0") == 0);
+    DG_CHECK(!dg_ipv4_normalize("1.2.3.4.5", buf, sizeof(buf)));
+    DG_CHECK(!dg_ipv4_normalize("", buf, sizeof(buf)));
+    DG_CHECK(!dg_ipv4_normalize(NULL, buf, sizeof(buf)));
+
+    printf("[V7] 补零形态(点号固定输入预填):12 位;空入空出\n");
+    DG_CHECK(dg_ipv4_pad("192.168.1.10", buf, sizeof(buf)) &&
+             strcmp(buf, "192.168.001.010") == 0);
+    DG_CHECK(dg_ipv4_pad("1.2.3.4", buf, sizeof(buf)) &&
+             strcmp(buf, "001.002.003.004") == 0);
+    DG_CHECK(dg_ipv4_pad("", buf, sizeof(buf)) && buf[0] == '\0');
+    DG_CHECK(!dg_ipv4_pad("300.1.1.1", buf, sizeof(buf)));
+
+    printf("[V8] 点号自动补全(用户只敲数字,3 位一组机器插点)\n");
+    snprintf(buf, sizeof(buf), "%s", "192168001010");
+    dg_ipv4_autodot(buf, sizeof(buf));
+    DG_CHECK(strcmp(buf, "192.168.001.010") == 0);
+    snprintf(buf, sizeof(buf), "%s", "192168");
+    dg_ipv4_autodot(buf, sizeof(buf));
+    DG_CHECK(strcmp(buf, "192.168") == 0);                /* 未输满不补尾点 */
+    snprintf(buf, sizeof(buf), "%s", "192.168.001.010");
+    dg_ipv4_autodot(buf, sizeof(buf));
+    DG_CHECK(strcmp(buf, "192.168.001.010") == 0);        /* 已有分隔=恒等 */
+    snprintf(buf, sizeof(buf), "%s", "192x168");          /* 非数字被忽略 */
+    dg_ipv4_autodot(buf, sizeof(buf));
+    DG_CHECK(strcmp(buf, "192.168") == 0);
+    snprintf(buf, sizeof(buf), "%s", "1234567890123");    /* 13 位截到 12 */
+    dg_ipv4_autodot(buf, sizeof(buf));
+    DG_CHECK(strcmp(buf, "123.456.789.012") == 0);        /* 展示层不判值 */
+}
+
 int main(void)
 {
     t_uid();
     t_name();
     t_pwd();
     t_hint();
+    t_ipv4();
     DG_TEST_EXIT();
 }

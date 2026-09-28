@@ -180,5 +180,6 @@
   "当前无网络地址": "No Network Address",
   "静态地址应用后,上位机请改用新地址访问": "After applying static IP, use the new address to reach the web UI",
   "默认网关": "Default Gateway",
-  "空格": "Space"
+  "空格": "Space",
+  "请输满 12 位数字,点号自动补全": "Enter all 12 digits; dots are added automatically"
 }

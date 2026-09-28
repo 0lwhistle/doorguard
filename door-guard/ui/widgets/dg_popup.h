@@ -27,6 +27,9 @@ typedef struct {
     bool        start_alpha;        /**< 键盘初始页:false=数字(ID/密码) true=字母(姓名) */
     uint16_t    max_len;            /**< 输入上限(0 = 不额外限制) */
     const char *initial;            /**< 预填文本(NULL/空 = 空输入;编辑现值用) */
+    /** 显示格式化(可选,点号固定类输入用):每次键入/删除后、预填时对
+     *  缓冲就地重排(如 dg_ipv4_autodot 自动插点号,用户只敲数字) */
+    void (*format)(char *buf, size_t cap);
     /** 合法性校验:返回 NULL 通过;非 NULL 为**已翻译**的错误文案,
      *  弹窗内红字提示且不提交(用户可继续修改) */
     const char *(*validate)(const char *text);

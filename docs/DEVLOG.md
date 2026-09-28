@@ -25,6 +25,18 @@ PENDING_DECISIONS 12 项按用户拍板逐条落地,分六批提交、每批推�
    注明;B4 web_auth 语义注;C1 events.h 死契约三类状态注;B3 保持现状;
    C3 搁置(stop+start 契约待定);A2/A3 白名单登记、PENDING_DECISIONS
    全部标注拍板结果。
+7. **网络配置点号固定输入(续)**:校验本已三层齐备(UI v_ip/v_mask/v_gw
+   初检 → net_cfg_validate 权威(web 同源)→ apply 复检),零缺;键盘无
+   点号键的输入 UX 重做——proto/valid 新增 dg_valid_ipv4/dg_ipv4_pad/
+   normalize/autodot 四件套(host 可测,test_valid 补 4 组判定表);
+   dg_popup_input 加 format 钩子(每次键入/删除/预填后跑);net_set 三行
+   改"只敲数字":预填补零 12 位、autodot 每 3 位自动插点、确认门禁恰 12
+   位、存盘前去前导零(**规范化必须**:net 侧 inet_pton 类解析拒 "001")。
+   板上实测:弹窗预填/删 2 敲 2 点号自动保持/取消不改值全过。
+- **坑**:①py heredoc 经 Git Bash 转义被吃(`\\n`→真换行、`\\0`→真 NUL,
+  文件变二进制)——含转义的生成内容一律 Write 落 .py + chr(92) 组装;
+  ②设备页 9-27 改版后行距变了,走查坐标按旧截图点会打错行(网络配置行
+  现在 y≈598),先截一张现布局再定坐标。
 - **坑**:①走查注入库重编踩 MSYS 路径改写(`wsl.exe bash -c '单引号 $var'`
   被 Git Bash 吃掉、`/mnt/...` 参数被加前缀)——一律 `MSYS_NO_PATHCONV=1`
   + 脚本文件方式;②walk_login v7 的 `sleep 8` 超方式选择 5s 窗口(登录静默

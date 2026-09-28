@@ -38,6 +38,27 @@ int dg_valid_pwd(const char *pwd);
 /** 校验失败原因(简短中文说明,写入日志/上位机响应;不含 i18n) */
 const char *dg_valid_hint(int err);
 
+/* ---- 点分 IPv4(网络配置输入;2026-09-28 点号固定输入配套)----
+ * 形态规则与 modules/net 的 net_cfg_validate 语义对齐(4 段 0~255);对象段
+ * 取值(0.x/环回/链路本地/掩码连续性)属网络语义,仍由调用方按用途判 */
+
+/** 点分 IPv4 形态:恰好 4 段、每段 1~3 位数字、段值 ≤255(允许段内前导零,
+ *  规范化见 dg_ipv4_normalize)。DG_OK / DG_ERR_PARAM */
+int dg_valid_ipv4(const char *s);
+
+/** 规范化:去段内前导零("192.168.001.010" → "192.168.1.10")。
+ *  非法输入返回 false 且不改写 out */
+bool dg_ipv4_normalize(const char *in, char *out, size_t cap);
+
+/** → 12 位补零形态("192.168.1.10" → "192.168.001.010";空 in → 空 out,
+ *  网关可空)。点号固定输入弹窗的预填形态;非法输入返回 false 且不改写 */
+bool dg_ipv4_pad(const char *in, char *out, size_t cap);
+
+/** 点号固定输入的显示格式化(就地改写、任何输入安全):抽取数字(≤12 位)
+ *  按 3 位一组重插点号——用户只敲数字,点号由机器补。输入弹窗在每次
+ *  键入/删除后调用(dg_popup_input 的 format 钩子) */
+void dg_ipv4_autodot(char *buf, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

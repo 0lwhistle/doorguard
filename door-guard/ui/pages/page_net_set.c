@@ -17,6 +17,7 @@
 #include "i18n.h"
 #include "modules/net/net_info.h"
 #include "theme.h"
+#include "valid.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_edit_nav.h"
 #include "widgets/dg_popup.h"
@@ -32,35 +33,32 @@ static bool s_busy;                            /* 应用进行中 */
 static lv_obj_t *s_val_mode, *s_val_ip, *s_val_mask, *s_val_gw;
 static lv_obj_t *s_addr_line, *s_btn_apply;
 
-/* ---- 点分地址校验(UI 侧初检;最终以 net_cfg_validate 为准) ---- */
+/* ---- 点分地址校验(UI 侧初检;最终以 net_cfg_validate 为准)----
+ * 形态规则在 proto/valid(dg_valid_ipv4,一处定义);对象段取值(IP 不得为
+ * 0/环回/链路本地,掩码连续,网关可空非 0)是网络语义,本页判 */
 
-static bool parse_ipv4(const char *s)
+static bool quad_vals(const char *s, unsigned v[4])
 {
-    int a, b, c, d;
-    char tail[2];
-    if (!s || sscanf(s, "%d.%d.%d.%d%1s", &a, &b, &c, &d, tail) != 4)
-        return false;
-    return a >= 0 && a <= 255 && b >= 0 && b <= 255 &&
-           c >= 0 && c <= 255 && d >= 0 && d <= 255;
+    return dg_valid_ipv4(s) == DG_OK &&
+           sscanf(s, "%u.%u.%u.%u", &v[0], &v[1], &v[2], &v[3]) == 4;
 }
 
 static bool mask_continuous(const char *s)
 {
-    int a, b, c, d;
-    if (!parse_ipv4(s) || sscanf(s, "%d.%d.%d.%d", &a, &b, &c, &d) != 4)
+    unsigned v[4];
+    if (!quad_vals(s, v))
         return false;
-    uint32_t v = ((uint32_t)a << 24) | ((uint32_t)b << 16) |
-                 ((uint32_t)c << 8) | (uint32_t)d;
-    if (v == 0)
-        return false;
-    return v == 0xFFFFFFFFu || (uint32_t)(v + (v & (~v + 1u))) == 0;
+    uint32_t m = (v[0] << 24) | (v[1] << 16) | (v[2] << 8) | v[3];
+    /* 连续性:高 1 低 0 ⟺ m 加最低置位位回绕到 0(net_cfg_mask_plen 同款) */
+    return m != 0 && (uint32_t)(m + (m & (~m + 1u))) == 0;
 }
 
 static const char *v_ip(const char *t)
 {
-    if (!parse_ipv4(t) || !strncmp(t, "0.", 2) || !strncmp(t, "127.", 4) ||
-        !strncmp(t, "169.254.", 8))
-        return _("IP 不合法");
+    unsigned v[4];
+    if (!quad_vals(t, v) || v[0] == 0 || v[0] == 127 ||
+        (v[0] == 169 && v[1] == 254))
+        return _("IP 不合法");                   /* 0.x/环回/链路本地无意义 */
     return NULL;
 }
 
@@ -73,9 +71,45 @@ static const char *v_gw(const char *t)
 {
     if (t[0] == '\0')
         return NULL;                           /* 网关可空 = 不设默认路由 */
-    if (!parse_ipv4(t) || !strcmp(t, "0.0.0.0"))
+    unsigned v[4];
+    if (!quad_vals(t, v) || (v[0] | v[1] | v[2] | v[3]) == 0)
         return _("网关不合法");
     return NULL;
+}
+
+/* ---- 点号固定输入(键盘无点号键,用户只敲数字)----
+ * 预填=现值补零成 12 位;键入中 dg_ipv4_autodot 每 3 位自动插点号;
+ * 确认门禁=恰好 12 位,存盘前规范化去前导零(否则 inet_pton 类解析拒收) */
+
+static bool input_complete(const char *t)
+{
+    int n = 0;
+    for (const char *p = t; *p; p++)
+        n += (*p >= '0' && *p <= '9');
+    return n == 12;
+}
+
+static const char *v_ip_input(const char *t)
+{
+    if (!input_complete(t))
+        return _("请输满 12 位数字,点号自动补全");
+    return v_ip(t);
+}
+
+static const char *v_mask_input(const char *t)
+{
+    if (!input_complete(t))
+        return _("请输满 12 位数字,点号自动补全");
+    return v_mask(t);
+}
+
+static const char *v_gw_input(const char *t)
+{
+    if (t[0] == '\0')
+        return NULL;                           /* 清空 = 不设网关 */
+    if (!input_complete(t))
+        return _("请输满 12 位数字,点号自动补全");
+    return v_gw(t);
 }
 
 /* ---- 草稿与 dirty ---- */
@@ -135,23 +169,28 @@ static void on_mode(lv_event_t *e)
     dg_popup_choice(_("接入方式"), opts, 2, draft_set_static, NULL, NULL);
 }
 
-static void edit_ip(void *ud, const char *text);
 static void edit_mask(void *ud, const char *text);
 static void edit_gw(void *ud, const char *text);
 
 static void edit_ip(void *ud, const char *text)
 {
     (void)ud;
-    snprintf(s_ip, sizeof(s_ip), "%s", text);
+    char norm[16];
+    if (!dg_ipv4_normalize(text, norm, sizeof(norm)))
+        snprintf(norm, sizeof(norm), "%s", text);  /* 校验已拦,防御保底 */
+    snprintf(s_ip, sizeof(s_ip), "%s", norm);
     refresh_rows();
 }
 
 static void on_ip(lv_event_t *e)
 {
     (void)e;
+    char init[16];
+    dg_ipv4_pad(s_ip, init, sizeof(init));     /* 现值 → 12 位补零(点号固定) */
     const dg_popup_input_cfg_t cfg = {
         .title = _("IP 地址"), .start_alpha = false, .max_len = 15,
-        .initial = s_ip, .validate = v_ip, .on_confirm = edit_ip,
+        .initial = init, .format = dg_ipv4_autodot,
+        .validate = v_ip_input, .on_confirm = edit_ip,
     };
     dg_popup_input(&cfg);
 }
@@ -159,10 +198,12 @@ static void on_ip(lv_event_t *e)
 static void on_mask(lv_event_t *e)
 {
     (void)e;
+    char init[16];
+    dg_ipv4_pad(s_mask, init, sizeof(init));
     const dg_popup_input_cfg_t cfg = {
         .title = _("子网掩码"), .start_alpha = false, .max_len = 15,
-        .initial = s_mask, .validate = v_mask,
-        .on_confirm = edit_mask,
+        .initial = init, .format = dg_ipv4_autodot,
+        .validate = v_mask_input, .on_confirm = edit_mask,
     };
     dg_popup_input(&cfg);
 }
@@ -170,17 +211,22 @@ static void on_mask(lv_event_t *e)
 static void edit_mask(void *ud, const char *text)
 {
     (void)ud;
-    snprintf(s_mask, sizeof(s_mask), "%s", text);
+    char norm[16];
+    if (!dg_ipv4_normalize(text, norm, sizeof(norm)))
+        snprintf(norm, sizeof(norm), "%s", text);
+    snprintf(s_mask, sizeof(s_mask), "%s", norm);
     refresh_rows();
 }
 
 static void on_gw(lv_event_t *e)
 {
     (void)e;
+    char init[16];
+    dg_ipv4_pad(s_gw, init, sizeof(init));     /* 空 = 清网关语义保持 */
     const dg_popup_input_cfg_t cfg = {
         .title = _("默认网关"), .start_alpha = false, .max_len = 15,
-        .initial = s_gw, .validate = v_gw,
-        .on_confirm = edit_gw,
+        .initial = init, .format = dg_ipv4_autodot,
+        .validate = v_gw_input, .on_confirm = edit_gw,
     };
     dg_popup_input(&cfg);
 }
@@ -188,7 +234,10 @@ static void on_gw(lv_event_t *e)
 static void edit_gw(void *ud, const char *text)
 {
     (void)ud;
-    snprintf(s_gw, sizeof(s_gw), "%s", text);
+    char norm[16];
+    if (!dg_ipv4_normalize(text, norm, sizeof(norm)))
+        snprintf(norm, sizeof(norm), "%s", text);  /* 空/异常原样存 */
+    snprintf(s_gw, sizeof(s_gw), "%s", norm);
     refresh_rows();
 }
 
