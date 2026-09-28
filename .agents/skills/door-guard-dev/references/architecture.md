@@ -33,9 +33,11 @@ UI 层        ui/ 页面与弹窗(LVGL;PC 模拟器 + 板上双构建)
 ```
 
 - 模块间只经 `proto/` 的消息队列与事件总线通信;服务层线程化,互不直接调用
-  (例外:只读直调登记制,**以 proposal §1 登记表为准**,现五条:database 特征
-  快照、config 读取、头像存取、jpeg 编解码、net_info 只读;enroll→vision
-  特征库增删是写路径直调,登记与否待拍板,见 docs/PENDING_DECISIONS.md A3)
+  (例外:直调登记制,**以 proposal §1 登记表为准**——只读五条:database 特征
+  快照、config 读取、头像存取、jpeg 编解码、net_info 只读;写路径三条:
+  UI→enroll 用户生命周期(A1 收口)、UI 设置页→config 同步读写(A2 拍板
+  方案 B)、enroll→vision 特征库增删(A3 拍板方案 A,2026-09-28);另有
+  UI 出站动作一律经 ui/bridge(C4 收口,页面零 EVENT_BUS_PUBLISH))
 - 事件命名:`EV_<域>_<动作>`(如 `EV_AUTH_RESULT`、`EV_ENROLL_DONE`、`EV_NET_OTA_PROGRESS`)
 - 新建模块步骤:本文档登记职责 → proto/ 定义接口与事件 → 实现 → 测试 → README + 使用示例
 - **netcore 登记(2026-09-22)**:modules/net/netcore,mongoose 7.23 胶水层,零业务;

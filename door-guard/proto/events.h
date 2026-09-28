@@ -31,7 +31,10 @@ extern "C" {
 /* AUTH:认证结果与门控(access_service 唯一出口) */
 #define EV_AUTH_RESULT       EV_DEF(DG_MODULE_ID_AUTH, 0x0001)  /**< 每次验证动作(成功/失败) */
 #define EV_AUTH_DOOR_OPEN    EV_DEF(DG_MODULE_ID_AUTH, 0x0002)  /**< 开门指令生效 */
-#define EV_AUTH_DOOR_CLOSE   EV_DEF(DG_MODULE_ID_AUTH, 0x0003)  /**< 开门时长到,门已闭合 */
+/* 契约状态(C1 盘点,2026-09-28):下面这些事件当前无发布方或无订阅方,
+ * 契约名保留、注释标明原因;接入/取代时回填,不删号(防第三方/上位机
+ * 已按 ID 对接)。详见 docs/PENDING_DECISIONS.md C1 拍板。 */
+#define EV_AUTH_DOOR_CLOSE   EV_DEF(DG_MODULE_ID_AUTH, 0x0003)  /**< [死契约·被取代] 电平型继电器由 relay_door_pulse 内部拉低复位,无独立闭合事件;脉冲型继电器接入时启用 */
 
 /* VISION:检测/匹配(vision → access/UI) */
 #define EV_VISION_FACE_BOX   EV_DEF(DG_MODULE_ID_VISION, 0x0001) /**< 人脸框状态(节流) */
@@ -42,22 +45,22 @@ extern "C" {
 #define EV_VISION_QUALITY    EV_DEF(DG_MODULE_ID_VISION, 0x0006) /**< 人脸质量判定(拍摄页实时提示) */
 
 /* SYSTEM:系统/装配层(看门狗 → UI/web 上位机) */
-#define EV_SYS_SERVICE_STATE EV_DEF(DG_MODULE_ID_SYSTEM, 0x0010) /**< 服务状态变化(降级/禁用通知) */
+#define EV_SYS_SERVICE_STATE EV_DEF(DG_MODULE_ID_SYSTEM, 0x0010) /**< [预留·有发布无订阅] 看门狗已在发;待 UI 降级提示/上位机接入订阅 */
 #define EV_SYS_REBOOT        EV_DEF(DG_MODULE_ID_SYSTEM, 0x0011) /**< 设备重启请求(ev_sys_reboot_t) */
 
 /* CAPTURE:取流状态(capture → UI/服务) */
-#define EV_CAPTURE_STATE     EV_DEF(DG_MODULE_ID_CAPTURE, 0x0001) /**< 就绪/断流 */
+#define EV_CAPTURE_STATE     EV_DEF(DG_MODULE_ID_CAPTURE, 0x0001) /**< [预留] 就绪/断流;待上位机/降级提示接入 */
 
 /* ENROLL:录入编排(UI → enroll → UI) */
 #define EV_ENROLL_REQUEST    EV_DEF(DG_MODULE_ID_ENROLL, 0x0001) /**< 录入/删除请求 */
-#define EV_ENROLL_PROGRESS   EV_DEF(DG_MODULE_ID_ENROLL, 0x0002) /**< 采集进度 */
+#define EV_ENROLL_PROGRESS   EV_DEF(DG_MODULE_ID_ENROLL, 0x0002) /**< [死契约·被取代] 两段式草稿后进度语义由 EV_ENROLL_RESULT(草稿就绪/终态)承载 */
 #define EV_ENROLL_RESULT     EV_DEF(DG_MODULE_ID_ENROLL, 0x0003) /**< 终态(含错误码) */
 
 /* NET:网络侧(net → UI/web) */
-#define EV_NET_STATE         EV_DEF(DG_MODULE_ID_NET, 0x0001)    /**< 联网状态变化 */
+#define EV_NET_STATE         EV_DEF(DG_MODULE_ID_NET, 0x0001)    /**< [死契约·被取代] 被 EV_NET_ADDR(地址快照监视)取代 */
 #define EV_NET_NTP_RESULT    EV_DEF(DG_MODULE_ID_NET, 0x0002)    /**< NTP 校正结果 */
 #define EV_NET_NTP_TRIGGER   EV_DEF(DG_MODULE_ID_NET, 0x0004)    /**< 请求校正一次(菜单按钮→net) */
-#define EV_NET_OTA_PROGRESS  EV_DEF(DG_MODULE_ID_NET, 0x0003)    /**< OTA 进度/终态 */
+#define EV_NET_OTA_PROGRESS  EV_DEF(DG_MODULE_ID_NET, 0x0003)    /**< [预留] OTA 进度/终态;本打算给上位机,WS 未接 */
 /* web 上位机账号管理(设备页 ↔ net):UI 不碰凭据存储,只发请求、收状态 */
 #define EV_NET_WEB_STATE_REQ EV_DEF(DG_MODULE_ID_NET, 0x0005)    /**< UI→net:请回报 web 状态 */
 #define EV_NET_WEB_STATE     EV_DEF(DG_MODULE_ID_NET, 0x0006)    /**< net→UI:web 运行状态快照 */
@@ -67,13 +70,14 @@ extern "C" {
 #define EV_NET_CFG_SET       EV_DEF(DG_MODULE_ID_NET, 0x000A)    /**< UI→net:应用网络配置(设备端屏幕设置) */
 #define EV_NET_CFG_RESULT    EV_DEF(DG_MODULE_ID_NET, 0x000B)    /**< net→UI:网络配置应用结果 */
 
-/* HAL:硬件事件(HAL → 服务) */
-#define EV_FINGER_STATUS     EV_DEF(DG_MODULE_ID_HAL, 0x0001)    /**< 指纹按压/释放/错误 */
-#define EV_IC_CARD           EV_DEF(DG_MODULE_ID_HAL, 0x0002)    /**< 读到卡号 */
-#define EV_DOOR_STATE        EV_DEF(DG_MODULE_ID_HAL, 0x0003)    /**< 门磁/门控反馈 */
+/* HAL:硬件事件(HAL → 服务;指纹/IC/门磁驱动未接,事件两端皆死,
+ * 契约保留待硬件接入——2026-09-27 硬件接入方案的对接面) */
+#define EV_FINGER_STATUS     EV_DEF(DG_MODULE_ID_HAL, 0x0001)    /**< [死契约·待硬件] 指纹按压/释放/错误 */
+#define EV_IC_CARD           EV_DEF(DG_MODULE_ID_HAL, 0x0002)    /**< [死契约·待硬件] 读到卡号 */
+#define EV_DOOR_STATE        EV_DEF(DG_MODULE_ID_HAL, 0x0003)    /**< [死契约·待硬件] 门磁/门控反馈 */
 
 /* UI:待机与页面(UI 内部页面管理用) */
-#define EV_UI_STANDBY        EV_DEF(DG_MODULE_ID_UI, 0x0010)     /**< 进入/退出待机 */
+#define EV_UI_STANDBY        EV_DEF(DG_MODULE_ID_UI, 0x0010)     /**< [死契约·被取代] 待机切换由 FSM 驱动 standby 页(经 EV_UI_GOTO_PAGE)+ 主页倒计时实现 */
 
 /* ---- UI ↔ 服务请求/回执(服务层→UI 的"请弹窗/请切页",UI 只渲染不决策) ---- */
 #define EV_UI_BTN            EV_DEF(DG_MODULE_ID_UI, 0x0020)     /**< 按钮:菜单/验证/返回 */

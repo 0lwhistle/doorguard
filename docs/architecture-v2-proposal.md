@@ -92,7 +92,15 @@ drv 做总线级薄封装;holder 管 modules / registry 管 services 的双注�
     读写(user_get/user_save/user_page/log_query;2026-09-28 A1 收口:UI 三页
     不再直写 SQLite,全部改经 enroll 服务,错误码透传、UI err_text() 映射不变;
     理由同上——保存回显与「保存退出」衔接需要同步返回码,事件往返会把一次
-    保存拆成两段交互)。
+    保存拆成两段交互);
+  - `page_access_set`/`page_device`/`page_face_set` 等设置页 → `services/config`
+    同步读写(cfg_get/cfg_set;2026-09-28 A2 拍板方案 B 登记):cfg 双缓冲
+    快照线程安全,设置页「保存即读即显」的交互用同步调用最简,发事件异步
+    回执反而把一次保存拆两段。**仅限设置页保存路径**;
+  - `enroll_service` → `vision_service` 特征库写直调(library_add/remove;
+    2026-09-28 A3 拍板方案 A 登记):commit/clear/delete 的事务序是 DB 先行、
+    内存库随后、失败反向还原,回滚判断依赖同步返回码——异步事件回执会把
+    回滚逻辑拆到两处,更难验证(返回值已检查,0d27f95)。
 
 ---
 

@@ -30,6 +30,9 @@ static const char *TAG = "[WEB.AUTH]";
 #define DEFAULT_PWD        "admin"
 #define SALT_LEN           16
 #define HASH_LEN           32
+/* 登录风控与设备侧 pwd_fail_lock_n/s(config 可调)数值相同但语义独立
+ * (B4 拍板 2026-09-28):这里锁的是 web 面 token/IP,设备侧锁的是门禁
+ * 密码验证——一防爆破上位机、一防猜门禁密码,两套计数互不相干,勿统一 */
 #define FAIL_LIMIT         5      /* 连错次数阈值 */
 #define LOCK_SECONDS       60     /* 锁定时长 */
 
