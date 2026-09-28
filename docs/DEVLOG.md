@@ -4,6 +4,40 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-28(续)十二项拍板决策全部执行(36/36 绿,板上 B 槽)
+
+PENDING_DECISIONS 12 项按用户拍板逐条落地,分六批提交、每批推板验收:
+1. **A1(9669af0)**:UI 直写 SQLite 收口进 enroll 服务——补 user_save(ADD
+   建用户[密码必设/auth_flags=FACE|PWD]/EDIT 覆写,以库内记录为基线防
+   ic/auth_flags 被 update 覆盖语义清掉)+ user_get/user_page/log_query;
+   三页删 storage.h;板上走查三页实测(用户管理/编辑页/记录查询截图)。
+2. **A4(24c899c)**:modules/relay 包装 gpio_hal——access 删 drv 直调、
+   main 装配注册+safe_shutdown 走 relay_reset;宿主 test_relay 降级路径;
+   板上 `[RELAY] 继电器就绪 gpio0`。
+3. **C2(c5fd771)**:components/timeutil——now_ms(REALTIME)/now_mono_ms
+   (MONOTONIC)显式分名,6 文件 7 处 static 定义收口,行为零变化。
+4. **C4(12232f4)**:bridge 补类型化出站 API(ntp_sync/reboot/net_cfg_set/
+   enroll_request),六处页面直发收口,UI 层只剩 bridge.c 触总线;板上
+   登录→菜单→返回实测。
+5. **B1(1a4e8aa)**:待机检测降帧——DETECT_ONLY 无人 10s 后 ~10fps,人脸/
+   模式切走即满速;**板上待机 CPU 19~20% → 8~9%(-11pp)**,唤醒无感。
+6. **B2/B3/B4/C1/C3(64ea106)**:B2 核对两入口默认 FACE|PWD 无偏差+spec
+   注明;B4 web_auth 语义注;C1 events.h 死契约三类状态注;B3 保持现状;
+   C3 搁置(stop+start 契约待定);A2/A3 白名单登记、PENDING_DECISIONS
+   全部标注拍板结果。
+- **坑**:①走查注入库重编踩 MSYS 路径改写(`wsl.exe bash -c '单引号 $var'`
+  被 Git Bash 吃掉、`/mnt/...` 参数被加前缀)——一律 `MSYS_NO_PATHCONV=1`
+  + 脚本文件方式;②walk_login v7 的 `sleep 8` 超方式选择 5s 窗口(登录静默
+  失败回主页),按 walk_pages3 修正为 `sleep 2`;③**菜单 15s 无操作自动回
+  主页会打断慢节奏分步走查**——多页走查必须单趟脚本 15s 内完成;④帧导出
+  在双缓冲交替时可能取旧帧,取证以 [PAGE] 导航日志为准、截图为辅。
+- **走查环境**:注入库源码在 tools/board-walk/,WSL 编译(dg-toolchain)
+  → 经 /mnt/c 中转 scp 上板 /root/dg_walk/(持久);walk_start/walk_stop
+  切走查/生产模式(板上也已就位),流程见 DEV_HANDBOOK §7.3。
+- **下一步**:真人标定活体阈值、质量阈值板上标定、指纹/IC 硬件接入、
+  C3 stop+start 契约立项。
+
+---
 ## 2026-09-28 全库代码审查+性能优化+文档对齐(34/34 绿,板上 A 槽 0d27f95 构建)
 
 两个子代理(风格扫描+事件契约核查)+人工精读核心链路,产出分三批落地:

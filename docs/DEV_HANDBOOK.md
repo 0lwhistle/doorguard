@@ -210,10 +210,13 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
   (/mnt/c/...);git bash 的 chmod 对 NTFS 无效,拷贝后缀改 .exe 即可过 dg-deploy
   的可执行检查,export DOORGUARD_BIN=C:/...(dg-new.exe)
 - CRLF 大坑(实测致 reboot 后应用起不来):Windows 工作区 core.autocrlf=true,
-  shell 脚本 checkout 即 CRLF,scp 上板后 shebang 带  无法执行(报 required file
+  shell 脚本 checkout 即 CRLF,scp 上板后 shebang 带 
+ 无法执行(报 required file
   not found,且 /var/log/door-guard.log 都不会生成)。已三重防护:.gitattributes
   强制 board/rootfs-overlay、env/bin、*.sh 为 LF;dg-deploy 上传 S60 前强制
-  tr -d '';手工推文件一律先 tr -d ''。推板后务必重启一次验证 S60 可执行
+  tr -d '
+';手工推文件一律先 tr -d '
+'。推板后务必重启一次验证 S60 可执行
 - git bash 的 /tmp 与 WSL 的 /tmp 是两个目录;跨侧中转文件放 /mnt/c 真实路径
 - dg-build 链接失败时 build/door-guard 保持旧产物,推板前核对版本串/md5
 
@@ -225,6 +228,32 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
   保底;应用层 cur_config.json 的 net_mode/net_ip/net_mask/net_gw 开机由 net_cfg
   服务应用(启动最晚,实际生效)。任何切回 DHCP 的操作都会让地址释放且拿不回 =
   失联,只能串口/人工恢复;web 端与设备端做 DHCP 切换前须二次确认
+
+### 7.3 板上 UI 走查环境(2026-09-28 实测定版)
+
+- **组件**:tools/board-walk/(注入库源码 dg_touch_inject.c、取帧脚本、
+  perf 工具);板上持久目录 /root/dg_walk/(注入库 .so + walk 脚本),
+  WSL 侧 /root/dg_walk/(历史截图/编译产物)。
+- **搭建**:注入库在 WSL 用 dg-toolchain 编(`aarch64-none-linux-gnu-gcc
+  --sysroot=$SYSROOT -shared -fPIC -O2`,细节见 tools/board-walk/README),
+  经 /mnt/c 中转 scp 上板(WSL 到板网络不通)。带 `DG_WALK_DUMP_DIR=
+  /root/dg_walk LD_PRELOAD=/root/dg_walk/dg_touch_inject_v4.so` 拉起应用
+  即走查模式;触摸命令写 /tmp/dg_touch(`P x y`/`R` 逐行追加),帧导出
+  `touch /tmp/dg_shot`。
+- **走查↔生产切换**:板上 /root/dg_walk/walk_start.sh(停 S60→重拉
+  rkaiq→带注入拉应用)/ walk_stop.sh(killall→S60 正常拉起),两脚本
+  已随 2026-09-28 会话放板上。
+- **脚本时序铁律(2026-09-28 实测)**:①方式选择弹窗 5s 超时——UID 确认
+  到点「密码」间隔用 `sleep 2`(walk_login v7 的 sleep 8 会让登录静默
+  失败回主页,walk_pages3 才是对的);②**菜单 15s 无操作自动回主页**——
+  多页走查必须单趟脚本内一口气完成,ssh 分步交互必被超时打断;③弹窗键盘
+  键入全速写(tap 后 sleep ≤0.05)。
+- **取证以日志为准**:`grep '\[PAGE\]' /var/log/door-guard.log` 是导航
+  真值(/tmp/dg_inject.log 是注入时间线);帧导出在 DIRECT 双缓冲交替时
+  可能取到旧帧,截图与日志矛盾时信日志。raw→png 用 PIL
+  `Image.frombytes("RGB",(720,1280),data,"raw","BGRX")` 半尺寸直读。
+- **测试账号**:10001/123456(role=1 管理员,auth_flags=5)在板库长期
+  保留供走查登录。
 
 
 ## 8. 已知问题与待办
