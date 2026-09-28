@@ -195,7 +195,7 @@ void page_web_set_create(lv_obj_t *parent)
                                BTN_Y + 2 * (DG_BTN_H + DG_PAD) + 10);
     lv_obj_set_style_text_color(hint, DG_COL_TEXT(), 0);
 
-    lv_obj_t *back = dg_btn_create_light(parent, NULL, _("返回"));
+    lv_obj_t *back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));
     lv_obj_set_size(back, 150, 64);
     lv_obj_align(back, LV_ALIGN_TOP_LEFT, DG_PAD, 16);
     lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);

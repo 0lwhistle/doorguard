@@ -47,7 +47,7 @@ static lv_obj_t *base_create(lv_color_t accent)
     lv_obj_remove_style_all(mask);
     lv_obj_set_size(mask, DG_SCREEN_W, DG_SCREEN_H);
     lv_obj_set_style_bg_color(mask, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(mask, LV_OPA_50, 0);
+    lv_obj_set_style_bg_opa(mask, LV_OPA_60, 0);   /* 60%:卡片更聚焦(50% 偏飘) */
     lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *card = lv_obj_create(mask);

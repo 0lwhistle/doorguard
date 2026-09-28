@@ -23,6 +23,7 @@
 static lv_obj_t *s_preview = NULL;     /* dg_preview:plane 直通或软渲染回退 */
 static lv_obj_t *s_facebox = NULL;
 static lv_obj_t *s_hint = NULL;
+static lv_obj_t *s_back = NULL;        /* 返回(仅验证/管理员认证流程中可见) */
 static lv_obj_t *s_clock = NULL;
 static lv_obj_t *s_net = NULL;         /* WiFi 图标(绿=在线/红=离线) */
 static lv_obj_t *s_net_ip = NULL;      /* 图标旁 IP(调试便利;无网络=0.0.0.0) */
@@ -94,6 +95,13 @@ static void on_verify_btn(lv_event_t *e)
     click_pub(&b);
 }
 
+static void on_back_btn(lv_event_t *e)
+{
+    (void)e;
+    ev_ui_btn_t b = { .btn = DG_BTN_BACK };
+    click_pub(&b);                      /* FSM 决策:取消当前流程回普通模式 */
+}
+
 /* ---- 生命周期 ---- */
 
 void page_home_create(lv_obj_t *parent)
@@ -121,22 +129,30 @@ void page_home_create(lv_obj_t *parent)
     lv_obj_set_style_text_color(s_hint, DG_COL_BG(), 0);
     lv_obj_set_style_bg_color(s_hint, DG_COL_SCRIM(), 0);
     lv_obj_set_style_bg_opa(s_hint, DG_OPA_SCRIM, 0);
-    lv_obj_set_style_radius(s_hint, 8, 0);
+    lv_obj_set_style_radius(s_hint, DG_RADIUS, 0);
     lv_obj_set_style_pad_hor(s_hint, 14, 0);
     lv_obj_set_style_pad_ver(s_hint, 6, 0);
     lv_obj_align(s_hint, LV_ALIGN_TOP_MID, 0, 24);
     lv_obj_add_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
 
-    /* 状态栏:左上实时时钟,右上网络图标。同款衬底 chip,从推流里「浮」出来 */
+    /* 状态栏:左上返回(流程中可见)+ 实时时钟,右上网络图标。同款衬底
+     * chip,从推流里「浮」出来。返回键与其他页面统一放左上(spec-ui:
+     * 返回固定左上角),普通模式无流程可退,随提示条一起隐藏 */
+    s_back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));
+    lv_obj_set_size(s_back, 150, 64);
+    lv_obj_align(s_back, LV_ALIGN_TOP_LEFT, DG_PAD, DG_PAD);
+    lv_obj_add_event_cb(s_back, on_back_btn, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_flag(s_back, LV_OBJ_FLAG_HIDDEN);
+
     s_clock = lv_label_create(parent);
     lv_obj_set_style_text_font(s_clock, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_clock, DG_COL_BG(), 0);
     lv_obj_set_style_bg_color(s_clock, DG_COL_SCRIM(), 0);
     lv_obj_set_style_bg_opa(s_clock, DG_OPA_SCRIM, 0);
-    lv_obj_set_style_radius(s_clock, 8, 0);
+    lv_obj_set_style_radius(s_clock, DG_RADIUS, 0);
     lv_obj_set_style_pad_hor(s_clock, 10, 0);
     lv_obj_set_style_pad_ver(s_clock, 4, 0);
-    lv_obj_align(s_clock, LV_ALIGN_TOP_LEFT, DG_PAD, DG_PAD);
+    lv_obj_align(s_clock, LV_ALIGN_TOP_LEFT, DG_PAD + 150 + 12, DG_PAD + 8);
     lv_obj_clear_flag(s_clock, LV_OBJ_FLAG_CLICKABLE);
 
     s_net = lv_label_create(parent);
@@ -144,7 +160,7 @@ void page_home_create(lv_obj_t *parent)
     lv_obj_set_style_text_font(s_net, &lv_font_montserrat_28, 0);
     lv_obj_set_style_bg_color(s_net, DG_COL_SCRIM(), 0);
     lv_obj_set_style_bg_opa(s_net, DG_OPA_SCRIM, 0);
-    lv_obj_set_style_radius(s_net, 8, 0);
+    lv_obj_set_style_radius(s_net, DG_RADIUS, 0);
     lv_obj_set_style_pad_all(s_net, 6, 0);
     lv_obj_align(s_net, LV_ALIGN_TOP_RIGHT, -DG_PAD, DG_PAD);
     lv_obj_clear_flag(s_net, LV_OBJ_FLAG_CLICKABLE);
@@ -157,7 +173,7 @@ void page_home_create(lv_obj_t *parent)
     lv_obj_set_style_text_color(s_net_ip, DG_COL_BG(), 0);
     lv_obj_set_style_bg_color(s_net_ip, DG_COL_SCRIM(), 0);
     lv_obj_set_style_bg_opa(s_net_ip, DG_OPA_SCRIM, 0);
-    lv_obj_set_style_radius(s_net_ip, 8, 0);
+    lv_obj_set_style_radius(s_net_ip, DG_RADIUS, 0);
     lv_obj_set_style_pad_hor(s_net_ip, 10, 0);
     lv_obj_set_style_pad_ver(s_net_ip, 8, 0);
     lv_obj_align(s_net_ip, LV_ALIGN_TOP_RIGHT, -DG_PAD - 40, DG_PAD);
@@ -195,6 +211,7 @@ void page_home_destroy(void)
     s_preview = NULL;
     s_facebox = NULL;
     s_hint = NULL;
+    s_back = NULL;
     s_clock = NULL;
     s_net = NULL;
     s_net_ip = NULL;
@@ -244,4 +261,14 @@ void page_home_set_hint(const char *text)
     }
     lv_label_set_text(s_hint, text);
     lv_obj_clear_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
+}
+
+void page_home_set_back(bool visible)
+{
+    if (!s_back)
+        return;
+    if (visible)
+        lv_obj_clear_flag(s_back, LV_OBJ_FLAG_HIDDEN);
+    else
+        lv_obj_add_flag(s_back, LV_OBJ_FLAG_HIDDEN);
 }

@@ -161,6 +161,7 @@ static void home_on_evt(const ui_evt_t *evt)
         break;
     case UI_EVT_RESULT: {
         const ev_ui_result_t *r = &evt->result_popup;
+        page_home_set_back(false);           /* 流程已出结果,返回键收起 */
         if (r->ok) {
             char text[DG_NAME_LEN + 16];
             snprintf(text, sizeof(text), "%s %s", _("验证成功"), r->user_name);
@@ -176,6 +177,9 @@ static void home_on_evt(const ui_evt_t *evt)
             /* 无管理员免认证进菜单的提示:此时页面已切到菜单,由菜单页弹(menu presenter) */
             break;
         }
+        /* 提示条出现 = 处于验证/管理员认证流程:左上返回键同步亮出,
+         * 与其他页面的左上返回布局统一 */
+        page_home_set_back(true);
         const char *text = NULL;
         if (h->method == DG_HINT_ADMIN_AUTH)
             text = _("管理员认证");
@@ -194,6 +198,7 @@ static void home_on_evt(const ui_evt_t *evt)
     }
     case UI_EVT_HINT_CLEAR:
         page_home_set_hint(NULL);
+        page_home_set_back(false);   /* 流程结束,返回键随之收起 */
         break;
     case UI_EVT_AUTH_RESULT:
         break;                               /* web/日志侧消费;主页文案走 EV_UI_RESULT */

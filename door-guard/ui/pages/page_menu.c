@@ -120,9 +120,10 @@ void page_menu_create(lv_obj_t *parent)
     for (int i = 0; i < 4; i++)
         cell_create(grid, cells[i].icon, cells[i].label, cells[i].open);
 
+    /* 返回键与其他页面统一:固定左上角(spec-ui 通用导航) */
     lv_obj_t *back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));
-    lv_obj_set_size(back, 200, DG_BTN_H);
-    lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 0, -DG_PAD);
+    lv_obj_set_size(back, 150, 64);
+    lv_obj_align(back, LV_ALIGN_TOP_LEFT, DG_PAD, 16);
     lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);
 }
 

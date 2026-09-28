@@ -23,6 +23,9 @@ void page_home_clear_facebox(void);
 /** 提示条(text 已翻译;NULL=隐藏) */
 void page_home_set_hint(const char *text);
 
+/** 返回键显隐(验证/管理员认证流程中可见,普通模式隐藏) */
+void page_home_set_back(bool visible);
+
 #ifdef __cplusplus
 }
 #endif
