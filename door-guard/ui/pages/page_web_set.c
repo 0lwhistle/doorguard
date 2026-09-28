@@ -68,7 +68,7 @@ static void on_pwd_second(void *ud, const char *text)
     /* 提交给 net 模块(net 侧再跑一遍合法性 + 落库) */
     bridge_web_set(s_new_user, s_first_pwd);
     memset(s_first_pwd, 0, sizeof(s_first_pwd));
-    dg_popup_success(_("正在保存…"), 800, NULL, NULL);
+    dg_popup_success(_("正在保存..."), 800, NULL, NULL);
 }
 
 static void on_popup_cancel(void *ud)

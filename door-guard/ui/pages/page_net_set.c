@@ -2,7 +2,7 @@
  * page_net_set.c — 网络配置设置页(接入方式 + IP/掩码/网关)
  *
  * 交互:行点击弹屏幕键盘编辑(预填当前期望值),右上「应用」经总线发给
- * 网络族落地(net_cfg 持久化 + 后台应用);应用是异步的,按钮置「应用中…」,
+ * 网络族落地(net_cfg 持久化 + 后台应用);应用是异步的,按钮置「应用中...」,
  * 结果回执弹窗。状态行实时显示实际生效地址(1s 轮询,与配置区分展示——
  * 期望配置与实际地址不一致时,用户一眼能看出还没应用或没生效。
  *
@@ -256,7 +256,7 @@ static bool apply_cfg(void)
     bridge_net_cfg_set(s_is_static, s_ip, s_mask, s_gw);   /* C4:出站统一经桥 */
     s_busy = true;
     if (s_btn_apply) {
-        dg_btn_set_label(s_btn_apply, _("应用中…"));
+        dg_btn_set_label(s_btn_apply, _("应用中..."));
         lv_obj_add_state(s_btn_apply, LV_STATE_DISABLED);
     }
     return true;
@@ -267,7 +267,7 @@ static void on_apply(lv_event_t *e)
     (void)e;
     if (!apply_cfg())
         return;
-    dg_popup_success(_("正在应用…"), 1000, NULL, NULL);
+    dg_popup_success(_("正在应用..."), 1000, NULL, NULL);
 }
 
 /* ---- 实际地址状态行(1s 轮询) ---- */

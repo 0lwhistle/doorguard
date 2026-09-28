@@ -47,7 +47,7 @@ static void on_ntp(lv_event_t *e)
     /* 真触发一次校正(用配置里的 ntp_server),结果经 EV_NET_NTP_RESULT 回来;
      * 不再弹输入框——服务器地址属设备配置,不该让门禁面板上的人现填 */
     bridge_ntp_sync();               /* C4:出站统一经桥 */
-    dg_popup_success(_("NTP 校时中…"), 1000, NULL, NULL);
+    dg_popup_success(_("NTP 校时中..."), 1000, NULL, NULL);
 }
 
 static void on_net(lv_event_t *e)
