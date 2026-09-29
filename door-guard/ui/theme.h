@@ -18,7 +18,7 @@ extern "C" {
 #define DG_COLOR_PRIMARY_DARK   0x1565C0 /**< 按钮按下态 */
 #define DG_COLOR_BG             0xFFFFFF /**< 页面底色 */
 #define DG_COLOR_BG_LIGHT       0xE3F2FD /**< 卡片/分区底 */
-#define DG_COLOR_TEXT           0x212121 /**< 主文字 */
+#define DG_COLOR_TEXT           0x000000 /**< 主文字(2026-09-29 用户拍板:纯黑,原 0x212121 发灰) */
 #define DG_COLOR_OK             0x2E7D32 /**< 成功(绿) */
 #define DG_COLOR_ERR            0xC62828 /**< 失败(红) */
 #define DG_COLOR_ERR_DARK       0x8E0000 /**< 失败红按下态(删除类按钮) */
@@ -40,10 +40,12 @@ extern "C" {
  * 用法:卡片与浮层 = DG_COL_BG_LIGHT 底 + 白色半透明描边;推流上的文字 =
  * 黑色半透明衬底 chip;次要文字(行标题/"无"占位)降透明度。
  * 2026-09-27 二调:DIM 50→70——蓝白浅底上 50% 黑发灰难辨认(用户反馈
- * 「字体要黑色,不然看不清」),层级保住、可读性优先 */
+ * 「字体要黑色,不然看不清」),层级保住、可读性优先。
+ * 2026-09-29 三调:DIM→COVER(用户拍板「字体和 label 尽量全是黑色」)——
+ * 次要文字不再降透明度,层级改靠字号档(SUB/CN);token 保留以便将来回调 */
 #define DG_OPA_SCRIM        LV_OPA_40  /**< 推流上 chip 衬底透明度 */
 #define DG_OPA_CARD_LINE    LV_OPA_60  /**< 卡片白边透明度 */
-#define DG_OPA_TEXT_DIM     LV_OPA_70  /**< 次要文字透明度 */
+#define DG_OPA_TEXT_DIM     LV_OPA_COVER /**< 次要文字透明度(现为全显纯黑) */
 
 /* ---- 版式(720×1280 竖屏;DG_SCREEN_W/H 已上移 proto/types.h,
  * display 模块要用,不该反向依赖本头) ---- */

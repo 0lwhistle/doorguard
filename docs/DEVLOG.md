@@ -4,6 +4,36 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-29(续)输入光标 + 全黑字体(36/36 绿零告警;推板见后记)
+
+**做了什么**(用户需求:输入框带输入指针可调位置;蓝白主题下字体 label 全黑):
+1. **输入光标**(dg_popup + dg_kbd):输入弹窗 textarea 白底蓝框 + 主蓝块状
+   光标(产品无 lv_theme,光标默认零样式 = 透明不可见,必须显式给样式);
+   点输入框任意位置定位光标(LVGL cursor.click_pos 默认开,不依赖聚焦),
+   键盘页脚加 ◀/▶(LVGL 内置 symbol 走 dg_btn 图标槽——dg_font_cn 字集
+   =语言表+GB2312,没有 ◀▶ 字形,勿用文本箭头);键入=光标处插入,
+   ⌫=删光标前一**完整 UTF-8 字符**。光标按字符索引,每次键入/删除前从
+   textarea 读回(点击/◀▶ 后以 LVGL 为权威),格式钩子(IP autodot)重排后
+   越界夹到末尾。
+2. **顺带修一个潜伏 bug**:旧 ⌫ 按字节删,中文/web 录入姓名会删出半个
+   UTF-8 字符乱码;现按字符边界删。
+3. **全黑字体**:DG_COLOR_TEXT 0x212121→0x000000;DG_OPA_TEXT_DIM
+   70%→COVER(次要文字不再降透明度,层级靠字号档;token 保留)。
+   推流/蓝底上的白字与语义色(OK 绿/ERR 红)不动——「换底色必须换字色」。
+4. 测试:test_widgets 新增 3 组(光标预填尾插/◀▶中插/读回;UTF-8 整字
+   删除;中文后字符边界中插),36/36 绿。
+5. **坑**:buf_byte_of_char 首版在多字节目标上落在字符中间(数到起点后
+   没吃掉该字符自己的 continuation 字节;ASCII 每字节都是起点恰好掩盖),
+   UTF-8 用例当场抓出——中插中文场景的字符→字节换算务必跑多字节用例。
+6. 宿主测试首次在 /mnt/c 克隆配缓存:`cd door-guard && cmake -B build-tests
+   -DDG_BUILD_TESTS=ON`(CMakeLists 在 door-guard/ 子目录,仓库根没有),
+   缓存留存,后续增量。
+
+**推板**:板 SSH/ping 不通但网关 137.1 正常 = 板端断电,产物已就位
+(door-guard/build/door-guard.exe,md5 772669a9…),上线后 Windows 侧
+`DOORGUARD_BIN="C:/Users/86151/Desktop/doorguard/doorguard/door-guard/build/door-guard.exe" dg-deploy` 即可。
+
+---
 ## 2026-09-29 主页时钟放大(编译零告警;已推板 dg_app.A=f53716d)
 
 **做了什么**(5c5cc22,仅 page_home.c):

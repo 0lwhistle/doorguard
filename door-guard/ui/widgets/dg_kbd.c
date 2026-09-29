@@ -56,6 +56,20 @@ static void emit_ok(lv_event_t *e)
         k->ops.on_ok(k->ops.user_data);
 }
 
+static void emit_cursor_left(lv_event_t *e)
+{
+    dg_kbd_t *k = lv_event_get_user_data(e);
+    if (k->ops.on_cursor_left)
+        k->ops.on_cursor_left(k->ops.user_data);
+}
+
+static void emit_cursor_right(lv_event_t *e)
+{
+    dg_kbd_t *k = lv_event_get_user_data(e);
+    if (k->ops.on_cursor_right)
+        k->ops.on_cursor_right(k->ops.user_data);
+}
+
 /* ⇧:改写 26 个字母键的显示文字(键值不动) */
 static void refresh_case(dg_kbd_t *k)
 {
@@ -165,6 +179,18 @@ static lv_obj_t *add_row(lv_obj_t *parent, int32_t h)
     return row;
 }
 
+/* 光标移动键:箭头走 dg_btn 图标槽(LVGL 内置 symbol 在 montserrat 内嵌,
+ * dg_font_cn 字集=语言表+GB2312,没有 ◀▶ 这类几何符号字形) */
+static lv_obj_t *add_cursor_key(lv_obj_t *parent, dg_kbd_t *k, const char *icon,
+                                int32_t w_pct, int32_t h, lv_event_cb_t cb)
+{
+    lv_obj_t *b = dg_btn_create_light(parent, icon, "");
+    lv_obj_set_width(b, LV_PCT(w_pct));
+    lv_obj_set_height(b, h);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, k);
+    return b;
+}
+
 lv_obj_t *dg_kbd_create(lv_obj_t *parent, bool start_alpha, const dg_kbd_ops_t *ops)
 {
     dg_kbd_t *k = calloc(1, sizeof(*k));
@@ -242,9 +268,11 @@ lv_obj_t *dg_kbd_create(lv_obj_t *parent, bool start_alpha, const dg_kbd_ops_t *
         lv_obj_set_style_bg_color(ok, DG_COL_OK(), 0);
     }
 
-    /* ---- 页脚:ABC / 123 切页 ---- */
+    /* ---- 页脚:◀ / ABC-123 切页 / ▶ ---- */
     lv_obj_t *footer = add_row(root, 48);
-    k->toggle = add_key(footer, k, "ABC", 30, 48, true, on_toggle);
+    add_cursor_key(footer, k, LV_SYMBOL_LEFT, 20, 48, emit_cursor_left);
+    k->toggle = add_key(footer, k, "ABC", 40, 48, true, on_toggle);
+    add_cursor_key(footer, k, LV_SYMBOL_RIGHT, 20, 48, emit_cursor_right);
 
     apply_layout(k);
     return root;

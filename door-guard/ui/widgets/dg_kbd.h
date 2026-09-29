@@ -4,7 +4,8 @@
  * 布局与交互(详见 spec-ui §6):
  *   数字页 1-9 / ⌫ / 0 / OK(门禁 PIN 常用,默认页)
  *   字母页 QWERTY(⇧ 切大小写)+ 空格 + ⌫ + OK
- *   页脚 "ABC"/"123" 键在两页间切换;状态记在键盘实例内,弹窗关闭即复位
+ *   页脚 ◀ / "ABC""123" / ▶:光标移动 + 两页切换(2026-09-29 输入光标)
+ *   状态记在键盘实例内,弹窗关闭即复位
  * 无物理键盘的设备:用户 ID/姓名/密码都靠它输入;中文需输入法,本设备不支持
  * (需要中文姓名请走上位机)。
  */
@@ -23,6 +24,8 @@ typedef struct {
     void (*on_key)(void *user_data, const char *sym);  /* 数字/字母/空格 " " */
     void (*on_backspace)(void *user_data);
     void (*on_ok)(void *user_data);
+    void (*on_cursor_left)(void *user_data);   /* 页脚 ◀(可空:空则键点了无效) */
+    void (*on_cursor_right)(void *user_data);  /* 页脚 ▶(可空) */
     void *user_data;
 } dg_kbd_ops_t;
 

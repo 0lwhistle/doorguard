@@ -256,6 +256,77 @@ int main(void)
     DG_CHECK(!dg_popup_active());
     printf("[W] dg_popup input: 校验失败不提交 + 弹窗保留 OK\n");
 
+    /* ---- 输入光标:预填尾插 / 点击定位 / ◀▶ 移动后中插(光标读回) ---- */
+    {
+        const dg_popup_input_cfg_t cur = {
+            .title = _("请输入密码"),
+            .max_len = 63,
+            .initial = "abcd",
+            .on_confirm = on_confirm,
+        };
+        s_confirmed = 0;
+        dg_popup_input(&cur);
+        lv_obj_t *mask4 = lv_obj_get_child(lv_layer_top(), 0);
+        lv_obj_t *card4 = lv_obj_get_child(mask4, 0);
+        lv_obj_t *ta4 = lv_obj_get_child(card4, 1);   /* 标题=0,textarea=1 */
+        lv_obj_t *np4 = find_by_child_cnt(card4, 12); /* 数字页 12 键 */
+        lv_obj_t *ft4 = lv_obj_get_child(lv_obj_get_parent(np4), 2);
+        /* 预填光标在末尾:点 7 → "abcd7" */
+        lv_obj_send_event(lv_obj_get_child(np4, 6), LV_EVENT_CLICKED, NULL);
+        /* 模拟点击定位(真机=点输入框由 LVGL PRESSED 摆光标):移到字符 1 */
+        lv_textarea_set_cursor_pos(ta4, 1);
+        lv_obj_send_event(lv_obj_get_child(np4, 8), LV_EVENT_CLICKED, NULL);
+        DG_CHECK(lv_textarea_get_cursor_pos(ta4) == 2);   /* a9bcd7,光标在 9 后 */
+        /* ◀ 移一格:本地 pos 已过期(2),下次键入从 textarea 读回 1 → 中插 */
+        lv_obj_send_event(lv_obj_get_child(ft4, 0), LV_EVENT_CLICKED, NULL);
+        DG_CHECK(lv_textarea_get_cursor_pos(ta4) == 1);
+        lv_obj_send_event(lv_obj_get_child(np4, 5), LV_EVENT_CLICKED, NULL);
+        DG_CHECK(lv_textarea_get_cursor_pos(ta4) == 2);   /* a69bcd7 */
+        /* ▶ 移一格再 ⌫:删光标前一个字符(9) → a6bcd7 */
+        lv_obj_send_event(lv_obj_get_child(ft4, 2), LV_EVENT_CLICKED, NULL);
+        lv_obj_send_event(lv_obj_get_child(np4, 9), LV_EVENT_CLICKED, NULL);
+        lv_obj_send_event(lv_obj_get_child(np4, 11), LV_EVENT_CLICKED, NULL);
+        DG_CHECK(s_confirmed == 1);
+        DG_CHECK(strcmp(s_conf_text, "a6bcd7") == 0);
+        DG_CHECK(!dg_popup_active());
+        printf("[W] dg_popup input: 光标预填尾插/点击定位/◀▶中插 OK\n");
+    }
+
+    /* ---- UTF-8 整字删除:中文预填 ⌫ 删整个字符(旧实现按字节删出乱码);
+     * 再在中文后中插 ASCII(字符索引→字节偏移必须落在字符边界) ---- */
+    {
+        const dg_popup_input_cfg_t cn = {
+            .title = _("请输入密码"),
+            .max_len = 63,
+            .initial = "中文",
+            .on_confirm = on_confirm,
+        };
+        s_confirmed = 0;
+        dg_popup_input(&cn);
+        lv_obj_t *mask5 = lv_obj_get_child(lv_layer_top(), 0);
+        lv_obj_t *card5 = lv_obj_get_child(mask5, 0);
+        lv_obj_t *np5 = find_by_child_cnt(card5, 12);
+        lv_obj_send_event(lv_obj_get_child(np5, 9), LV_EVENT_CLICKED, NULL);
+        lv_obj_send_event(lv_obj_get_child(np5, 11), LV_EVENT_CLICKED, NULL);
+        DG_CHECK(s_confirmed == 1);
+        DG_CHECK(strcmp(s_conf_text, "中") == 0);
+        DG_CHECK(!dg_popup_active());
+        /* 第二轮:预填"中文",光标移到字符 1,插 9 → "中9文" */
+        s_confirmed = 0;
+        dg_popup_input(&cn);
+        lv_obj_t *mask6 = lv_obj_get_child(lv_layer_top(), 0);
+        lv_obj_t *card6 = lv_obj_get_child(mask6, 0);
+        lv_obj_t *ta6 = lv_obj_get_child(card6, 1);
+        lv_obj_t *np6 = find_by_child_cnt(card6, 12);
+        lv_textarea_set_cursor_pos(ta6, 1);
+        lv_obj_send_event(lv_obj_get_child(np6, 8), LV_EVENT_CLICKED, NULL);
+        lv_obj_send_event(lv_obj_get_child(np6, 11), LV_EVENT_CLICKED, NULL);
+        DG_CHECK(s_confirmed == 1);
+        DG_CHECK(strcmp(s_conf_text, "中9文") == 0);
+        DG_CHECK(!dg_popup_active());
+        printf("[W] dg_popup input: UTF-8 整字删除/字符边界中插 OK\n");
+    }
+
     /* ---- 选择弹窗:选项回调携下标 ---- */
     static const char *const opts[] = { "zh-CN", "en-US" };
     dg_popup_choice(_("语言"), opts, 2, on_pick, NULL, NULL);
