@@ -10,3 +10,7 @@ board/rootfs-overlay/** text eol=lf
 # 前端构建产物:gen_pages.sh 把文件长度编进 web_pages.c 资源表,CRLF 会让
 # 长度对不上(frontend_check 抓"声明 N 实际 N+行数")
 door-guard/services/web/pages/** text eol=lf
+# WSL 侧生成的产物(2026-09-30 补):dg-font/web 生成物的工作区老副本是
+# CRLF,git status 永久显示幻影 modified(diff 为空);强制 LF 一劳永逸
+door-guard/ui/font/*.c text eol=lf
+door-guard/services/web/web_pages.c text eol=lf

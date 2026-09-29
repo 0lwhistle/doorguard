@@ -20,6 +20,10 @@
 4. 顺带提交用户文案改动:「应用配置」→「应用」(zh-CN.json 值;字符集无变
    化,字库无需重生成——git status 曾显示 4 个字库 modified 是 stat 缓存
    假象,CRLF 检查刷新后消失)。
+5. **根治字库幻影 modified**:.gitattributes 给 ui/font/*.c 与 web_pages.c
+   补 text eol=lf——生成物在 WSL 写 LF、Windows 工作区老副本是 CRLF,
+   autocrlf 下 status 永久显示 modified 而 diff 恒空;rm+重检后工作区干净。
+   「属性只管之后检出,老副本须 rm+checkout 强制重检」纪律再次生效。
 
 ---
 ## 2026-09-30 网络配置页三处调整(标示左对齐/删接口状态行/值全黑)+顺带修模式值不显示
