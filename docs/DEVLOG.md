@@ -4,6 +4,24 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-30(续)脚本收编进 env/bin:dg-font/dg-frontend;README 扩写为使用文档
+
+1. 新增 env/bin/dg-font(字库重生成,包装 ui/font/gen.sh)与 dg-frontend
+   (前端构建+内嵌,包装 build_frontend.sh,--install 透传 npm ci),source
+   即用;env.sh 就绪输出更新为 9 脚本全清单。
+2. env/README.md 扩写成完整使用文档:9 脚本总览 + 典型流程(改代码推板/
+   推板分档/改语言包/改前端/测试/新机初始化)+ 环境变量表(含 DG_BUILD_DIR
+   与 Release 默认)+ 分工边界。
+3. dg-font 实跑验证:60s 重新生成 4 档字库,与仓库逐字节一致(本次语言包
+   只改文案、无字符增删);dg-build 15s 零告警。坑重申:dg-font 只扫
+   zh-CN/en-US 两个 json,代码新增 _("原文") 的字符也要进 lang key 才入
+   字库;U+2026 源字体无字形,省略号写 "...";`npx --yes lv_font_conv`
+   未锁版本,今天实测无漂移,若将来漂移可考虑在 gen.sh 锁版本。
+4. 顺带提交用户文案改动:「应用配置」→「应用」(zh-CN.json 值;字符集无变
+   化,字库无需重生成——git status 曾显示 4 个字库 modified 是 stat 缓存
+   假象,CRLF 检查刷新后消失)。
+
+---
 ## 2026-09-30 网络配置页三处调整(标示左对齐/删接口状态行/值全黑)+顺带修模式值不显示
 
 1. 选项行标示左对齐:dg_btn 内容行默认整行居中,本页 row_create 改

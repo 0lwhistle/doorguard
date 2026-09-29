@@ -44,7 +44,7 @@ fi
 
 echo "door-guard env 就绪"
 echo "  DOORGUARD_ROOT = $DOORGUARD_ROOT"
-echo "  脚本           = dg-build dg-build-pc dg-test dg-deploy dg-tc-install dg-serial"
+echo "  脚本           = dg-build dg-build-pc dg-test dg-deploy dg-font dg-frontend dg-ota-upload dg-tc-install dg-serial(用法: env/README.md)"
 [ -n "${DG_BUILD_DIR:-}" ]      && echo "  DG_BUILD_DIR   = $DG_BUILD_DIR"
 [ -n "${DG_TEST_BUILD_DIR:-}" ] && echo "  DG_TEST_BUILD_DIR = $DG_TEST_BUILD_DIR"
 [ -n "${DG_PC_BUILD_DIR:-}" ]   && echo "  DG_PC_BUILD_DIR   = $DG_PC_BUILD_DIR"

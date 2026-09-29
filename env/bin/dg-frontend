@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# dg-frontend — 一键重建 web 上位机前端并内嵌进固件资源(web_pages.c)
+# 用法: dg-frontend [--install]
+#   --install   先 npm ci 干净装依赖(需要可用网络;默认跳过,直接构建)
+#
+# 只在**改前端**(services/web/frontend/ 的 Vue 工程)时需要跑;只改后端
+# C 代码不用。流程 = npm build → 覆盖 pages/ → gen_pages.sh 生成 web_pages.c
+# (前端资源编译进 app 二进制,板上无独立 web 文件——升级 web = 升级 app)。
+#
+# 坑(2026-09 实测):WSL 对 npm registry 无网(localhost 代理不镜像 NAT),
+# --install(npm ci)必挂——用依赖已装好(node_modules 在)的克隆直接构建;
+# --install 仅在有网/配好镜像的环境用。
+# 之后:git 提交 pages/ 与 web_pages.c → dg-build → dg-deploy -app。
+set -euo pipefail
+
+: "${DOORGUARD_ROOT:?请先 source env/env.sh}"
+
+exec bash "$DOORGUARD_ROOT/door-guard/services/web/build_frontend.sh" "$@"

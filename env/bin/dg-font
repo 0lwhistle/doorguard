@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# dg-font — 语言包变更后重生成中文位图字库(ui/font/dg_font_cn_*.c)
+# 用法: dg-font
+#
+# 扫描 ui/lang/zh-CN.json + en-US.json 的键与值收集全部字符;16/26/30 三档
+# 并入 GB2312 全集(运行时姓名等超表文本的兜底),40px 标题档仅语言表字集。
+# 生成的 .c 随仓库提交。需要 node(npx lv_font_conv,首次自动取包)+ python3
+# + 源字体 DroidSansFallbackFull / DejaVuSans(路径可用 DG_FONT_TTF /
+# DG_FONT_LATIN 覆盖)。
+#
+# 之后:git 提交 font/*.c 与 lang/*.json → dg-build → dg-deploy(用默认 -all:
+# 字形编进二进制走 OTA 槽位,JSON 译文走资源直推,两头都要新)。
+set -euo pipefail
+
+: "${DOORGUARD_ROOT:?请先 source env/env.sh}"
+
+exec bash "$DOORGUARD_ROOT/door-guard/ui/font/gen.sh" "$@"
