@@ -3,8 +3,7 @@
  *
  * 交互:行点击弹屏幕键盘编辑(预填当前期望值),右上「应用」经总线发给
  * 网络族落地(net_cfg 持久化 + 后台应用);应用是异步的,按钮置「应用中...」,
- * 结果回执弹窗。状态行实时显示实际生效地址(1s 轮询,与配置区分展示——
- * 期望配置与实际地址不一致时,用户一眼能看出还没应用或没生效。
+ * 结果回执弹窗。
  *
  * 注意:本环境可能没有 DHCP 服务器(纯静态网线直连),切回 DHCP 会拿不到
  * 地址导致失联——选择静态/DHCP 时不立即应用,攒到「应用」一次下发。
@@ -15,7 +14,6 @@
 #include "events.h"
 #include "bridge/bridge.h"
 #include "i18n.h"
-#include "modules/net/net_info.h"
 #include "theme.h"
 #include "valid.h"
 #include "widgets/dg_btn.h"
@@ -31,7 +29,7 @@ static char s_ip[16], s_mask[16], s_gw[16];
 static bool s_busy;                            /* 应用进行中 */
 
 static lv_obj_t *s_val_mode, *s_val_ip, *s_val_mask, *s_val_gw;
-static lv_obj_t *s_addr_line, *s_btn_apply;
+static lv_obj_t *s_btn_apply;
 
 /* ---- 点分地址校验(UI 侧初检;最终以 net_cfg_validate 为准)----
  * 形态规则在 proto/valid(dg_valid_ipv4,一处定义);对象段取值(IP 不得为
@@ -141,7 +139,7 @@ static void refresh_rows(void)
 {
     if (!s_val_mode)
         return;
-    dg_btn_set_label(s_val_mode, s_is_static ? _("静态地址") : _("DHCP 自动获取"));
+    lv_label_set_text(s_val_mode, s_is_static ? _("静态地址") : _("DHCP 自动获取"));
     lv_label_set_text(s_val_ip, s_is_static ? (s_ip[0] ? s_ip : _("无"))
                                             : _("自动获取"));
     lv_label_set_text(s_val_mask, s_is_static ? (s_mask[0] ? s_mask : _("无"))
@@ -270,32 +268,6 @@ static void on_apply(lv_event_t *e)
     dg_popup_success(_("正在应用..."), 1000, NULL, NULL);
 }
 
-/* ---- 实际地址状态行(1s 轮询) ---- */
-
-static lv_timer_t *s_addr_timer;
-
-static void addr_timer_cb(lv_timer_t *t)
-{
-    (void)t;
-    net_info_addr_t a;
-    net_info_read(&a);
-    page_net_set_set_addr(a.ifname, a.ip, a.gw, a.have_ip);
-}
-
-void page_net_set_set_addr(const char *ifname, const char *ip,
-                           const char *gw, bool have_ip)
-{
-    if (!s_addr_line)
-        return;
-    char buf[128];
-    if (have_ip)
-        snprintf(buf, sizeof(buf), "%s: %s | IP: %s | %s: %s",
-                 _("接口"), ifname, ip, _("网关"), gw);
-    else
-        snprintf(buf, sizeof(buf), "%s", _("当前无网络地址"));
-    lv_label_set_text(s_addr_line, buf);
-}
-
 void page_net_set_on_result(bool ok, int err, const char *ip)
 {
     (void)err;
@@ -317,18 +289,22 @@ void page_net_set_on_result(bool ok, int err, const char *ip)
 
 /* ---- 装配 ---- */
 
+/* 行:浅底按钮,标示左对齐,右侧「当前值」黑字(按下蓝底时随标题转白) */
 static lv_obj_t *row_create(lv_obj_t *parent, const char *title,
-                            lv_obj_t **val_out, lv_event_cb_t cb)
+                            lv_obj_t **val_out)
 {
     lv_obj_t *row = dg_btn_create_light(parent, NULL, title);
     lv_obj_set_size(row, DG_SCREEN_W - 2 * DG_PAD, 96);
     *val_out = NULL;
-    (void)cb;
-    /* 行右侧「当前值」label(dg_btn 结构:btn>row>label,见 page_device 手法) */
+    /* 标示左对齐(2026-09-30 用户要求):dg_btn 的内容行默认整行居中,改靠左 */
     lv_obj_t *inner = lv_obj_get_child(row, 0);
-    lv_obj_t *val = lv_label_create(inner);
+    lv_obj_align(inner, LV_ALIGN_LEFT_MID, DG_PAD, 0);
+    /* 值必须挂在 btn 上:内容行是 flex 容器,子对象会被流式布局摆到标题旁,
+     * lv_obj_align 被无视;作为 btn 的直接子对象才能右贴边 */
+    lv_obj_t *val = lv_label_create(row);
     lv_obj_set_style_text_font(val, DG_FONT_CN, 0);
-    lv_obj_set_style_text_color(val, DG_COL_BG(), 0);
+    lv_obj_set_style_text_color(val, DG_COL_TEXT(), 0);
+    lv_obj_set_style_text_color(val, DG_COL_BG(), LV_STATE_PRESSED);
     lv_obj_align(val, LV_ALIGN_RIGHT_MID, -12, 0);
     *val_out = val;
     return row;
@@ -351,28 +327,22 @@ void page_net_set_create(lv_obj_t *parent)
                                            .save = apply_cfg };
     dg_edit_nav_create(parent, &ops, false);
 
-    s_addr_line = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_addr_line, DG_FONT_SUB, 0);
-    lv_obj_set_style_text_color(s_addr_line, DG_COL_TEXT(), 0);
-    lv_obj_align(s_addr_line, LV_ALIGN_TOP_MID, 0, 100);
-    lv_label_set_text(s_addr_line, "");
-
-    /* 行:接入方式 / IP / 掩码 / 网关 */
-    lv_obj_t *r = row_create(parent, _("接入方式"), &s_val_mode, NULL);
+    /* 行:接入方式 / IP / 掩码 / 网关(状态行已移除,行体上移补位) */
+    lv_obj_t *r = row_create(parent, _("接入方式"), &s_val_mode);
     (void)r;
-    lv_obj_align(r, LV_ALIGN_TOP_MID, 0, 170);
+    lv_obj_align(r, LV_ALIGN_TOP_MID, 0, 110);
     lv_obj_add_event_cb(r, on_mode, LV_EVENT_CLICKED, NULL);
 
-    r = row_create(parent, _("IP 地址"), &s_val_ip, NULL);
-    lv_obj_align(r, LV_ALIGN_TOP_MID, 0, 170 + 108);
+    r = row_create(parent, _("IP 地址"), &s_val_ip);
+    lv_obj_align(r, LV_ALIGN_TOP_MID, 0, 110 + 108);
     lv_obj_add_event_cb(r, on_ip, LV_EVENT_CLICKED, NULL);
 
-    r = row_create(parent, _("子网掩码"), &s_val_mask, NULL);
-    lv_obj_align(r, LV_ALIGN_TOP_MID, 0, 170 + 2 * 108);
+    r = row_create(parent, _("子网掩码"), &s_val_mask);
+    lv_obj_align(r, LV_ALIGN_TOP_MID, 0, 110 + 2 * 108);
     lv_obj_add_event_cb(r, on_mask, LV_EVENT_CLICKED, NULL);
 
-    r = row_create(parent, _("网关"), &s_val_gw, NULL);
-    lv_obj_align(r, LV_ALIGN_TOP_MID, 0, 170 + 3 * 108);
+    r = row_create(parent, _("网关"), &s_val_gw);
+    lv_obj_align(r, LV_ALIGN_TOP_MID, 0, 110 + 3 * 108);
     lv_obj_add_event_cb(r, on_gw, LV_EVENT_CLICKED, NULL);
 
     /* 右上「应用配置」 */
@@ -390,18 +360,12 @@ void page_net_set_create(lv_obj_t *parent)
 
     draft_from_cfg();
     refresh_rows();
-    s_addr_timer = lv_timer_create(addr_timer_cb, 1000, NULL);
-    addr_timer_cb(NULL);
 }
 
 void page_net_set_destroy(void)
 {
-    if (s_addr_timer) {
-        lv_timer_del(s_addr_timer);
-        s_addr_timer = NULL;
-    }
     s_val_mode = s_val_ip = s_val_mask = s_val_gw = NULL;
-    s_addr_line = s_btn_apply = NULL;
+    s_btn_apply = NULL;
     s_busy = false;
     DG_LOGI("[NETSET]", "page destroy");
 }

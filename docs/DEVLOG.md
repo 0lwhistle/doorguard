@@ -4,6 +4,22 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-30 网络配置页三处调整(标示左对齐/删接口状态行/值全黑)+顺带修模式值不显示
+
+1. 选项行标示左对齐:dg_btn 内容行默认整行居中,本页 row_create 改
+   lv_obj_align(inner, LEFT_MID, DG_PAD)。
+2. 删掉 1s 轮询的「接口: eth0 | IP: ... | 网关: ...」状态行(用户不要):
+   page_net_set_set_addr/定时器/net_info.h include 全清;行体 y 170→110 补位。
+3. 行右侧当前值改黑字:原 DG_COL_BG() 纯白在浅蓝底(0xE3F2FD)上几乎不可见
+   ——即「IP 显示要黑色」的根因;并给值加按下态白字(按下整行变蓝底,
+   黑字不可读,与 dg_btn 标题按下态同步)。值改挂 btn 直接子对象:内容行
+   是 flex 容器,子对象被流式摆到标题旁,lv_obj_align 被无视——原实现的
+   「右对齐」从未生效,值一直贴着标题居中显示。
+4. 顺带修:refresh_rows 对「接入方式」用了 dg_btn_set_label(那是收按钮的
+   API,传 label 进去是空操作)→ 该行当前值从未显示过;改 lv_label_set_text。
+5. dg-build 15s 零告警;dg-test 全绿。未推板,待与 Release 首验一起真机走查。
+
+---
 ## 2026-09-29(续3)dg-deploy 分档:-all(默认)/-app/-res;web 无独立升级包的定论
 
 1. dg-deploy 加选项隔离:-all=资源+程序(默认,旧行为);-app=只走 OTA 槽位

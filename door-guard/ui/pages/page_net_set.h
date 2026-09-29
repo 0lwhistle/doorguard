@@ -17,10 +17,6 @@ extern "C" {
 void page_net_set_create(lv_obj_t *parent);
 void page_net_set_destroy(void);
 
-/** 实际生效地址(1s 轮询渲染) */
-void page_net_set_set_addr(const char *ifname, const char *ip,
-                           const char *gw, bool have_ip);
-
 /** 应用结果回执(presenter 转发总线 EV_NET_CFG_RESULT) */
 void page_net_set_on_result(bool ok, int err, const char *ip);
 
