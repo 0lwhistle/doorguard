@@ -4,6 +4,21 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-29(续3)dg-deploy 分档:-all(默认)/-app/-res;web 无独立升级包的定论
+
+1. dg-deploy 加选项隔离:-all=资源+程序(默认,旧行为);-app=只走 OTA 槽位
+   链路(语言包/S60 不动,日常改代码用);-res=只推语言包+自启脚本不切槽
+   (改翻译用,重启进程生效)。-h 打印用法;IP 变为任意位置的位置参数。
+2. **"-web 单独升级"不成立的定论**:web 前端 = gen_pages.sh 从 pages/ 生成
+   web_pages.c **编译进 app 二进制**(web_server.c handle_static 查内嵌资源
+   表,板上无独立 web 文件)——升级 web = 升级 app,-app 已覆盖。头注已写明。
+3. 编译侧无需对应改动:CMake 增量本来就是"没变的源码不重编";语言包是运行
+   时读取的 JSON 不参与编译;前端只在手动 build_frontend.sh+gen_pages.sh 时
+   重新生成 web_pages.c(届时 dg_net 一个文件重编)。
+4. 实测:语法/无IP/未知选项/-h 四条路径 rc 正确,全程未触板;真机 -app 首推
+   留待下次推板(与 Release 首验一起做)。
+
+---
 ## 2026-09-29(续2)构建提速:改一个文件 2.5min→14s;推板产物转 Release(-O3)
 
 **做了什么**(用户反馈"改一个 UI 参数编译要几分钟"):

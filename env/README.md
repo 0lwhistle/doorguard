@@ -11,7 +11,7 @@ source env/env.sh
 | 脚本 | 用途 | 常用形式 |
 |---|---|---|
 | `dg-build` | 交叉编译 door-guard | `dg-build`(增量)/ `dg-build -c`(全新配置) |
-| `dg-deploy` | scp 推到板子 | `dg-deploy 192.168.x.x` / `dg-deploy -r <IP>`(推完即跑) |
+| `dg-deploy` | 推板(OTA A/B 链路) | `dg-deploy <IP>`(默认 -all:资源+程序)/ `dg-deploy -app <IP>`(只升程序)/ `dg-deploy -res <IP>`(只推语言包/自启脚本)/ `-r` 推完跟日志 |
 | `dg-tc-install` | 安装/更新交叉工具链到 `~/dg-toolchain`(md5 校验→解压) | `dg-tc-install` |
 | `dg-serial` | 串口控制台(1500000 8N1) | `dg-serial` |
 

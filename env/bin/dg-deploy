@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # dg-deploy — 推送 door-guard 到板子(**走板上 OTA A/B 链路**,2026-09-26 起)
-# 用法: dg-deploy [-r] [板子IP]
-#   -r   部署后跟踪应用日志(tail -f;Ctrl-C 退出,不影响板上服务)
-#   IP   缺省用 $DOORGUARD_IP(env.sh 里 export)
+# 用法: dg-deploy [-r] [-all|-app|-res] [板子IP]
+#   -r     部署后跟踪应用日志(tail -f;Ctrl-C 退出,不影响板上服务)
+#   -all   资源 + 程序(默认,与旧行为一致;S60 自启脚本变更后/首次必须用它)
+#   -app   只升级 app 二进制(OTA 槽位链路;语言包/自启脚本不动——日常改代码用这个)
+#   -res   只推资源(语言包 /root/ui/lang + 自启脚本),不切槽不重启
+#          (改翻译后用;语言包是启动时加载,重启进程才生效)
+#   IP     缺省用 $DOORGUARD_IP(env.sh 里 export)
 #
-# 部署 = 把新二进制放进板上 OTA 暂存区(/var/lib/door-guard/ota_staged.bin
+# web 上位机前端是 gen_pages.sh 生成 web_pages.c **编译进 app 二进制**的
+# (板上没有独立 web 资源文件)——升级 web = 升级 app,-app 已覆盖。
+#
+# 程序部署 = 把新二进制放进板上 OTA 暂存区(/var/lib/door-guard/ota_staged.bin
 # + .sha256 + .ver),由 S60doorguard 的 ota_watch 消费:2s 大小稳定判定 →
 # sha256 二次复核 → 装**非活动槽** → symlink 原子切换 → 重启进程;新包连续
 # 3 次秒退(<15s)自动回滚旧槽。开发推板与生产 OTA 从此走同一条路:
@@ -14,18 +21,22 @@ set -euo pipefail
 
 : "${DOORGUARD_ROOT:?请先 source env/env.sh}"
 
-follow=0
-if [ "${1:-}" = "-r" ]; then
-    follow=1
-    shift
-fi
-ip="${1:-${DOORGUARD_IP:-}}"
-[ -n "$ip" ] || { echo "用法: dg-deploy [-r] <板子IP>,或先 export DOORGUARD_IP=<IP>"; exit 1; }
+usage() { sed -n '2,12p' "$0"; exit "${1:-0}"; }
 
-# 产物路径与 dg-build 同源(env.sh 的 DG_BUILD_DIR,WSL 内在 ext4);
-# Windows 侧备用路不带 env.sh → 回退盘内路径,或显式 DOORGUARD_BIN=...exe
-bin="${DOORGUARD_BIN:-${DG_BUILD_DIR:-$DOORGUARD_ROOT/door-guard/build}/door-guard}"
-[ -x "$bin" ] || { echo "没有编译产物,先执行 dg-build"; exit 1; }
+mode=all follow=0 ip=""
+for a in "$@"; do
+    case "$a" in
+        -r)            follow=1 ;;
+        -all)          mode=all ;;
+        -app)          mode=app ;;
+        -res)          mode=res ;;
+        -h|--help)     usage 0 ;;
+        -*)            echo "未知选项: $a"; usage 1 ;;
+        *)             ip="$a" ;;
+    esac
+done
+ip="${ip:-${DOORGUARD_IP:-}}"
+[ -n "$ip" ] || usage 1
 
 # DOORGUARD_SSH_PORT 非空 = 全部 ssh/scp 走该端口(如 WSL 经 Windows
 # portproxy 转发:DOORGUARD_IP=<网关IP> DOORGUARD_SSH_PORT=2223)
@@ -33,84 +44,97 @@ sshp=() scpp=()
 [ -n "${DOORGUARD_SSH_PORT:-}" ] && { sshp=(-p "$DOORGUARD_SSH_PORT"); scpp=(-P "$DOORGUARD_SSH_PORT"); }
 sshx() { ssh "${sshp[@]}" "root@$ip" "$@"; }
 
-echo "==> 资源直推(语言包/自启脚本;资源文件不走槽位)"
-# S60 必须先于"监听检查"上板:旧版脚本的 stop 有自毁 bug,restart/stop+start
-# 都靠它;先换新脚本,后面的服务重建才可靠
-sshx 'mkdir -p /root/ui/lang'
-scp -q "${scpp[@]}" "$DOORGUARD_ROOT"/door-guard/ui/lang/*.json "root@$ip:/root/ui/lang/" 2>/dev/null || true
-if [ -f "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" ]; then
-    # 防坑(2026-09-27):Windows 工作区 autocrlf 会把脚本 checkout 成 CRLF,
-    # shebang 带 \r 上板即无法执行("required file not found")。上传前强制转 LF
-    tr -d '\r' < "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" > "${TMPDIR:-/tmp}/S60.upload"
-    scp -q "${scpp[@]}" "${TMPDIR:-/tmp}/S60.upload" "root@$ip:/etc/init.d/S60doorguard"
-    sshx 'chmod +x /etc/init.d/S60doorguard'
+# 产物路径与 dg-build 同源(env.sh 的 DG_BUILD_DIR,WSL 内在 ext4);
+# Windows 侧备用路不带 env.sh → 回退盘内路径,或显式 DOORGUARD_BIN=...exe
+bin="${DOORGUARD_BIN:-${DG_BUILD_DIR:-$DOORGUARD_ROOT/door-guard/build}/door-guard}"
+if [ "$mode" != res ]; then
+    [ -x "$bin" ] || { echo "没有编译产物($bin),先执行 dg-build"; exit 1; }
 fi
 
-echo "==> 板上 OTA 监听检查"
-cur_slot=$(sshx 'basename "$(readlink /root/door-guard 2>/dev/null)" 2>/dev/null' || true)
-if ! sshx 'kill -0 "$(cat /var/run/door-guard-ota.pid 2>/dev/null)" 2>/dev/null'; then
-    # ota_watch 不在(服务未启动/只前台跑过/看门狗被杀):stop+start 重建监督
-    # 与监听两个循环(幂等;前台挂着的实例会被 stop 收掉,由监督循环接管)
-    echo "    ota_watch 未运行 → 重启板上服务(stop + start)"
-    sshx '/etc/init.d/S60doorguard stop' || true
-    # start 阻塞在 aiq_restart(等 rkaiq 起来,最长 ~10s)之后才拉起监听循环:
-    # 必须轮询等待,固定 sleep 会误判"监听仍不在"
-    sshx '/etc/init.d/S60doorguard start' || true
-    watch_ok=0
-    for _ in $(seq 1 10); do
-        sleep 2
-        if sshx 'kill -0 "$(cat /var/run/door-guard-ota.pid 2>/dev/null)" 2>/dev/null'; then
-            watch_ok=1
-            break
-        fi
-    done
-    [ "$watch_ok" = 1 ] || {
-        echo "OTA 监听循环仍不在,放弃(线索看板上 /var/log/door-guard.log)"; exit 1; }
-    cur_slot=$(sshx 'basename "$(readlink /root/door-guard)"')
+if [ "$mode" != app ]; then
+    echo "==> 资源直推(语言包/自启脚本;资源文件不走槽位)"
+    # S60 必须先于"监听检查"上板:旧版脚本的 stop 有自毁 bug,restart/stop+start
+    # 都靠它;先换新脚本,后面的服务重建才可靠(-app 模式跳过:假定 S60 已就位)
+    sshx 'mkdir -p /root/ui/lang'
+    scp -q "${scpp[@]}" "$DOORGUARD_ROOT"/door-guard/ui/lang/*.json "root@$ip:/root/ui/lang/" 2>/dev/null || true
+    if [ -f "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" ]; then
+        # 防坑(2026-09-27):Windows 工作区 autocrlf 会把脚本 checkout 成 CRLF,
+        # shebang 带 \r 上板即无法执行("required file not found")。上传前强制转 LF
+        tr -d '\r' < "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" > "${TMPDIR:-/tmp}/S60.upload"
+        scp -q "${scpp[@]}" "${TMPDIR:-/tmp}/S60.upload" "root@$ip:/etc/init.d/S60doorguard"
+        sshx 'chmod +x /etc/init.d/S60doorguard'
+    fi
 fi
-echo "    当前活动槽 $cur_slot"
 
-echo "==> 暂存 OTA 包"
-sshx 'mkdir -p /var/lib/door-guard'
-scp -q "${scpp[@]}" "$bin" "root@$ip:/var/lib/door-guard/ota_staged.bin"
-sha=$(sha256sum "$bin" | cut -d' ' -f1)
-printf '%s  ota_staged.bin\n' "$sha" | sshx 'cat > /var/lib/door-guard/ota_staged.bin.sha256'
-ver=$(git -C "$DOORGUARD_ROOT" describe --always --dirty 2>/dev/null || date +%F-%H%M%S)
-printf '%s\n' "$ver" | sshx 'cat > /var/lib/door-guard/ota_staged.ver'
+if [ "$mode" != res ]; then
+    echo "==> 板上 OTA 监听检查"
+    cur_slot=$(sshx 'basename "$(readlink /root/door-guard 2>/dev/null)" 2>/dev/null' || true)
+    if ! sshx 'kill -0 "$(cat /var/run/door-guard-ota.pid 2>/dev/null)" 2>/dev/null'; then
+        # ota_watch 不在(服务未启动/只前台跑过/看门狗被杀):stop+start 重建监督
+        # 与监听两个循环(幂等;前台挂着的实例会被 stop 收掉,由监督循环接管)
+        echo "    ota_watch 未运行 → 重启板上服务(stop + start)"
+        sshx '/etc/init.d/S60doorguard stop' || true
+        # start 阻塞在 aiq_restart(等 rkaiq 起来,最长 ~10s)之后才拉起监听循环:
+        # 必须轮询等待,固定 sleep 会误判"监听仍不在"
+        sshx '/etc/init.d/S60doorguard start' || true
+        watch_ok=0
+        for _ in $(seq 1 10); do
+            sleep 2
+            if sshx 'kill -0 "$(cat /var/run/door-guard-ota.pid 2>/dev/null)" 2>/dev/null'; then
+                watch_ok=1
+                break
+            fi
+        done
+        [ "$watch_ok" = 1 ] || {
+            echo "OTA 监听循环仍不在,放弃(线索看板上 /var/log/door-guard.log)"; exit 1; }
+        cur_slot=$(sshx 'basename "$(readlink /root/door-guard)"')
+    fi
+    echo "    当前活动槽 $cur_slot"
 
-echo "==> 等待 OTA 切槽(ota_watch 轮询 + 复核 + 原子切换)"
-new_slot=""
-for _ in $(seq 1 20); do
-    sleep 2
-    new_slot=$(sshx 'basename "$(readlink /root/door-guard 2>/dev/null)" 2>/dev/null' || true)
-    [ -n "$new_slot" ] && [ "$new_slot" != "$cur_slot" ] && break
+    echo "==> 暂存 OTA 包"
+    sshx 'mkdir -p /var/lib/door-guard'
+    scp -q "${scpp[@]}" "$bin" "root@$ip:/var/lib/door-guard/ota_staged.bin"
+    sha=$(sha256sum "$bin" | cut -d' ' -f1)
+    printf '%s  ota_staged.bin\n' "$sha" | sshx 'cat > /var/lib/door-guard/ota_staged.bin.sha256'
+    ver=$(git -C "$DOORGUARD_ROOT" describe --always --dirty 2>/dev/null || date +%F-%H%M%S)
+    printf '%s\n' "$ver" | sshx 'cat > /var/lib/door-guard/ota_staged.ver'
+
+    echo "==> 等待 OTA 切槽(ota_watch 轮询 + 复核 + 原子切换)"
     new_slot=""
-done
-[ -n "$new_slot" ] || { echo "超时:槽位未切换(暂存包没被消费?看 /var/log/door-guard.log)"; exit 1; }
-echo "    已切槽 $cur_slot → $new_slot(版本 $ver)"
+    for _ in $(seq 1 20); do
+        sleep 2
+        new_slot=$(sshx 'basename "$(readlink /root/door-guard 2>/dev/null)" 2>/dev/null' || true)
+        [ -n "$new_slot" ] && [ "$new_slot" != "$cur_slot" ] && break
+        new_slot=""
+    done
+    [ -n "$new_slot" ] || { echo "超时:槽位未切换(暂存包没被消费?看 /var/log/door-guard.log)"; exit 1; }
+    echo "    已切槽 $cur_slot → $new_slot(版本 $ver)"
 
-echo "==> 等待新槽进程拉起"
-up=0
-for _ in $(seq 1 10); do
-    sleep 1
-    if sshx 'pidof door-guard >/dev/null 2>&1'; then up=1; break; fi
-done
-[ "$up" = 1 ] || echo "警告:进程尚未拉起(监督循环 3s 内会拉;若秒退 3 次会自动回滚旧槽)"
+    echo "==> 等待新槽进程拉起"
+    up=0
+    for _ in $(seq 1 10); do
+        sleep 1
+        if sshx 'pidof door-guard >/dev/null 2>&1'; then up=1; break; fi
+    done
+    [ "$up" = 1 ] || echo "警告:进程尚未拉起(监督循环 3s 内会拉;若秒退 3 次会自动回滚旧槽)"
 
-echo "==> md5 核对(本地产物 vs 板上新槽)"
-local_md5=$(md5sum "$bin" | cut -d' ' -f1)
-# GNU md5sum 对含反斜杠的文件名(Windows 路径直传)按转义规范整行加 "\" 前缀,
-# cut 取第一列会把前缀带进哈希造成"传输损坏"误报(2026-09-28 Windows 侧推板实测)
-local_md5=${local_md5#\\}
-board_md5=$(sshx "md5sum /root/$new_slot" | cut -d' ' -f1)
-if [ "$local_md5" != "$board_md5" ]; then
-    echo "md5 不一致!本地 $local_md5 板上 $board_md5 —— 传输损坏,请重推"
-    exit 1
+    echo "==> md5 核对(本地产物 vs 板上新槽)"
+    local_md5=$(md5sum "$bin" | cut -d' ' -f1)
+    # GNU md5sum 对含反斜杠的文件名(Windows 路径直传)按转义规范整行加 "\" 前缀,
+    # cut 取第一列会把前缀带进哈希造成"传输损坏"误报(2026-09-28 Windows 侧推板实测)
+    local_md5=${local_md5#\\}
+    board_md5=$(sshx "md5sum /root/$new_slot" | cut -d' ' -f1)
+    if [ "$local_md5" != "$board_md5" ]; then
+        echo "md5 不一致!本地 $local_md5 板上 $board_md5 —— 传输损坏,请重推"
+        exit 1
+    fi
+    echo "    md5 一致 $local_md5"
+
+    if [ "$follow" = 1 ]; then
+        echo "==> 跟踪日志(Ctrl-C 退出,不影响板上服务)"
+        sshx 'tail -n 40 -f /var/log/door-guard.log'
+    fi
+    echo "部署完成(槽 $new_slot,版本 $ver)"
+else
+    echo "资源部署完成(语言包/自启脚本;重启进程后生效)"
 fi
-echo "    md5 一致 $local_md5"
-
-if [ "$follow" = 1 ]; then
-    echo "==> 跟踪日志(Ctrl-C 退出,不影响板上服务)"
-    sshx 'tail -n 40 -f /var/log/door-guard.log'
-fi
-echo "部署完成(槽 $new_slot,版本 $ver)"
