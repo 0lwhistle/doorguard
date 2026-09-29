@@ -32,7 +32,7 @@ typedef enum {
     UI_EVT_QUALITY,        /**< 人脸质量判定(拍摄页:可拍/太糊/太小提示) */
     UI_EVT_NET_CFG_RESULT, /**< 网络配置应用结果(网络配置页弹窗) */
     UI_EVT_CAPTURE,        /**< 相机可用态(EV_CAPTURE_STATE;主页/拍摄页
-                                据此提示"摄像头未就绪"+预览清为半透明白) */
+                                据此提示「摄像头未就绪」+预览清为半透明白) */
 } ui_evt_kind_t;
 
 typedef struct {

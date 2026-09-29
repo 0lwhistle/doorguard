@@ -192,9 +192,10 @@ add_library(dg_ui STATIC
     ${DG_WIDGET_SRCS}
 )
 target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DIR}/services/access
-                                        ${CMAKE_SOURCE_DIR}/services/enroll)
+                                        ${CMAKE_SOURCE_DIR}/services/enroll
+                                        ${CMAKE_SOURCE_DIR}/services/capture)
 target_link_libraries(dg_ui PUBLIC lvgl dg_config dg_access dg_storage dg_jpeg
-                                   dg_net_info)
+                                   dg_net_info dg_capture)
 
 # access:验证状态机 + 认证融合服务(FSM 持有者,日志/开门唯一出口)
 add_library(dg_access STATIC
@@ -407,7 +408,8 @@ else()
         ${CMAKE_SYSROOT}/usr/include/rkaiq
         ${CMAKE_SYSROOT}/usr/include/rga)
     # rkaiq:3A 经板上 rkaiq_3A_server;librga:NV12→XRGB 硬件旋转转换
-    target_link_libraries(dg_camera PUBLIC rkaiq rga)
+    # dg_holder:取流成败同步 camera 模块健康态(sim 无硬件,不置态不用链)
+    target_link_libraries(dg_camera PUBLIC rkaiq rga dg_holder)
 endif()
 
 # LVGL9 最小渲染验证入口(C1 门禁工具):不依赖 ui 层,sim(SDL)与交叉(DRM)

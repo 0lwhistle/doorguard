@@ -209,7 +209,7 @@ static int on_net_cfg_result(const event_t *e, void *ud)
     return 0;
 }
 
-/* 相机断流(capture)→ 主页/拍摄页:提示"摄像头未就绪"+ 预览清半透明白 */
+/* 相机断流(capture)→ 主页/拍摄页:提示「摄像头未就绪」+ 预览清半透明白 */
 static int on_capture_state(const event_t *e, void *ud)
 {
     (void)ud;

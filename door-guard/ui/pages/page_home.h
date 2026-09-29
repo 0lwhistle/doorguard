@@ -23,7 +23,7 @@ void page_home_clear_facebox(void);
 /** 提示条(text 已翻译;NULL=隐藏) */
 void page_home_set_hint(const char *text);
 
-/** 相机可用态(2026-09-30 断流检测):不可用=提示条"摄像头未就绪"+ 清脸框
+/** 相机可用态(2026-09-30 断流检测):不可用=提示条「摄像头未就绪」+ 清脸框
  *  + 预览盖半透明白幕;恢复=撤白幕(提示条若仍是相机文案则一并清) */
 void page_home_set_cam_ready(bool ready);
 

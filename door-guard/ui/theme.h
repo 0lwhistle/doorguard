@@ -47,8 +47,8 @@ extern "C" {
 #define DG_OPA_CARD_LINE    LV_OPA_60  /**< 卡片白边透明度 */
 #define DG_OPA_TEXT_DIM     LV_OPA_COVER /**< 次要文字透明度(现为全显纯黑) */
 #define DG_OPA_VEIL         LV_OPA_90  /**< 相机不可用白幕(2026-09-30):近白
-                                            而微透,冻结帧从"假直播"变"明确
-                                            不可用";透出的暗底显出层次 */
+                                            而微透,冻结帧从「假直播」变「明确
+                                            不可用」;透出的暗底显出层次 */
 
 /* ---- 版式(720×1280 竖屏;DG_SCREEN_W/H 已上移 proto/types.h,
  * display 模块要用,不该反向依赖本头) ---- */

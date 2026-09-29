@@ -113,16 +113,6 @@ int camera_rotation(void)
     return 0;                               /* sim 帧即正立图,无旋转 */
 }
 
-bool camera_stream_on(void)
-{
-    return s_img_cnt > 0;                   /* 图片装载成功即视为取流中 */
-}
-
-int64_t camera_last_frame_ms(void)
-{
-    return s_last_frame_ms;
-}
-
 /* latest 双缓冲:投帧线程写 back,渲染端读 front(poll 与渲染同线程,直写即可) */
 static sim_image_t *s_latest = NULL;
 static uint32_t s_latest_seq = 0;
@@ -180,4 +170,15 @@ void camera_dmabuf_mark_shown(int slot)
 void camera_rgb_preview_set(bool on)
 {
     (void)on;
+}
+
+/* ---- 流健康事实(与板上后端同语义;sim 图片循环恒"在流") ---- */
+bool camera_stream_on(void)
+{
+    return s_img_cnt > 0;                   /* 图片装载成功即视为取流中 */
+}
+
+int64_t camera_last_frame_ms(void)
+{
+    return s_last_frame_ms;
 }

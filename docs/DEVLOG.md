@@ -29,8 +29,11 @@
    死机的正解是断电,软件只负责诚实降级+提示。
 5. 测试:test_capture_health 新增(include .c 直驱 static 状态机,相机
    事实用桩,8 场景);test_auth_fsm 增 F15(reason=9/密码照常/恢复复用)。
-   未跑通:Windows 侧只改码,WSL 编译+dg-test 待推。真机断流态表现待板
-   上人工验收(含断流瞬间 plane 隐藏的时序契约)。
+   dg-test 37/37 绿、dg-build 零告警(修三处:dg_ui 补 services/capture
+   include;dg_camera 链 dg_holder 取 include;ui 注释里 ASCII 引号包中文
+   会踩 test_i18n 逐行扫描器——注释引号一律用「」)。sim 侧 camera_sim
+   同步实现两个事实接口( getter 需在静态变量之后,语法单查过)。真机断
+   流态表现待板上人工验收(含断流瞬间 plane 隐藏的时序契约)。
 
 ---
 ## 2026-09-30(续)脚本收编进 env/bin:dg-font/dg-frontend;README 扩写为使用文档

@@ -18,7 +18,7 @@ void dg_preview_pump(lv_obj_t *p);
 
 /** 相机可用态(2026-09-30 断流检测配套):
  *  false = 停泵,plane 模式隐藏 video plane(冻结帧不再扫描),控件上盖
- *          半透明白幕——最后一帧从"假直播"变"明确不可用"(spec-ui §3.1);
+ *          半透明白幕——最后一帧从「假直播」变「明确不可用」(spec-ui §3.1);
  *  true  = 撤白幕恢复泵,plane 模式下一新帧自动重新 show。
  *  可用态变化时调用即可;状态由 capture_service 经 UI_EVT_CAPTURE 推送 */
 void dg_preview_set_available(lv_obj_t *p, bool avail);
