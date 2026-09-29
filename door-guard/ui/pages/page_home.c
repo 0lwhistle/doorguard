@@ -6,7 +6,9 @@
  */
 #include "page_home.h"
 #include "bridge/bridge.h"
+#include "capture_service.h"
 #include "dg_log.h"
+#include "i18n.h"
 #include "theme.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_popup.h"
@@ -28,6 +30,7 @@ static lv_obj_t *s_net = NULL;         /* WiFi 图标(绿=在线/红=离线) */
 static lv_obj_t *s_net_ip = NULL;      /* 图标旁 IP(调试便利;无网络=0.0.0.0) */
 static lv_timer_t *s_pump_timer = NULL;
 static lv_timer_t *s_status_timer = NULL;
+static bool s_cam_down = false;        /* 相机断流中(白幕+提示由本页持有) */
 
 /* ---- 相机帧 → 预览(dg_preview 控件,20ms 泵,2026-09-22 video-plane) ----
  * plane 模式:NV12 dma-buf 直送 VOP2 Overlay(zpos 在 UI 之下),控件只是
@@ -124,7 +127,7 @@ void page_home_create(lv_obj_t *parent)
     lv_obj_set_style_radius(s_hint, DG_RADIUS, 0);
     lv_obj_set_style_pad_hor(s_hint, 14, 0);
     lv_obj_set_style_pad_ver(s_hint, 6, 0);
-    lv_obj_align(s_hint, LV_ALIGN_TOP_MID, 0, 24);
+    lv_obj_align(s_hint, LV_ALIGN_TOP_MID, 0, 80);
     lv_obj_add_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
 
     /* 状态栏:左上实时时钟,右上网络图标。同款衬底 chip,从推流里「浮」出来。
@@ -182,6 +185,10 @@ void page_home_create(lv_obj_t *parent)
 
     s_pump_timer = lv_timer_create(canvas_timer_cb, 20, NULL); /* 50Hz 采样:相机
                                                                   30fps 自由跑,泵频高于帧频才不吃拍频损失(seq 去重后空转近乎零成本) */
+
+    /* 断流态跨页面存续(服务层持有),重建页面时找回——放在全部控件就位后,
+     * 提示条/脸框才能一并补渲染;切页回来不再重新露出冻结帧 */
+    page_home_set_cam_ready(capture_camera_ready());
 }
 
 void page_home_destroy(void)
@@ -248,4 +255,25 @@ void page_home_set_hint(const char *text)
     }
     lv_label_set_text(s_hint, text);
     lv_obj_clear_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* ---- 相机可用态(2026-09-30 断流检测) ---- */
+
+void page_home_set_cam_ready(bool ready)
+{
+    s_cam_down = !ready;
+    dg_preview_set_available(s_preview, ready);
+    if (!s_facebox)
+        return;                          /* 页面未创建:只登记,create 时补渲染 */
+    if (!ready) {
+        /* 断流中验证必然失败:脸框失去跟随对象,先清掉防悬空 */
+        page_home_clear_facebox();
+        page_home_set_hint(_("摄像头未就绪"));
+        return;
+    }
+    /* 恢复:只清自己的提示——验证流程的引导文案(请输密码等)若已覆盖,
+     * 说明用户正在无相机路径上操作,不得清掉 */
+    const char *cur = lv_label_get_text(s_hint);
+    if (cur && strcmp(cur, _("摄像头未就绪")) == 0)
+        page_home_set_hint(NULL);
 }

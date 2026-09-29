@@ -53,6 +53,9 @@
 ### 3.1 主页面(默认页,ST_NORMAL/ST_ADMIN_AUTH/ST_VERIFY 所在地)
 
 - 背景:摄像头实时推流(NV12 → RGA/DRM 上屏,或模拟器下视频源);LVGL 只叠 UI 层
+- **相机断流态(2026-09-30)**:capture 服务 5s 无新帧判停 → EV_CAPTURE_STATE;
+  预览停泵 + plane 隐藏 + 盖 `DG_OPA_VEIL` 半透明白幕(冻结帧不许冒充直播),
+  提示条"摄像头未就绪";人脸 1:1 步立即 reason=9(spec-auth §5)。恢复自动撤幕
 - 脸框 overlay:黄=检测到;绿=1:N/1:1 命中;红=失败/陌生人/黑名单(跟随人脸矩形)
 - 下方两个按钮:**菜单**(左下,`LV_SYMBOL_SETTINGS`)、**验证**(右下,`LV_SYMBOL_OK`);
   行为见 spec-auth-business.md

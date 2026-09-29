@@ -195,6 +195,10 @@ static void home_on_evt(const ui_evt_t *evt)
     case UI_EVT_HINT_CLEAR:
         page_home_set_hint(NULL);
         break;
+    case UI_EVT_CAPTURE:
+        /* 相机断流/恢复(capture 服务):提示条 + 预览半透明白幕(spec-ui §3.1) */
+        page_home_set_cam_ready(evt->cam_ready);
+        break;
     case UI_EVT_AUTH_RESULT:
         break;                               /* web/日志侧消费;主页文案走 EV_UI_RESULT */
     case UI_EVT_GOTO_PAGE:

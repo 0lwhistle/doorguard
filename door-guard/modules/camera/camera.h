@@ -43,6 +43,17 @@ const camera_frame_t *camera_latest(void);
 /** sim 后端帧率(ms/帧) */
 void camera_sim_set_interval(uint32_t ms);
 
+/* ---- 流健康事实(断流检测用;capture_service 据此判停,holder 置态) ----
+ * 板上传感器偶发死机(重启都救不回、须断电 5s)时 V4L2 不再出帧:seq 停止
+ * 增长但 latest/dmabuf 仍是旧帧,UI 冻屏。这里只给"事实",停滞判定策略在
+ * capture_service(服务层)。 */
+
+/** 取流是否已启动(STREAMON 完成);不含"是否有帧" */
+bool camera_stream_on(void);
+
+/** 最近一帧的单调时刻 ms(0 = 从未出帧)。板上每个成功 DQBUF 刷新 */
+int64_t camera_last_frame_ms(void);
+
 /** 预览旋转角(0/90/180/270,DG_CAM_ROT;视觉链路须把检测输入旋到同一
  * 方向,框/关键点才与预览同域——见 npu_pre_nv12_rotate)。未就绪时也给
  * 配置值:它来自环境变量,camera_init 时即定 */

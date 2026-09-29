@@ -209,6 +209,18 @@ static int on_net_cfg_result(const event_t *e, void *ud)
     return 0;
 }
 
+/* 相机断流(capture)→ 主页/拍摄页:提示"摄像头未就绪"+ 预览清半透明白 */
+static int on_capture_state(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_CAPTURE;
+    evt.cam_ready = ((const ev_capture_state_t *)e->data)->ready;
+    ui_evt_push(&evt);
+    return 0;
+}
+
 void bridge_init(void)
 {
     event_bus_subscribe(EV_VISION_FACE_BOX, on_face_box, NULL);
@@ -228,7 +240,8 @@ void bridge_init(void)
     event_bus_subscribe(EV_ENROLL_RESULT, on_enroll_result, NULL);
     event_bus_subscribe(EV_VISION_QUALITY, on_vision_quality, NULL);
     event_bus_subscribe(EV_NET_CFG_RESULT, on_net_cfg_result, NULL);
-    DG_LOGI("[BRIDGE]", "事件桥就绪(17 订阅)");
+    event_bus_subscribe(EV_CAPTURE_STATE, on_capture_state, NULL);
+    DG_LOGI("[BRIDGE]", "事件桥就绪(18 订阅)");
 }
 
 void bridge_btn(const ev_ui_btn_t *btn)

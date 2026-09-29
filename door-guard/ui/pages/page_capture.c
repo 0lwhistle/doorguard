@@ -15,6 +15,7 @@
  * 与事件的 verdict 字段同源,不引入业务调用)。
  */
 #include "dg_log.h"
+#include "capture_service.h"
 #include "err.h"
 #include "enroll_service.h"
 #include "events.h"
@@ -203,6 +204,8 @@ static void on_done(lv_event_t *e)
 
 /* ---- 事件(LVGL 线程,经 bridge 入队) ---- */
 
+static void capture_cam_apply(bool ready);
+
 static void on_evt(const ui_evt_t *evt)
 {
     switch (evt->kind) {
@@ -238,8 +241,30 @@ static void on_evt(const ui_evt_t *evt)
             set_state_live();
         }
         break;
+    case UI_EVT_CAPTURE:
+        /* 断流:预览盖半透明白幕 + 提示(质量事件不会再有,拍摄等
+         * 超时失败路径兜底);恢复即撤幕 */
+        capture_cam_apply(evt->cam_ready);
+        break;
     default:
         break;
+    }
+}
+
+/* ---- 相机可用态(2026-09-30 断流检测) ---- */
+
+static void capture_cam_apply(bool ready)
+{
+    dg_preview_set_available(s_preview, ready);
+    if (!s_hint)
+        return;
+    if (!ready) {
+        /* 质量提示 同一 chip 复用:断流时质量事件不会再有,直接顶掉 */
+        lv_label_set_text(s_hint, _("摄像头未就绪"));
+        lv_obj_set_style_text_color(s_hint, DG_COL_WARN(), 0);
+        lv_obj_clear_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
+    } else if (strcmp(lv_label_get_text(s_hint), _("摄像头未就绪")) == 0) {
+        lv_obj_add_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -342,6 +367,8 @@ void page_capture_create(lv_obj_t *parent)
 
     s_pump_timer = lv_timer_create(canvas_timer_cb, 20, NULL); /* 50Hz 泵,同主页 */
     set_state_live();
+    /* 断流态跨页面存续:进页即找回(否则带冻结帧拍摄) */
+    capture_cam_apply(capture_camera_ready());
 }
 
 void page_capture_destroy(void)

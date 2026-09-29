@@ -69,6 +69,8 @@ typedef enum {
     FSM_EV_TIMER,               /**< 定时器到期(data: timer_evt_t) */
     FSM_EV_TOUCH,               /**< 任意触摸(data: now_ms) */
     FSM_EV_TICK,                /**< 1s 心跳(data: now_ms,用于待机/锁定计时) */
+    FSM_EV_CAM_STATE,           /**< 相机可用态(data: cam_ready;断流时人脸
+                                     1:1 步立即 reason=9,不空等 5s 超时) */
 } fsm_event_t;
 
 typedef struct {
@@ -109,6 +111,7 @@ typedef union {
     fsm_verify_result_t result;
     fsm_timer_evt_t timer;
     int64_t now_ms;
+    bool cam_ready;                /**< FSM_EV_CAM_STATE:相机断流检测(capture) */
 } fsm_event_data_t;
 
 /* ---- 定时器用途(FSM 声明,外部实现) ---- */
@@ -233,6 +236,10 @@ typedef struct {
      *  结束回普通模式时用:人还站在镜头前就不对同一场重开判定窗(补枪
      *  「验证失败」),走开再来才算新的一次 */
     bool face_present;
+
+    /** 相机流可用(capture 服务 EV_CAPTURE_STATE 喂入,init=true 乐观值;
+     *  只挡"选了人脸方式"这一步——断流时无脸事件,判定窗天然不开) */
+    bool cam_ready;
 
     /** 管理员人数(FSM_EV_ADMIN_COUNT 回填;<0 = 未知)。=0 时菜单免认证进入:
      *  新机/管理员被删光的情形下,要求管理员认证会让菜单永远进不去(鸡生蛋) */

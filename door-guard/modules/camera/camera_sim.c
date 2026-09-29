@@ -113,9 +113,20 @@ int camera_rotation(void)
     return 0;                               /* sim 帧即正立图,无旋转 */
 }
 
+bool camera_stream_on(void)
+{
+    return s_img_cnt > 0;                   /* 图片装载成功即视为取流中 */
+}
+
+int64_t camera_last_frame_ms(void)
+{
+    return s_last_frame_ms;
+}
+
 /* latest 双缓冲:投帧线程写 back,渲染端读 front(poll 与渲染同线程,直写即可) */
 static sim_image_t *s_latest = NULL;
 static uint32_t s_latest_seq = 0;
+static int64_t s_last_frame_ms = 0;          /* 与板上后端同款的流健康事实 */
 
 const camera_frame_t *camera_latest(void)
 {
@@ -141,6 +152,7 @@ void camera_poll(void)
     sim_image_t *img = &s_imgs[s_cur];
     s_latest = img;
     s_latest_seq = ++s_seq;
+    s_last_frame_ms = now;
 
     if (s_cb) {
         camera_frame_t frame = {

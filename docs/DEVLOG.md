@@ -4,6 +4,35 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-30(续2)相机断流检测:holder 置态 + UI 半透明白幕 + 人脸 reason=9 快速失败
+
+1. 背景:IMX415 偶发硬件死机(重启都救不回,须断电 5s),现象=预览冻结
+   在最后一帧假装直播。旧 capture_service 用 `camera_latest()!=NULL` 判
+   就绪,只能发现"从未出流",发现不了"流过但死了"。
+2. 链路(全事件驱动,零跨层直调):camera 模块新暴露流健康事实
+   `camera_stream_on()/camera_last_frame_ms()`(板上=每次成功 DQBUF 刷新,
+   死机时停止);capture_service 1s 巡检跑 WAIT/FLOW/DOWN 状态机——5s 无
+   新帧判停(检出延迟 5~6s)、流起但 8s 从未出帧也判停;状态变化才发布
+   EV_CAPTURE_STATE(契约未动,还是 {ready} 单字段),同时 holder
+   "camera" 模块置 ERROR/READY(取流线程启动成败也同步 holder,运行期
+   `holder_is_module_ready("camera")` 从此可答"相机能不能用")。
+3. 消费侧三路:①bridge 17→18 订阅 → UI_EVT_CAPTURE → 主页/拍摄页
+   `dg_preview_set_available(false)`:停泵 + plane 隐藏 + 控件盖
+   DG_OPA_VEIL(LV_OPA_90)半透明白幕,提示"摄像头未就绪"(键已在语言包,
+   字库无需重生成);切页回来经 capture_camera_ready() 找回断流态,不再
+   露出冻结帧。②FSM 订阅(FSM_EV_CAM_STATE):断流中选 1:1 人脸立即
+   fail_and_back(reason=9"摄像头未就绪"),不空等 5s 超时;密码/指纹/IC
+   照常——spec-auth §5-113 的"立刻失败"至此真正落地。③恢复=帧回来自动
+   撤幕回正常,无人值守自愈。
+4. 不做自动重推流:卡死的 ISP 恰恰可能让 STREAMOFF 阻塞主循环(10s 被
+   看门狗杀),且用户实拍"重启都没用"——软件重试收益低风险高;硬件级
+   死机的正解是断电,软件只负责诚实降级+提示。
+5. 测试:test_capture_health 新增(include .c 直驱 static 状态机,相机
+   事实用桩,8 场景);test_auth_fsm 增 F15(reason=9/密码照常/恢复复用)。
+   未跑通:Windows 侧只改码,WSL 编译+dg-test 待推。真机断流态表现待板
+   上人工验收(含断流瞬间 plane 隐藏的时序契约)。
+
+---
 ## 2026-09-30(续)脚本收编进 env/bin:dg-font/dg-frontend;README 扩写为使用文档
 
 1. 新增 env/bin/dg-font(字库重生成,包装 ui/font/gen.sh)与 dg-frontend

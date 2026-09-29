@@ -19,6 +19,8 @@
 typedef struct {
     char tag[10];
     bool plane;                /* true=硬件 plane 直通;false=软渲染回退 */
+    bool avail;                /* 相机可用(capture 断流检测置 false 停泵) */
+    lv_obj_t *veil;            /* 不可用白幕(半透明白,盖住冻结帧) */
     /* 软渲染路径状态 */
     lv_obj_t *img;             /* 回退路径的 lv_img 控件 */
     lv_image_dsc_t dsc;
@@ -143,6 +145,7 @@ lv_obj_t *dg_preview_create(lv_obj_t *parent, const char *log_tag)
     if (!st)
         return NULL;
     snprintf(st->tag, sizeof(st->tag), "%s", log_tag);
+    st->avail = true;
 
     lv_obj_t *p;
     if (display_has_video_plane()) {
@@ -160,14 +163,46 @@ lv_obj_t *dg_preview_create(lv_obj_t *parent, const char *log_tag)
         camera_rgb_preview_set(true);
         DG_LOGI(st->tag, "preview=软渲染回退");
     }
+
+    /* 不可用白幕:两条路径统一盖在预览区上(plane 在 UI 下层,白幕在 UI
+     * 层;软渲染的冻结帧是 img 内容,白幕是 img 子对象压在上面)。近白
+     * 微透(DG_OPA_VEIL):透出的暗底让"盖着东西"可感知,区别于死屏 */
+    st->veil = lv_obj_create(p);
+    lv_obj_remove_style_all(st->veil);
+    lv_obj_set_size(st->veil, DG_SCREEN_W, DG_SCREEN_H);
+    lv_obj_set_style_bg_color(st->veil, DG_COL_BG(), 0);
+    lv_obj_set_style_bg_opa(st->veil, DG_OPA_VEIL, 0);
+    lv_obj_clear_flag(st->veil, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(st->veil, LV_OBJ_FLAG_HIDDEN);
+
     lv_obj_set_user_data(p, st);
     return p;
+}
+
+void dg_preview_set_available(lv_obj_t *p, bool avail)
+{
+    st_t *st = p ? (st_t *)lv_obj_get_user_data(p) : NULL;
+    if (!st || st->avail == avail)
+        return;
+    st->avail = avail;
+    if (avail) {
+        lv_obj_add_flag(st->veil, LV_OBJ_FLAG_HIDDEN);
+        /* 不主动 show plane:恢复流后的第一个新 seq 由 pump 正常上屏 */
+        return;
+    }
+    /* 断流:停泵防"白幕下 plane 还在被新帧刷新";已扫描的冻结帧随
+     * plane 隐藏消失,白幕(90% 白)透出暗底=明确的不可用态 */
+    if (st->plane) {
+        display_video_plane_hide();
+        camera_dmabuf_mark_shown(-1);
+    }
+    lv_obj_clear_flag(st->veil, LV_OBJ_FLAG_HIDDEN);
 }
 
 void dg_preview_pump(lv_obj_t *p)
 {
     st_t *st = p ? (st_t *)lv_obj_get_user_data(p) : NULL;
-    if (!st)
+    if (!st || !st->avail)
         return;
     if (st->plane)
         pump_plane(st);

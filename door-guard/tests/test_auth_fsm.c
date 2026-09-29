@@ -967,6 +967,49 @@ static void t14_presence_dedup_and_touch(void)
              FSM_TMR_MATCH_WINDOW);                     /* 新在场重新判定 */
 }
 
+/* ================= 15 相机断流:人脸方式立即 reason=9(2026-09-30) ================= */
+
+static void cam_state(bool ready)
+{
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.cam_ready = ready;
+    auth_fsm_handle(&s_fsm, FSM_EV_CAM_STATE, &d);
+}
+
+static void t15_cam_down(void)
+{
+    printf("[F15] 相机断流:人脸 1:1 立即 reason=9;密码照常;恢复后人脸可用\n");
+
+    /* 断流中选人脸:立即失败(不进 V_FACE_1V1 子步、不空等 5s),日志 reason=9 */
+    fsm_reset();
+    cam_state(false);
+    uid_flow("10001", true, DG_ROLE_NORMAL, DG_AUTH_FACE | DG_AUTH_PWD);
+    DG_CHECK(s_fsm.step == V_PICK_METHOD);
+    method_pick(DG_METHOD_FACE_11);
+    DG_CHECK(s_fsm.state == ST_RESULT);
+    const act_rec_t *log = last_act(FSM_ACT_WRITE_LOG);
+    DG_CHECK(log && log->d.log.method == DG_METHOD_FACE_11);
+    DG_CHECK(log && log->d.log.reason == DG_REASON_DEVICE_ERR);
+
+    /* 密码方式不经相机:断流中照常进入子步 */
+    timer_fire(FSM_TMR_RESULT_3S);
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+    uid_flow("10001", true, DG_ROLE_NORMAL, DG_AUTH_FACE | DG_AUTH_PWD);
+    DG_CHECK(s_fsm.step == V_PICK_METHOD);
+    method_pick(DG_METHOD_PWD);
+    DG_CHECK(s_fsm.step == V_PWD);
+
+    /* 流恢复:取消本流程回普通,人脸方式重新可进子步 */
+    cam_state(true);
+    auth_fsm_handle(&s_fsm, FSM_EV_BACK, NULL);
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+    uid_flow("10001", true, DG_ROLE_NORMAL, DG_AUTH_FACE);
+    DG_CHECK(s_fsm.step == V_PICK_METHOD);
+    method_pick(DG_METHOD_FACE_11);
+    DG_CHECK(s_fsm.step == V_FACE_1V1);
+}
+
 
 int main(void)
 {
@@ -990,6 +1033,7 @@ int main(void)
     t12_menu_entry_and_verify_flow();
     t13_presence_window();
     t14_presence_dedup_and_touch();
+    t15_cam_down();
 
     DG_TEST_EXIT();
 }

@@ -25,6 +25,7 @@
  */
 #include "camera.h"
 #include "dg_log.h"
+#include "holder.h"
 
 #include "im2d.h"
 #include "uAPI2/rk_aiq_user_api2_imgproc.h"
@@ -80,6 +81,9 @@ static uint8_t *s_out[3];
 static int s_out_idx;
 static camera_frame_t s_frame;
 static uint32_t s_seq;
+static int64_t s_last_frame_ms;              /* 最近成功 DQBUF 的单调时刻(0=从未);
+                                                相机死机时停止刷新,capture_service
+                                                据此判停(策略在服务层,这里只记事实) */
 static camera_nv12_fn s_nv12_fn;             /* 视觉帧监听(可空) */
 static camera_nv12_release_fn s_nv12_rel;
 static bool s_busy[CAM_BUF_CNT];             /* ROCKIVA 占用中,归还待 release */
@@ -94,6 +98,13 @@ static const char *env_or(const char *k, const char *dflt)
 {
     const char *v = getenv(k);
     return (v && v[0]) ? v : dflt;
+}
+
+static int64_t mono_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
 static int xioctl(int fd, unsigned long req, void *arg)
@@ -213,8 +224,12 @@ static void *stream_thread(void *arg)
     nanosleep(&ts, NULL);
     if (v4l2_setup() != DG_OK) {
         DG_LOGE(CAM_TAG, "取流线程:V4L2 初始化失败(相机未就绪,不影响 UI)");
+        /* init 是异步的,holder 里 camera 的 READY 是"模块装上了";
+         * 流真正起来/失败在这里才见分晓,同步给 holder 供运行期健康查询 */
+        holder_set_module_state("camera", HOLDER_MODULE_STATE_ERROR);
         return NULL;
     }
+    holder_set_module_state("camera", HOLDER_MODULE_STATE_READY);
     s_ready = true;
     DG_LOGI(CAM_TAG, "相机后端就绪:%dx%d NV12 → RGA rot=%d → %dx%d XRGB%s",
             s_cap_w, s_cap_h, s_rot, s_out_w, s_out_h,
@@ -437,9 +452,11 @@ void camera_poll(void)
     buf.m.planes = planes;
 
     if (xioctl(s_vfd, VIDIOC_DQBUF, &buf) < 0)
-        return; /* EAGAIN=暂无帧,轮询节奏本来就密 */
+        return; /* EAGAIN=暂无帧,轮询节奏本来就密;传感器死机时永远走这里,
+                   s_seq/s_last_frame_ms 停止刷新 → capture_service 判停 */
 
     int idx = buf.index;
+    s_last_frame_ms = mono_ms();
     s_seq++;                                 /* 帧序号与消费路径解耦:RGA 失败
                                                 也照常发号,视觉/直通不受牵连 */
     if (s_rgb_preview && convert_frame_rgb(idx)) {
@@ -516,6 +533,16 @@ void camera_nv12_release(uint32_t frame_id)
 int camera_rotation(void)
 {
     return s_rot;                           /* camera_init 即从 env 定死 */
+}
+
+bool camera_stream_on(void)
+{
+    return s_ready && s_stream_on;
+}
+
+int64_t camera_last_frame_ms(void)
+{
+    return s_last_frame_ms;
 }
 
 const camera_frame_t *camera_latest(void)

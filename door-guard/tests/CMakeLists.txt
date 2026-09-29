@@ -15,6 +15,8 @@ dg_add_test(test_event_bus dg_event_bus)
 dg_add_test(test_event_bus_stress dg_event_bus)
 dg_add_test(test_tasker dg_tasker)
 dg_add_test(test_holder dg_holder)
+# include 被测 .c 直驱 static 状态机:相机事实用桩,依赖挂真库
+dg_add_test(test_capture_health dg_event_bus dg_tasker dg_holder dg_timeutil dg_proto)
 dg_add_test(test_registry dg_registry)
 dg_add_test(test_proto dg_proto)
 dg_add_test(test_valid dg_proto)

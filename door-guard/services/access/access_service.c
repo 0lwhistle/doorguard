@@ -361,6 +361,17 @@ static int on_face_lost(const event_t *e, void *ud)
     return 0;
 }
 
+/* 相机断流(capture 服务)→ FSM:人脸 1:1 步据此立即 reason=9(spec §5-113) */
+static int on_capture_state(const event_t *e, void *ud)
+{
+    (void)ud;
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.cam_ready = ((const ev_capture_state_t *)e->data)->ready;
+    fsm_feed(FSM_EV_CAM_STATE, &d);
+    return 0;
+}
+
 /* 1:1 比对结果(vision 只在通过时发布)→ FSM 统一结果处理
  * (auth_fsm.c 的 FSM_EV_VERIFY_11 分支;FSM 不重复实现,只做搬运) */
 static int on_verify_11(const event_t *e, void *ud)
@@ -517,6 +528,7 @@ int access_service_start(void)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_TOUCH, on_touch, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_ACCESS_TIMER, on_access_timer, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_ACCESS_TICK, on_access_tick, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_CAPTURE_STATE, on_capture_state, NULL);
 
     if (tasker_task_init_li(&s_tick_node, 1000, TASK_CNT_INF, "access_tick",
                             tick_task, NULL) != TASK_OK ||

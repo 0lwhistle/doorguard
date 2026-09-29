@@ -243,7 +243,9 @@ target_link_libraries(dg_enroll PUBLIC dg_proto dg_storage dg_vision)
 # capture:取流状态服务
 add_library(dg_capture STATIC services/capture/capture_service.c)
 target_include_directories(dg_capture PUBLIC ${CMAKE_SOURCE_DIR}/services/capture)
-target_link_libraries(dg_capture PUBLIC dg_proto dg_tasker)
+# holder/时间:断流判停的置态与单调时基;camera 事实接口故意不链(宿主测试
+# 以桩顶替,板上由 door-guard 主链接的 dg_camera 提供)
+target_link_libraries(dg_capture PUBLIC dg_proto dg_tasker dg_holder dg_timeutil)
 
 # gpio:门控(sysfs;rootfs 带 libgpiod 后迁移)
 add_library(dg_gpio STATIC drv/gpio/gpio_hal.c)
