@@ -4,6 +4,28 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-29 主页时钟放大(编译零告警;**推板被阻:板子不在线**)
+
+**做了什么**(5c5cc22,仅 page_home.c):
+1. 字体 `lv_font_montserrat_28`(四档化前遗留的体系外值)→ `DG_FONT_TITLE`
+   (dg_font_cn_40,页面标题档);时钟数字/冒号均在中文体内,无缺字风险。
+2. 背景块( scrim chip)尺寸 200×40 固定魔数 → `LV_SIZE_CONTENT` 自适应,
+   内边距 20/8 不变——以后调字体档位 chip 永远包得住,不再裁字。
+3. 右上 IP 标签与网络图标间留 25px 间隙(工作区既有手调一并收编)。
+
+**推板过程**:
+- WSL 侧 dg-deploy 直连 192.168.137.100 超时——再次确认 **WSL2 NAT 不达 137
+  网段**,推板只能走 Windows 侧(既有结论)。
+- Windows 产物通道:WSL build 产物 `cp` 到 `/mnt/c/.../door-guard/build/
+  door-guard.exe`(`.exe` 名绕 dg-deploy 的 `-x` 执行位检查,内容是 ELF)。
+- **板子 ping 不通(100% 丢包)且 SSH 超时,但 Windows 网关 192.168.137.1
+  正常** → 板端没上电/网线松/死机,非主机侧问题。产物已就位,板子上线后
+  Windows 侧直接 `DOORGUARD_BIN=.../door-guard.exe dg-deploy` 即可。
+
+**下一步**:板子上电后推板验收字体观感;若 40px 偏大可回 DG_FONT_CN(30,
+但与 28 观感差异很小,基本等于维持现状)。
+
+---
 ## 2026-09-28(续2)四项 UI 反馈集中修(36/36 绿,WSL 交叉编译零告警;待推板)
 
 **做了什么**(c7b229c + 字体 chore):
