@@ -2,6 +2,9 @@
 # door-guard 单元测试(宿主 gcc + ctest)。用法: dg-test [--tsan] [-c]
 #   --tsan  另建 ThreadSanitizer 构建目录并跑全部用例(并发组件验收要求)
 #   -c      删除构建目录全新配置
+#
+# 构建目录在 WSL 内默认走 ext4(env.sh 的 DG_TEST_BUILD_DIR),configure 按需跑
+# ——与 dg-build 同一套提速逻辑,理由见其头注(2026-09-29)
 set -euo pipefail
 
 : "${DOORGUARD_ROOT:?请先 source env/env.sh}"
@@ -20,13 +23,15 @@ build_tests() {
     local dir="$1"; shift
     cd "$DOORGUARD_ROOT/door-guard"
     [ "$clean" = 1 ] && rm -rf "$dir"
-    cmake -B "$dir" -DDG_BUILD_TESTS=ON "$@" >/dev/null
+    if [ ! -f "$dir/CMakeCache.txt" ]; then
+        cmake -B "$dir" -DDG_BUILD_TESTS=ON "$@" >/dev/null
+    fi
     cmake --build "$dir" -j"$(nproc)"
     ctest --test-dir "$dir" --output-on-failure
 }
 
 if [ "$tsan" = 1 ]; then
-    build_tests build-tests-tsan -DCMAKE_C_FLAGS="-fsanitize=thread -g -O1"
+    build_tests "${DG_TEST_BUILD_DIR:-build-tests}-tsan" -DCMAKE_C_FLAGS="-fsanitize=thread -g -O1"
 else
-    build_tests build-tests
+    build_tests "${DG_TEST_BUILD_DIR:-build-tests}"
 fi

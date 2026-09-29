@@ -161,7 +161,9 @@ static void probe_ranges(dg_touch_t *t)
 static int open_best_touch(void)
 {
     int cand = -1;
-    char cand_desc[96] = "";
+    /* 192 = path[31]+"("+name[127]+")"+NUL 的可证明上限;-O3 的
+     * -Wformat-truncation=2 会按最坏情况建模,96 必被告警 */
+    char cand_desc[192] = "";
     char path[32], name[128];
     for (int i = 0; i < 32; i++) {
         snprintf(path, sizeof(path), "/dev/input/event%d", i);

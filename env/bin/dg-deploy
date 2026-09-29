@@ -22,7 +22,9 @@ fi
 ip="${1:-${DOORGUARD_IP:-}}"
 [ -n "$ip" ] || { echo "用法: dg-deploy [-r] <板子IP>,或先 export DOORGUARD_IP=<IP>"; exit 1; }
 
-bin="${DOORGUARD_BIN:-$DOORGUARD_ROOT/door-guard/build/door-guard}"
+# 产物路径与 dg-build 同源(env.sh 的 DG_BUILD_DIR,WSL 内在 ext4);
+# Windows 侧备用路不带 env.sh → 回退盘内路径,或显式 DOORGUARD_BIN=...exe
+bin="${DOORGUARD_BIN:-${DG_BUILD_DIR:-$DOORGUARD_ROOT/door-guard/build}/door-guard}"
 [ -x "$bin" ] || { echo "没有编译产物,先执行 dg-build"; exit 1; }
 
 # DOORGUARD_SSH_PORT 非空 = 全部 ssh/scp 走该端口(如 WSL 经 Windows

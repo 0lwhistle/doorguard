@@ -53,10 +53,15 @@ static void refresh_list(void)
     if (enroll_service_user_page(s_rows, USERS_PAGE_SIZE, &n, &total) != DG_OK)
         return;
     for (uint32_t i = 0; i < n; i++) {
-        char rowtxt[DG_UID_LEN + DG_NAME_LEN + 16];
-        snprintf(rowtxt, sizeof(rowtxt), "%s %s [%s]", s_rows[i].user_id,
-                 s_rows[i].user_name, role_name(s_rows[i].role));
-        snprintf(s_row_uids[i], sizeof(s_row_uids[i]), "%s", s_rows[i].user_id);
+        /* 全部参数带精度上限:-O3 的 -Wformat-truncation=2 对未知长度 %s
+         * 按最坏情况建模必告警;上限只影响展示,uid/角色名实际远短于此 */
+        char rowtxt[DG_UID_LEN + DG_NAME_LEN + 32];
+        snprintf(rowtxt, sizeof(rowtxt), "%.*s %.*s [%.24s]",
+                 DG_UID_LEN - 1, s_rows[i].user_id,
+                 DG_NAME_LEN - 1, s_rows[i].user_name,
+                 role_name(s_rows[i].role));
+        /* 整块拷贝(dst/src 同为 char[DG_UID_LEN]):等价且绕开格式分析误报 */
+        memcpy(s_row_uids[i], s_rows[i].user_id, DG_UID_LEN);
         /* 行首头像缩略图(40×40,libjpeg 1/4 缩放解码 + 控件内缓存);
          * 无头像传 NULL,行为与旧列表一致 */
         lv_obj_t *row = dg_list_add_row(s_list, dg_avatar_get(s_rows[i].user_id, DG_AVATAR_THUMB),

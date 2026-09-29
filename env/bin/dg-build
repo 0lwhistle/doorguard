@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # 编译 door-guard(WSL 交叉编译)。用法: dg-build [-c] [追加的 cmake 配置参数...]
-#   -c   删掉 build/ 全新配置(工具链/工具链文件变更后用)
+#   -c   全新配置(删构建目录重来;工具链/全局编译参数变更后用)
+#
+# 提速三件套(2026-09-29,实测盘内"改一个文件要 2.5 分钟"的归因):
+#   1. 构建目录默认在 ext4(env.sh 的 DG_BUILD_DIR)——/mnt/c drvfs 上空跑
+#      configure 62s + 空跑 build 44s,编译本身只占十几秒,I/O 才是大头
+#   2. configure 按需跑(无缓存/-c/带参数):CMakeLists 变更由 cmake --build
+#      的重生成规则自动兜底,新增源文件靠 GLOB 的 CONFIGURE_DEPENDS 兜底
+#   3. 默认 Release(-O3,可用 DG_BUILD_TYPE 覆盖)。注意 -O3 是运行时收益,
+#      不减少编译耗时;此前推板产物一直跑 -O0 Debug,板上渲染白白吃亏
 set -euo pipefail
 
 : "${DOORGUARD_ROOT:?请先 source env/env.sh}"
@@ -12,10 +20,29 @@ if [ "${1:-}" = "-c" ]; then
 fi
 
 cd "$DOORGUARD_ROOT/door-guard"
-[ "$clean" = 1 ] && rm -rf build
+BUILD_DIR="${DG_BUILD_DIR:-$DOORGUARD_ROOT/door-guard/build}"
 
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64.cmake "$@"
-cmake --build build -j"$(nproc)"
+[ "$clean" = 1 ] && rm -rf "$BUILD_DIR"
 
+need_cfg=0
+[ -f "$BUILD_DIR/CMakeCache.txt" ] || need_cfg=1
+if [ "$#" -gt 0 ]; then need_cfg=1; fi
+if [ "$need_cfg" = 1 ]; then
+    cfg=(-DCMAKE_BUILD_TYPE="${DG_BUILD_TYPE:-Release}")
+    # ccache 装了就自动接上(重复编译直接命中;没装不阻塞,装完下次 -c 生效)
+    command -v ccache >/dev/null 2>&1 && cfg+=(-DCMAKE_C_COMPILER_LAUNCHER=ccache)
+    cmake -B "$BUILD_DIR" -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64.cmake "${cfg[@]}" "$@"
+else
+    echo "==> 复用已有配置 $BUILD_DIR(全新配置用 dg-build -c)"
+fi
+
+t0=$SECONDS
+cmake --build "$BUILD_DIR" -j"$(nproc)"
 echo
-echo "产物: door-guard/build/door-guard   (推送板子: dg-deploy [-r] [IP])"
+echo "编译完成:$((SECONDS - t0))s"
+echo "产物: $BUILD_DIR/door-guard   (推送板子: dg-deploy [-r] [IP])"
+
+# 旧盘内产物必须清掉:dg-deploy 的回退默认路径仍指着它,留着必出"推了旧包"事故
+if [ "$BUILD_DIR" != "$DOORGUARD_ROOT/door-guard/build" ]; then
+    rm -f "$DOORGUARD_ROOT/door-guard/build/door-guard"
+fi

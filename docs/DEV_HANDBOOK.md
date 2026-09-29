@@ -206,6 +206,12 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 ### 7.1 Windows 侧推板(WSL 到板网络不通时的备用路径,2026-09-27 实测)
 
 - 前提:WSL 的 ssh 私钥已拷到 Windows ~/.ssh/(git bash 可直连 root@192.168.137.100)
+- **2026-09-29 起构建目录默认在 WSL ext4**(env.sh 自动 export):交叉产物在
+  `~/dg-build/aarch64-<仓库路径哈希>/door-guard`,宿主测试/PC 模拟器在
+  `~/dg-build/{tests,pc}-<哈希>/`(两克隆各一份缓存不串)。dg-deploy 默认直取
+  DG_BUILD_DIR;Windows 侧备用推板从这里把产物拷到 /mnt/c 改 .exe。盘内
+  door-guard/build/door-guard 旧产物会被 dg-build 自动清掉(防推旧包),别再
+  指望盘内 build/ 有新产物
 - 产物:/home/olwhistle/doorguard/door-guard/build/door-guard 拷到 Windows 真实路径
   (/mnt/c/...);git bash 的 chmod 对 NTFS 无效,拷贝后缀改 .exe 即可过 dg-deploy
   的可执行检查,export DOORGUARD_BIN=C:/...(dg-new.exe)

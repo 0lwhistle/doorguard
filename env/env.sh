@@ -30,9 +30,24 @@ fi
 # 板子 IP:dg-deploy 可省参数;换 IP 时 export DOORGUARD_IP=新IP 或改这里
 export DOORGUARD_IP="${DOORGUARD_IP:-192.168.137.100}"
 
+# 构建目录(WSL 内默认放 ext4):编译耗时大头是 /mnt/c drvfs 的慢 I/O,不是编译
+# (2026-09-29 实测:盘内空跑 configure 62s + 空跑 build 44s,编译本身仅十几秒;
+#  同样的活迁 ext4 后秒级)。后缀取仓库路径哈希:/mnt/c 与 WSL 本地两个克隆
+# 各用各的缓存互不串。要改回盘内:export DG_BUILD_DIR=<盘内路径> 即可
+if grep -qi microsoft /proc/version 2>/dev/null; then
+    _dg_key="$(printf %s "$DOORGUARD_ROOT" | md5sum | cut -c1-8)"
+    export DG_BUILD_DIR="${DG_BUILD_DIR:-$HOME/dg-build/aarch64-$_dg_key}"
+    export DG_TEST_BUILD_DIR="${DG_TEST_BUILD_DIR:-$HOME/dg-build/tests-$_dg_key}"
+    export DG_PC_BUILD_DIR="${DG_PC_BUILD_DIR:-$HOME/dg-build/pc-$_dg_key}"
+    unset _dg_key
+fi
+
 echo "door-guard env 就绪"
 echo "  DOORGUARD_ROOT = $DOORGUARD_ROOT"
-echo "  脚本           = dg-build dg-deploy dg-tc-install dg-serial"
+echo "  脚本           = dg-build dg-build-pc dg-test dg-deploy dg-tc-install dg-serial"
+[ -n "${DG_BUILD_DIR:-}" ]      && echo "  DG_BUILD_DIR   = $DG_BUILD_DIR"
+[ -n "${DG_TEST_BUILD_DIR:-}" ] && echo "  DG_TEST_BUILD_DIR = $DG_TEST_BUILD_DIR"
+[ -n "${DG_PC_BUILD_DIR:-}" ]   && echo "  DG_PC_BUILD_DIR   = $DG_PC_BUILD_DIR"
 [ -n "$DG_TC_ROOT" ]   && echo "  DG_TC_ROOT     = $DG_TC_ROOT"
 [ -n "$DOORGUARD_IP" ] && echo "  DOORGUARD_IP   = $DOORGUARD_IP"
 true  # 保底返回 0:上面可选 echo 在变量为空时会短路成非零,连累 source 后的 && 链

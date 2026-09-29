@@ -4,6 +4,32 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-29(续2)构建提速:改一个文件 2.5min→14s;推板产物转 Release(-O3)
+
+**做了什么**(用户反馈"改一个 UI 参数编译要几分钟"):
+1. **归因实测**(盘内构建):空跑 configure 62s + 空跑 build 44s + 单文件
+   重编重链 41s ≈ 2.5min——90% 是 /mnt/c drvfs 慢 I/O(每轮无条件 cmake -B
+   对 lvgl 上千文件 stat;make 依赖扫描同理),编译本身只占十几秒。
+2. **三板斧**:①构建目录迁 ext4(env.sh 自动设 DG_BUILD_DIR/DG_TEST_BUILD_DIR/
+   DG_PC_BUILD_DIR = ~/dg-build/<类>-<仓库路径哈希>,两克隆缓存不串);
+   ②configure 按需跑(无缓存/-c/带参数才跑;CMakeLists 变更由 cmake --build
+   重生成规则兜底);③默认 Release(-O3,DG_BUILD_TYPE 可覆盖)。-j 原本就有。
+3. **效果**:空跑 5s、单文件改动 14s、全新 Release 全量 188s(一次性);
+   地板 ≈9s = make 对 /mnt/c 源码树的依赖扫描,要再快只能源码也进 ext4
+   (WSL 本地克隆构建),暂不动现有开发流。
+4. **-O3 首扫出 3 处 -Wformat-truncation=2**(-O0 不开这分析):touch_evdev
+   cand_desc[96]→[192](path+name 可证明上限);page_users 行文本全参数加
+   精度上限(%.24s 等)+ uid 拷贝改整块 memcpy(dst/src 同为 char[DG_UID_LEN])
+   ——行为等价,零告警恢复。
+5. LVGL GLOB 不加 CONFIGURE_DEPENDS(vendored 库;加了反而每轮 build 复核
+   glob,在 drvfs 上是 stat 风暴,实测吃掉空跑大半耗时;真加文件用 -c);
+   ui/widgets 的 GLOB 保留(真会新增文件)。
+6. dg-test 36/36 绿(252s 为 ext4 全新建库一次性成本)。**注意:推板产物
+   首次从 -O0 Debug 转 -O3 Release,运行时行为待真机验证**(待机 CPU/fps
+   预计受益);A/B 槽 + 3 次秒退自动回滚兜底。今日未推板,槽位仍
+   B=e97fcb8 / A=f53716d。
+
+---
 ## 2026-09-29(续)输入光标 + 全黑字体(36/36 绿零告警;推板见后记)
 
 **做了什么**(用户需求:输入框带输入指针可调位置;蓝白主题下字体 label 全黑):

@@ -113,6 +113,9 @@ target_link_libraries(dg_jpeg PUBLIC dg_proto ${DG_JPEG_LIB})
 option(DG_USE_LVGL9 "Use LVGL 9.5 (third_party/lvgl9) instead of 8.3" ON)
 option(DG_LVGL_NO_NEON "Force LVGL SW draw C path (NEON crash triage)" OFF)
 if(DG_USE_LVGL9)
+    # LVGL 是 vendored 库、几乎不新增文件,不加 CONFIGURE_DEPENDS:按需
+    # configure 后它会让每轮 build 都复核 glob——上千文件在 /mnt/c drvfs 上
+    # 是一轮 stat 风暴(2026-09-29 实测吃掉空跑大半耗时);真加了文件用 -c
     file(GLOB_RECURSE LVGL_SRCS third_party/lvgl9/src/*.c)
     add_library(lvgl STATIC ${LVGL_SRCS})
     # include 根 = third_party/lvgl9:`#include "lvgl.h"` 路径与 8.3 一致,
@@ -148,7 +151,7 @@ endif()
 
 # ---- UI 子系统(theme/i18n/widgets/page_mgr/字体) ----
 # (C2 起随 LVGL9 编译;上方守卫已于 ui/ 迁移完成时解除)
-file(GLOB DG_WIDGET_SRCS ui/widgets/*.c)
+file(GLOB DG_WIDGET_SRCS CONFIGURE_DEPENDS ui/widgets/*.c)
 add_library(dg_ui STATIC
     ui/ui.c
     ui/port.c

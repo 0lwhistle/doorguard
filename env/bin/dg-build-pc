@@ -16,14 +16,18 @@ while [ $# -gt 0 ]; do
 done
 
 cd "$DOORGUARD_ROOT/door-guard"
-[ "$clean" = 1 ] && rm -rf build-pc
-
-cmake -B build-pc -DDG_SIM=ON "$@"
-cmake --build build-pc -j"$(nproc)"
+# 构建目录在 WSL 内默认走 ext4(env.sh 的 DG_PC_BUILD_DIR),configure 按需跑
+# ——与 dg-build 同一套提速逻辑,理由见其头注(2026-09-29)
+BUILD_DIR="${DG_PC_BUILD_DIR:-build-pc}"
+[ "$clean" = 1 ] && rm -rf "$BUILD_DIR"
+if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
+    cmake -B "$BUILD_DIR" -DDG_SIM=ON "$@"
+fi
+cmake --build "$BUILD_DIR" -j"$(nproc)"
 
 echo
-echo "产物: door-guard/build-pc/door-guard"
+echo "产物: $BUILD_DIR/door-guard"
 if [ "$run" = 1 ]; then
     cd "$DOORGUARD_ROOT/door-guard"       # 相对路径:lang/configs/sim 目录
-    exec ./build-pc/door-guard
+    exec "$BUILD_DIR/door-guard"
 fi
