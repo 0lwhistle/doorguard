@@ -45,7 +45,7 @@ extern "C" {
 #define EV_VISION_QUALITY    EV_DEF(DG_MODULE_ID_VISION, 0x0006) /**< 人脸质量判定(拍摄页实时提示) */
 
 /* SYSTEM:系统/装配层(看门狗 → UI/web 上位机) */
-#define EV_SYS_SERVICE_STATE EV_DEF(DG_MODULE_ID_SYSTEM, 0x0010) /**< [预留·有发布无订阅] 看门狗已在发;待 UI 降级提示/上位机接入订阅 */
+#define EV_SYS_SERVICE_STATE EV_DEF(DG_MODULE_ID_SYSTEM, 0x0010) /**< 看门狗处置/存储巡检/relay 开门失败(2026-09-30 起有订阅:UI bridge 故障提示 + access FSM 人脸禁用) */
 #define EV_SYS_REBOOT        EV_DEF(DG_MODULE_ID_SYSTEM, 0x0011) /**< 设备重启请求(ev_sys_reboot_t) */
 
 /* CAPTURE:取流状态(capture → UI/服务) */

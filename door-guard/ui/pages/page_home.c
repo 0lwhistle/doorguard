@@ -5,11 +5,14 @@
  * 渲染内容事件经 setter 注入(page_home_set_*),业务在 presenter_home。
  */
 #include "page_home.h"
+#include "access_service.h"
 #include "bridge/bridge.h"
 #include "capture_service.h"
 #include "dg_log.h"
 #include "i18n.h"
+#include "storage.h"
 #include "theme.h"
+#include "vision_service.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_popup.h"
 #include "widgets/dg_preview.h"
@@ -30,7 +33,6 @@ static lv_obj_t *s_net = NULL;         /* WiFi 图标(绿=在线/红=离线) */
 static lv_obj_t *s_net_ip = NULL;      /* 图标旁 IP(调试便利;无网络=0.0.0.0) */
 static lv_timer_t *s_pump_timer = NULL;
 static lv_timer_t *s_status_timer = NULL;
-static bool s_cam_down = false;        /* 相机断流中(白幕+提示由本页持有) */
 
 /* ---- 相机帧 → 预览(dg_preview 控件,20ms 泵,2026-09-22 video-plane) ----
  * plane 模式:NV12 dma-buf 直送 VOP2 Overlay(zpos 在 UI 之下),控件只是
@@ -186,9 +188,12 @@ void page_home_create(lv_obj_t *parent)
     s_pump_timer = lv_timer_create(canvas_timer_cb, 20, NULL); /* 50Hz 采样:相机
                                                                   30fps 自由跑,泵频高于帧频才不吃拍频损失(seq 去重后空转近乎零成本) */
 
-    /* 断流态跨页面存续(服务层持有),重建页面时找回——放在全部控件就位后,
+    /* 故障态跨页面存续(服务层持有),重建页面时找回——放在全部控件就位后,
      * 提示条/脸框才能一并补渲染;切页回来不再重新露出冻结帧 */
     page_home_set_cam_ready(capture_camera_ready());
+    page_home_set_face_ready(vision_backend_running());
+    page_home_set_relay_ok(access_relay_ok());
+    page_home_set_storage_ok(storage_health_check() == DG_OK);
 }
 
 void page_home_destroy(void)
@@ -257,23 +262,63 @@ void page_home_set_hint(const char *text)
     lv_obj_clear_flag(s_hint, LV_OBJ_FLAG_HIDDEN);
 }
 
-/* ---- 相机可用态(2026-09-30 断流检测) ---- */
+/* ---- 设备故障提示(2026-09-30 holder 健康管理推广) ---- */
+
+/* 四类面客可感知故障:合成一条提示条,优先级 = 影响面从大到小。恢复即让位;
+ * 全部恢复时只清「还是故障文案」的提示条——验证流程的引导文案(请输密码等)
+ * 若已顶上来,不得清掉 */
+static bool s_relay_down;
+static bool s_cam_down;                /* 相机断流中(白幕+提示由本页持有) */
+static bool s_face_down;
+static bool s_storage_down;
+
+static void fault_hint_refresh(void)
+{
+    if (!s_hint)
+        return;
+    const char *fault =
+        s_relay_down    ? _("门锁异常,请联系管理员")
+        : s_cam_down    ? _("摄像头未就绪")
+        : s_face_down   ? _("人脸识别不可用")
+        : s_storage_down ? _("存储故障,请检修")
+                         : NULL;
+    if (fault) {
+        page_home_set_hint(fault);
+        return;
+    }
+    const char *cur = lv_label_get_text(s_hint);
+    if (cur && (strcmp(cur, _("门锁异常,请联系管理员")) == 0 ||
+                strcmp(cur, _("摄像头未就绪")) == 0 ||
+                strcmp(cur, _("人脸识别不可用")) == 0 ||
+                strcmp(cur, _("存储故障,请检修")) == 0))
+        page_home_set_hint(NULL);
+}
 
 void page_home_set_cam_ready(bool ready)
 {
     s_cam_down = !ready;
     dg_preview_set_available(s_preview, ready);
-    if (!s_facebox)
-        return;                          /* 页面未创建:只登记,create 时补渲染 */
-    if (!ready) {
-        /* 断流中验证必然失败:脸框失去跟随对象,先清掉防悬空 */
+    if (!ready && s_facebox)
+        page_home_clear_facebox();       /* 断流中验证必然失败:框先清防悬空 */
+    fault_hint_refresh();
+}
+
+void page_home_set_face_ready(bool ready)
+{
+    s_face_down = !ready;
+    if (!ready && s_facebox)
         page_home_clear_facebox();
-        page_home_set_hint(_("摄像头未就绪"));
-        return;
-    }
-    /* 恢复:只清自己的提示——验证流程的引导文案(请输密码等)若已覆盖,
-     * 说明用户正在无相机路径上操作,不得清掉 */
-    const char *cur = lv_label_get_text(s_hint);
-    if (cur && strcmp(cur, _("摄像头未就绪")) == 0)
-        page_home_set_hint(NULL);
+    fault_hint_refresh();
+}
+
+void page_home_set_relay_ok(bool ok)
+{
+    s_relay_down = !ok;
+    fault_hint_refresh();
+}
+
+void page_home_set_storage_ok(bool ok)
+{
+    s_storage_down = !ok;
+    fault_hint_refresh();
 }

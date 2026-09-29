@@ -419,6 +419,10 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
         fsm->cam_ready = data->cam_ready;
         return;
 
+    case FSM_EV_VISION_STATE:
+        fsm->vision_ready = data->vision_ready;
+        return;
+
     case FSM_EV_MATCH_1N:
         on_match_1n(fsm, &data->match, 0);
         return;
@@ -595,10 +599,11 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
             fail_and_back(fsm, m, DG_REASON_METHOD_DISABLED, 0);
             return;
         }
-        /* 相机断流时人脸不可用(spec-auth §5-113:验证路径立刻失败
-         * reason=9,不得卡死等待);密码/指纹/IC 不经相机,照常 */
-        if (m == DG_METHOD_FACE_11 && !fsm->cam_ready) {
-            DG_LOGW(TAG, "相机断流,1:1 人脸直接失败(reason=9)");
+        /* 相机断流或识别后端被禁:人脸不可用(spec-auth §5-113:验证路径
+         * 立刻失败 reason=9,不得卡死等待);密码/指纹/IC 不经人脸,照常 */
+        if (m == DG_METHOD_FACE_11 && (!fsm->cam_ready || !fsm->vision_ready)) {
+            DG_LOGW(TAG, "人脸不可用(相机断流=%d 识别后端挂=%d),1:1 直接失败"
+                         "(reason=9)", !fsm->cam_ready, !fsm->vision_ready);
             fail_and_back(fsm, DG_METHOD_FACE_11, DG_REASON_DEVICE_ERR, 0);
             return;
         }
@@ -686,6 +691,7 @@ void auth_fsm_init(auth_fsm_t *fsm, int32_t door_open_ms, int32_t standby_timeou
     fsm->match_enabled = true;          /* 开机默认普通模式 1:N(spec §5) */
     fsm->admin_count = -1;              /* 未知:菜单入口保守要求管理员认证 */
     fsm->cam_ready = true;              /* 乐观值:capture 只在断流时发 false */
+    fsm->vision_ready = true;           /* 同上:看门狗只在禁后端时发 false */
     fsm->door_open_ms = door_open_ms;
     fsm->standby_timeout_s = standby_timeout_s;
     fsm->menu_timeout_s = menu_timeout_s;

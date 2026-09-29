@@ -18,6 +18,7 @@
 #include "dg_log.h"
 #include "event_bus.h"
 #include "events.h"
+#include "registry.h"
 #include "relay.h"
 #include "storage.h"
 #include "tasker.h"
@@ -41,7 +42,7 @@ static void copy_cstr(char *dst, size_t cap, const char *src)
 static const char *TAG = "[ACCESS]";
 
 static auth_fsm_t s_fsm;
-static event_subscription_t *s_subs[12];
+static event_subscription_t *s_subs[14];
 static int s_sub_cnt = 0;
 static struct task_node s_tick_node;
 static bool s_running = false;
@@ -199,19 +200,48 @@ static void arm_fsm_timer(int32_t id, uint32_t ms, uint32_t seq)
  * 多发一次脉冲,开门无害)。事件契约不变:EV_AUTH_DOOR_OPEN 照发 */
 static volatile bool s_pulse_busy;
 
+/* 开门失败 latch(2026-09-30 健康管理推广):脉冲写失败=用户看到"验证成功"
+ * 门却不开,必须给显式提示;下次成功自动解除。降级态(无 GPIO)返回 DG_OK
+ * 不算故障——宿主/未接线不是设备坏了 */
+static bool s_relay_fault;
+
+static void publish_relay_state(bool fault)
+{
+    ev_sys_service_state_t ev;
+    memset(&ev, 0, sizeof(ev));
+    snprintf(ev.name, sizeof(ev.name), "relay");
+    ev.state = fault ? REG_STATE_ERROR : REG_STATE_READY;
+    EVENT_BUS_PUBLISH(EV_SYS_SERVICE_STATE, &ev);
+}
+
 static void *door_pulse_thread(void *arg)
 {
     const uint32_t ms = (uint32_t)(uintptr_t)arg;
 
     /* 继电器走 modules/relay(A4):宿主/硬件缺失的降级在模块内消化,
      * 开门语义由下方 EV_AUTH_DOOR_OPEN 事件承载 */
-    if (relay_door_pulse(ms) != DG_OK)
-        DG_LOGE(TAG, "开门脉冲失败");
+    int rc = relay_door_pulse(ms);
+    if (rc != DG_OK) {
+        DG_LOGE(TAG, "开门脉冲失败(rc=%d):门未动作,提示用户检修", rc);
+        if (!s_relay_fault) {
+            s_relay_fault = true;
+            publish_relay_state(true);
+        }
+    } else if (s_relay_fault) {
+        s_relay_fault = false;
+        publish_relay_state(false);
+    }
     ev_door_state_t ev = { .open = true };
     EVENT_BUS_PUBLISH(EV_AUTH_DOOR_OPEN, &ev);
     DG_LOGI(TAG, "开门 %ums", ms);
     s_pulse_busy = false;
     return NULL;
+}
+
+/** relay 健康查询(主页提示创建时找回用;true=未观测到故障) */
+bool access_relay_ok(void)
+{
+    return !s_relay_fault;
 }
 
 static void on_fsm_action(fsm_action_t act, const fsm_action_data_t *d, void *ud)
@@ -372,6 +402,22 @@ static int on_capture_state(const event_t *e, void *ud)
     return 0;
 }
 
+/* 看门狗处置结果 → FSM:人脸路径上只有识别后端(capture 已另有通道)。
+ * vision_service/backend 挂死/被禁 → 人脸不可用;其余服务与验证无关不转发 */
+static int on_service_state(const event_t *e, void *ud)
+{
+    (void)ud;
+    const ev_sys_service_state_t *s = (const ev_sys_service_state_t *)e->data;
+    if (strcmp(s->name, "vision_service") != 0 &&
+        strcmp(s->name, "vision_backend") != 0)
+        return 0;
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.vision_ready = (s->state == REG_STATE_READY);
+    fsm_feed(FSM_EV_VISION_STATE, &d);
+    return 0;
+}
+
 /* 1:1 比对结果(vision 只在通过时发布)→ FSM 统一结果处理
  * (auth_fsm.c 的 FSM_EV_VERIFY_11 分支;FSM 不重复实现,只做搬运) */
 static int on_verify_11(const event_t *e, void *ud)
@@ -529,6 +575,7 @@ int access_service_start(void)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_ACCESS_TIMER, on_access_timer, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_ACCESS_TICK, on_access_tick, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_CAPTURE_STATE, on_capture_state, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_SYS_SERVICE_STATE, on_service_state, NULL);
 
     if (tasker_task_init_li(&s_tick_node, 1000, TASK_CNT_INF, "access_tick",
                             tick_task, NULL) != TASK_OK ||

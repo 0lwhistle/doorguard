@@ -143,6 +143,8 @@ static const vision_backend_ops_t *s_backends[BACKEND_MAX];
 static int s_backend_cnt;
 static const vision_backend_ops_t *s_active;
 static bool s_features_compatible = true;   /* 口径校验结果(后端发布命中前查) */
+static bool s_active_ok;                    /* 最近一次 start 的结果:识别能力在否
+                                               (看门狗重启后端时会经此刷新) */
 
 int vision_backend_register(const vision_backend_ops_t *ops)
 {
@@ -354,10 +356,23 @@ int vision_backend_start(bool enable_mock)
                 ops->name);
 
     int rc = ops->start(enable_mock);
+    s_active_ok = (rc == DG_OK);
     DG_LOGI(TAG, "后端 %s(model_tag=%s,关键点=%s)启动%s", ops->name,
             vision_backend_model_tag(), ops->has_landmarks ? "有" : "无",
             rc == DG_OK ? "成功" : "失败(降级:无检测/无识别)");
     return rc;
+}
+
+bool vision_backend_running(void)
+{
+    return s_active_ok;
+}
+
+int64_t vision_backend_heartbeat_ms(void)
+{
+    if (!s_active || !s_active->heartbeat_ms)
+        return 0;
+    return s_active->heartbeat_ms();
 }
 
 int vision_service_start(void)

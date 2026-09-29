@@ -100,6 +100,8 @@ static bool s_face_present;            /* worker 写;on_mode_changed(总线线�
                                           false 仅单字写,读侧滞后一帧无实义 */
 static int64_t s_last_det_ms;          /* 最近一次检出时刻:LOST 滞回 + B1 降帧静置基线(0=开机起未见人) */
 static int64_t s_last_proc_ms;         /* 降帧期最近一次推理时刻(B1;worker 独占) */
+static volatile int64_t s_worker_hb_ms; /* worker 活性心跳(worker 独占写,
+                                           registry 看门狗读,见 ops.heartbeat_ms) */
 
 /* 最近一次质量测量与判定:供日志标定 + 拍摄页实时提示(下一班接入 UI) */
 static face_quality_t s_last_q;
@@ -651,8 +653,15 @@ static void *vision_worker(void *arg)
     (void)arg;
     for (;;) {
         pthread_mutex_lock(&s_mb_mtx);
-        while (!s_mb.has)
-            pthread_cond_wait(&s_mb_cond, &s_mb_mtx);
+        while (!s_mb.has) {
+            /* 定时等待:相机断流时没有帧可处理,worker 的"活着"只能靠
+             * 醒来这件事自证——心跳义务见 vision_backend.heartbeat_ms */
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_sec += 1;
+            pthread_cond_timedwait(&s_mb_cond, &s_mb_mtx, &ts);
+            s_worker_hb_ms = now_mono_ms();
+        }
         const uint8_t *data = s_mb.data;
         const uint32_t fid = s_mb.fid;
         const int w = s_mb.w, h = s_mb.h;
@@ -660,6 +669,7 @@ static void *vision_worker(void *arg)
         pthread_mutex_unlock(&s_mb_mtx);
 
         process_frame(data, w, h, fid); /* 所有路径内部保证归还缓冲 */
+        s_worker_hb_ms = now_mono_ms();
     }
     return NULL;                        /* 进程生命周期线程,无退出路径 */
 }
@@ -1138,6 +1148,11 @@ fail:
 }
 
 /* 后端注册项(装配层 app/main.c 注册;契约见 vision_backend.h) */
+static int64_t worker_heartbeat_ms(void)
+{
+    return s_worker_hb_ms;              /* registry 看门狗读;0=尚未起跳 */
+}
+
 const vision_backend_ops_t vision_backend_rknn = {
     .name = "rknn",
     .model_tag = "rknn-arcface-r50-v1",  /* ArcFace-R50 512 维特征空间 */
@@ -1147,4 +1162,5 @@ const vision_backend_ops_t vision_backend_rknn = {
     .lib_del = lib_del,
     .compare = rknn_cmp,
     .on_mode = on_mode_changed,
+    .heartbeat_ms = worker_heartbeat_ms,
 };

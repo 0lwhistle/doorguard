@@ -204,7 +204,7 @@ add_library(dg_access STATIC
 )
 target_include_directories(dg_access PUBLIC ${CMAKE_SOURCE_DIR}/services/access
                                             ${CMAKE_SOURCE_DIR}/services/vision)
-target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker dg_relay)
+target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker dg_relay dg_registry)
 
 # vision:视觉服务(槽位/模式/后端注册表 + sim mock / rockiva 板上后端)
 add_library(dg_vision STATIC services/vision/vision_service.c)

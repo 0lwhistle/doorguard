@@ -9,6 +9,7 @@
 #define DG_VISION_SERVICE_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "err.h"
@@ -65,6 +66,15 @@ int vision_service_library_remove(const char *user_id);
 int vision_service_submit_feature(const char *user_id, uint32_t seq,
                                   const uint8_t *feature, size_t len);
 int vision_service_fetch_feature(uint32_t seq, uint8_t *out, size_t cap, size_t *len);
+
+/* ---- 健康查询(2026-09-30 holder 健康管理推广;页面/装配层用) ---- */
+
+/** 后端 start 成功且未被看门狗 DISABLED(识别能力在;与相机断流互相独立) */
+bool vision_backend_running(void);
+
+/** 生效后端的 worker 心跳(单调 ms;0 = 后端无心跳或未启动)——
+ *  main.c 注册进 registry 作 stale 判据,worker 挂死 15s 可见 */
+int64_t vision_backend_heartbeat_ms(void);
 
 /* ---- 头像照片槽(单槽;照片是 KB 级,按架构纪律不进事件总线) ----
  *

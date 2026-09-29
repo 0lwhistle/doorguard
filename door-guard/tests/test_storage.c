@@ -411,6 +411,12 @@ static void test_config(void)
     printf("[S4] config KV: set / get / default(NOT_FOUND) / overwrite\n");
     fresh_setup();
 
+    /* 健康巡检(2026-09-30):init 后 SELECT 1 必过;deinit 后显式 NOT_INIT */
+    DG_CHECK(storage_health_check() == DG_OK);
+    storage_deinit();
+    DG_CHECK(storage_health_check() == DG_ERR_NOT_INIT);
+    fresh_setup();
+
     char val[128];
     DG_CHECK(db_config_get("language", val, sizeof(val)) == DG_ERR_NOT_FOUND);
 

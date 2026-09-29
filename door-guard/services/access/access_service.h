@@ -9,6 +9,8 @@
 #ifndef DG_ACCESS_SERVICE_H
 #define DG_ACCESS_SERVICE_H
 
+#include <stdbool.h>
+
 #include "err.h"
 
 #ifdef __cplusplus
@@ -20,6 +22,9 @@ int access_service_start(void);
 
 /** 停止(测试用) */
 void access_service_stop(void);
+
+/** 开门继电器健康(2026-09-30 健康管理推广):自装配起未观测到脉冲失败 */
+bool access_relay_ok(void);
 
 #ifdef __cplusplus
 }

@@ -977,6 +977,14 @@ static void cam_state(bool ready)
     auth_fsm_handle(&s_fsm, FSM_EV_CAM_STATE, &d);
 }
 
+static void vision_state(bool ready)
+{
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.vision_ready = ready;
+    auth_fsm_handle(&s_fsm, FSM_EV_VISION_STATE, &d);
+}
+
 static void t15_cam_down(void)
 {
     printf("[F15] 相机断流:人脸 1:1 立即 reason=9;密码照常;恢复后人脸可用\n");
@@ -1010,6 +1018,41 @@ static void t15_cam_down(void)
     DG_CHECK(s_fsm.step == V_FACE_1V1);
 }
 
+static void t16_vision_down(void)
+{
+    printf("[F16] 识别后端被禁:人脸 1:1 立即 reason=9;相机断流叠加同文案;"
+           "恢复后可用\n");
+
+    /* 看门狗禁后端(vision_ready=false):选人脸立即失败 */
+    fsm_reset();
+    vision_state(false);
+    uid_flow("10001", true, DG_ROLE_NORMAL, DG_AUTH_FACE | DG_AUTH_PWD);
+    DG_CHECK(s_fsm.step == V_PICK_METHOD);
+    method_pick(DG_METHOD_FACE_11);
+    DG_CHECK(s_fsm.state == ST_RESULT);
+    const act_rec_t *log = last_act(FSM_ACT_WRITE_LOG);
+    DG_CHECK(log && log->d.log.reason == DG_REASON_DEVICE_ERR);
+
+    /* 相机与识别后端任一不可用都够:恢复后端但断流相机,照样拒 */
+    timer_fire(FSM_TMR_RESULT_3S);
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+    vision_state(true);
+    cam_state(false);
+    uid_flow("10001", true, DG_ROLE_NORMAL, DG_AUTH_FACE);
+    DG_CHECK(s_fsm.step == V_PICK_METHOD);
+    method_pick(DG_METHOD_FACE_11);
+    DG_CHECK(s_fsm.state == ST_RESULT);
+    DG_CHECK(last_act(FSM_ACT_WRITE_LOG)->d.log.reason == DG_REASON_DEVICE_ERR);
+
+    /* 双双恢复:人脸方式正常进子步 */
+    timer_fire(FSM_TMR_RESULT_3S);
+    cam_state(true);
+    uid_flow("10001", true, DG_ROLE_NORMAL, DG_AUTH_FACE);
+    DG_CHECK(s_fsm.step == V_PICK_METHOD);
+    method_pick(DG_METHOD_FACE_11);
+    DG_CHECK(s_fsm.step == V_FACE_1V1);
+}
+
 
 int main(void)
 {
@@ -1034,6 +1077,7 @@ int main(void)
     t13_presence_window();
     t14_presence_dedup_and_touch();
     t15_cam_down();
+    t16_vision_down();
 
     DG_TEST_EXIT();
 }

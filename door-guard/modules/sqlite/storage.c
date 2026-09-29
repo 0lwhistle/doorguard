@@ -278,6 +278,21 @@ int storage_init(const char *db_path, const char *key_path)
     return DG_OK;
 }
 
+int storage_health_check(void)
+{
+    pthread_mutex_lock(&s_mtx);
+    if (!s_db) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_NOT_INIT;
+    }
+    /* SELECT 1 探活:库句柄在但介质/磁盘满时执行也会失败(WAL 写路径) */
+    int rc = sqlite3_exec(s_db, "SELECT 1;", NULL, NULL, NULL) == SQLITE_OK
+                 ? DG_OK
+                 : DG_ERR_DB;
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
 void storage_deinit(void)
 {
     pthread_mutex_lock(&s_mtx);

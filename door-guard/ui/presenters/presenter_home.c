@@ -14,6 +14,7 @@
 #include "widgets/dg_popup.h"
 #include "valid_ui.h"
 #include "dg_log.h"
+#include "registry.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -35,7 +36,7 @@ static const char *result_text(const ev_ui_result_t *r)
     case DG_REASON_WRONG_PWD:         return _("密码错误");
     case DG_REASON_METHOD_DISABLED:   return _("该方式未开启");
     case DG_REASON_AUTH_DISABLED:     return _("全部验证方式已关闭");
-    case DG_REASON_DEVICE_ERR:        return _("摄像头未就绪");
+    case DG_REASON_DEVICE_ERR:        return _("人脸识别不可用");
     default:                          return _("验证失败");   /* 陌生人/黑名单/超时… */
     }
 }
@@ -199,6 +200,20 @@ static void home_on_evt(const ui_evt_t *evt)
         /* 相机断流/恢复(capture 服务):提示条 + 预览半透明白幕(spec-ui §3.1) */
         page_home_set_cam_ready(evt->cam_ready);
         break;
+    case UI_EVT_SERVICE_STATE: {
+        /* 看门狗处置(挂/禁用/恢复):映射到面客可感知的三类故障提示。
+         * 其余服务(web/ntp/mdns…)降级不碍面客业务,主页不提示只留日志 */
+        const ev_sys_service_state_t *s = &evt->svc;
+        const bool ok = (s->state == REG_STATE_READY);
+        if (!strcmp(s->name, "vision_service") ||
+            !strcmp(s->name, "vision_backend"))
+            page_home_set_face_ready(ok);
+        else if (!strcmp(s->name, "relay"))
+            page_home_set_relay_ok(ok);
+        else if (!strcmp(s->name, "storage"))
+            page_home_set_storage_ok(ok);
+        break;
+    }
     case UI_EVT_AUTH_RESULT:
         break;                               /* web/日志侧消费;主页文案走 EV_UI_RESULT */
     case UI_EVT_GOTO_PAGE:

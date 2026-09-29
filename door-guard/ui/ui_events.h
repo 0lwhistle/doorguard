@@ -33,6 +33,8 @@ typedef enum {
     UI_EVT_NET_CFG_RESULT, /**< 网络配置应用结果(网络配置页弹窗) */
     UI_EVT_CAPTURE,        /**< 相机可用态(EV_CAPTURE_STATE;主页/拍摄页
                                 据此提示「摄像头未就绪」+预览清为半透明白) */
+    UI_EVT_SERVICE_STATE,  /**< 看门狗处置结果(EV_SYS_SERVICE_STATE;主页按
+                                服务名映射故障提示:识别/门锁/存储) */
 } ui_evt_kind_t;
 
 typedef struct {
@@ -52,6 +54,7 @@ typedef struct {
     ev_vision_quality_t quality;   /* UI_EVT_QUALITY */
     ev_net_cfg_result_t net_cfg_result; /* UI_EVT_NET_CFG_RESULT */
     bool cam_ready;                /* UI_EVT_CAPTURE */
+    ev_sys_service_state_t svc;    /* UI_EVT_SERVICE_STATE */
 } ui_evt_t;
 
 /** 入队(任意线程;队满丢弃并计数) */

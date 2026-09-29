@@ -221,6 +221,18 @@ static int on_capture_state(const event_t *e, void *ud)
     return 0;
 }
 
+/* 看门狗处置结果 → 主页故障提示(识别/门锁/存储;其余服务主页不提示) */
+static int on_service_state(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_SERVICE_STATE;
+    evt.svc = *(const ev_sys_service_state_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
 void bridge_init(void)
 {
     event_bus_subscribe(EV_VISION_FACE_BOX, on_face_box, NULL);
@@ -241,7 +253,8 @@ void bridge_init(void)
     event_bus_subscribe(EV_VISION_QUALITY, on_vision_quality, NULL);
     event_bus_subscribe(EV_NET_CFG_RESULT, on_net_cfg_result, NULL);
     event_bus_subscribe(EV_CAPTURE_STATE, on_capture_state, NULL);
-    DG_LOGI("[BRIDGE]", "事件桥就绪(18 订阅)");
+    event_bus_subscribe(EV_SYS_SERVICE_STATE, on_service_state, NULL);
+    DG_LOGI("[BRIDGE]", "事件桥就绪(19 订阅)");
 }
 
 void bridge_btn(const ev_ui_btn_t *btn)

@@ -263,7 +263,10 @@ static registry_err_t register_services(void)
     } svc[] = {
         { "capture",        mod_capture,        false, DEP_CAMERA,      1, NULL },
         { "vision_service", mod_vision_service, true,  NULL,            0, NULL },
-        { "vision_backend", mod_vision_backend, false, DEP_VIS_BE,      2, NULL },
+        /* vision_backend 心跳 = rknn worker 活性(契约义务 9):worker 挂死
+         * 15s 后看门狗判 stale 重启,识别静默失效从此可观测 */
+        { "vision_backend", mod_vision_backend, false, DEP_VIS_BE,      2,
+          vision_backend_heartbeat_ms },
         { "access",         mod_access,         true,  DEP_TASKER_ONLY, 1, NULL },
         { "enroll",         mod_enroll,         false, DEP_TASKER_ONLY, 1, NULL },
         { "liveness",       mod_liveness,       false, DEP_TASKER_ONLY, 1, NULL },
@@ -344,10 +347,33 @@ static void safe_shutdown(const char *reason)
     exit(1);
 }
 
+/* storage 运行期巡检(required 模块,坏了不能重启只能上报):连续两轮
+ * SELECT 1 失败才广播(单次抖动不吓人),恢复回 READY 让提示撤下 */
+static bool s_storage_fault;
+
+static void watchdog_storage_once(void)
+{
+    bool bad = (storage_health_check() != DG_OK);
+    if (bad == s_storage_fault)
+        return;
+    static int fail_streak;
+    if (bad) {
+        if (++fail_streak < 2)
+            return;
+    } else {
+        fail_streak = 0;
+    }
+    s_storage_fault = bad;
+    publish_service_state("storage", bad ? REG_STATE_ERROR : REG_STATE_READY);
+    DG_LOGE("[MAIN]", "存储巡检:%s", bad ? "SELECT 1 连续失败(磁盘满/介质错?)" : "恢复");
+}
+
 /* 单次巡检:异常( ERROR / 心跳超龄)→ 重启一次 → 仍异常置 DISABLED + 通知;
  * 必需服务异常 → 安全停机 */
 static void watchdog_once(void)
 {
+    watchdog_storage_once();
+
     int64_t now = now_ms();
     uint32_t n = registry_count();
     for (uint32_t i = 0; i < n; i++) {

@@ -65,6 +65,12 @@ typedef struct {
 
     /** 工作模式变更(可为 NULL) */
     void (*on_mode)(dg_vision_mode_t mode, const char *user_id);
+
+    /** worker 线程活性心跳(单调 ms;NULL = 无心跳,registry 不判 stale)。
+     *  义务 9:必须在后端自己的推理线程里周期刷新(与有没有帧无关)——
+     *  心跳停 15s 看门狗判 stale 重启一次,仍挂则 DISABLED + EV 通知 UI
+     *  「人脸识别不可用」。这是识别静默失效唯一的自动观测通道 */
+    int64_t (*heartbeat_ms)(void);
 } vision_backend_ops_t;
 
 /**

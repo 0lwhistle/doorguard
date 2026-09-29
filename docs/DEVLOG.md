@@ -4,6 +4,45 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-09-30(续3)holder 健康管理推广:vision 心跳 / relay 开门失败 / storage 巡检 / 降级事件接入 UI
+
+1. 背景:相机断流那套「事实→巡检→置态→提示」推广到其余模块。盘点结论:
+   EV_SYS_SERVICE_STATE 看门狗一直在发但**零订阅**;vision_backend worker
+   挂死不可观测(registry 心跳只有 web 在用);relay 脉冲失败只有一行日志
+   (用户看到"验证成功"门却不开);storage 是 required 模块但运行期没人巡。
+2. **vision_backend 心跳**(识别静默失效唯一自动观测):契约 ops 加
+   `heartbeat_ms`(义务 9:推理线程内刷新、与帧无关);rknn worker 的
+   cond_wait 改 1s 定时等待,醒来即跳。main.c 把它注册成 registry 心跳——
+   worker 挂死 15s 判 stale → 重启一次 → 仍挂 DISABLED + EV。sim/rockiva
+   不实现(NULL,registry 兼容现状)。
+3. **EV_SYS_SERVICE_STATE 双订阅**(预留事件首次接通):①access_service →
+   FSM_EV_VISION_STATE,vision 挂时选 1:1 人脸立即 reason=9(与相机断流
+   合成一个门,F16 测试);②bridge → 主页故障提示,按服务名映射:vision_
+   service/backend=「人脸识别不可用」、relay=「门锁异常,请联系管理员」、
+   storage=「存储故障,请检修」;web/ntp/mdns 等不碍面客业务,主页不提示
+   只留看门狗日志。
+4. **relay 开门失败 latch**:door_pulse 失败置 fault + 发 EV(relay ERROR),
+   下次成功自动解除(READY);主页提示随之出现/撤下。降级态(无 GPIO)
+   返回 DG_OK 不算故障。
+5. **storage 运行期巡检**:storage_health_check()=SELECT 1 探活;
+   看门狗每轮调,连续 2 轮失败才广播(单次抖动不吓人),恢复回 READY。
+   required 模块坏了不能重启,只能显式提示——静默丢记录比崩溃难察觉。
+6. **主页提示合成**:四类故障(门锁>相机>人脸>存储)共用提示条,恢复自动
+   让位;全部恢复只清故障文案本身,不抢验证流程引导(沿用 F15 那套 strcmp
+   保护)。主页 create 时经 capture_camera_ready/vision_backend_running/
+   access_relay_ok/storage_health_check 四个查询接口找回断电前状态。
+7. 弹窗 reason=9 文案改「人脸识别不可用」(原「摄像头未就绪」对 vision 挂
+   而相机好的场景不准);主页 chip 仍区分相机/人脸两条文案。语言包 +3 键
+   (人脸识别不可用/门锁异常请联系管理员/存储故障请检修),需 dg-font 重生成。
+8. 测试:F16(后端禁→reason=9;与相机断流叠加;恢复复用)、S4 增
+   storage_health_check(OK/NOT_INIT)。relay latch/vision 心跳为线程行为,
+   宿主不测,真机验收:重启 vision 后端看提示撤下、拔相机看白幕。
+9. 已知边界(不做):touch/display 挂死靠主循环看门狗兜底(10s 杀进程重拉);
+   tasker/event_bus 是全死场景;netcore 挂死由 web 心跳超龄间接可见(重启
+   web 治不了 netcore,记为待办)。ev_finger_status/ev_ic_card 事件已预留,
+   指纹/IC 硬件接入时按同思路挂健康位。
+
+---
 ## 2026-09-30(续2)相机断流检测:holder 置态 + UI 半透明白幕 + 人脸 reason=9 快速失败
 
 1. 背景:IMX415 偶发硬件死机(重启都救不回,须断电 5s),现象=预览冻结

@@ -30,6 +30,11 @@ extern "C" {
 int storage_init(const char *db_path, const char *key_path);
 void storage_deinit(void);
 
+/** 运行期健康巡检(SELECT 1 探活;看门狗周期调用)。2026-09-30 推广:
+ *  storage 是 required 模块,运行期坏(磁盘满/介质错)不能靠重启挽救,
+ *  只能显式上报供 UI 提示"存储故障"——静默丢记录比崩溃更难察觉 */
+int storage_health_check(void);
+
 /* ---- 密码辅助:添加/改密前调用(哈希+盐写回 rec;密码本身不落任何盘) ---- */
 int db_user_set_password(user_rec_t *rec, const char *plain_pwd);
 

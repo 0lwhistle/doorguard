@@ -27,6 +27,17 @@ void page_home_set_hint(const char *text);
  *  + 预览盖半透明白幕;恢复=撤白幕(提示条若仍是相机文案则一并清) */
 void page_home_set_cam_ready(bool ready);
 
+/* ---- 设备故障提示(2026-09-30 holder 健康管理推广;四类共用一条提示条,
+ *      优先级 门锁 > 相机 > 人脸 > 存储,恢复自动让位;只在无故障且当前
+ *      文案是故障文案时才清,不抢验证流程的引导提示) ---- */
+
+/** 人脸识别后端可用(看门狗禁用 rknn worker 时不可用) */
+void page_home_set_face_ready(bool ready);
+/** 开门继电器健康(脉冲写失败=验证成功但门未动作) */
+void page_home_set_relay_ok(bool ok);
+/** 存储健康(SELECT 1 巡检失败=记录可能丢失) */
+void page_home_set_storage_ok(bool ok);
+
 
 #ifdef __cplusplus
 }
