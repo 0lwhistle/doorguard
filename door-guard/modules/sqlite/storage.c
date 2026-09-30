@@ -188,6 +188,16 @@ static const char *const s_ddl[] = {
     "CREATE INDEX IF NOT EXISTS idx_logs_ts   ON access_logs(ts);",
     "CREATE INDEX IF NOT EXISTS idx_logs_user ON access_logs(user_id, ts);",
     "CREATE TABLE IF NOT EXISTS device_config (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);",
+    /* 指纹(FINGERPRINT_AS608.md 决策 B:每用户 ≤3 枚,DB 是 PageID 映射唯一事实源)。
+     * finger_vec 为 AES-256-CTR 加密副本(512B 特征),仅备份/换模组回灌用 */
+    "CREATE TABLE IF NOT EXISTS fingerprints (\n"
+    "    id          INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+    "    user_id     TEXT    NOT NULL,\n"
+    "    page_id     INTEGER NOT NULL UNIQUE,\n"
+    "    finger_vec  BLOB,\n"
+    "    created_at  INTEGER NOT NULL\n"
+    ");",
+    "CREATE INDEX IF NOT EXISTS idx_fp_user ON fingerprints(user_id);",
     NULL,
 };
 
@@ -229,6 +239,20 @@ int storage_init(const char *db_path, const char *key_path)
     /* 库文件 0600(spec-database §3):特征为密文、IC 明文,目录权限另由装配保证 */
     chmod(db_path, 0600);
 
+    /* fingerprints 表是否本就存在(须在 DDL 之前判定——CREATE IF NOT EXISTS
+     * 执行完就分不出新库老库了);决定 finger_vec 迁移要不要做 */
+    bool had_fp_table = false;
+    {
+        sqlite3_stmt *st = NULL;
+        if (sqlite3_prepare_v2(s_db,
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='fingerprints';",
+                -1, &st, NULL) == SQLITE_OK) {
+            if (sqlite3_step(st) == SQLITE_ROW)
+                had_fp_table = true;
+            sqlite3_finalize(st);
+        }
+    }
+
     for (int i = 0; s_ddl[i]; i++) {
         char *err = NULL;
         if (sqlite3_exec(s_db, s_ddl[i], NULL, NULL, &err) != SQLITE_OK) {
@@ -262,6 +286,59 @@ int storage_init(const char *db_path, const char *key_path)
             else
                 DG_LOGI(TAG, "迁移:users 表已补 avatar 列");
         }
+    }
+
+    /* 迁移(幂等):users.finger_vec(旧单枚模型)→ fingerprints 独立表
+     * (FINGERPRINT_AS608.md 决策 B)。只在本库首次出现 fingerprints 表时
+     * 执行一次(存在性已在 DDL 前判定);搬完 users 列置 NULL 保留占位。
+     * blob 已是密文,原样搬运 */
+    if (!had_fp_table) {
+        int migrated = 0;
+        int next_page = 0;   /* 老模型单枚/人,PageID 顺序分配 */
+        sqlite3_stmt *q = NULL;
+        sqlite3_stmt *ins = NULL;
+        sqlite3_stmt *clr = NULL;
+        if (sqlite3_prepare_v2(s_db,
+                "SELECT user_id, finger_vec FROM users WHERE finger_vec IS NOT NULL;",
+                -1, &q, NULL) == SQLITE_OK &&
+            sqlite3_prepare_v2(s_db,
+                "INSERT INTO fingerprints(user_id,page_id,finger_vec,created_at)"
+                " VALUES(?1,?2,?3,?4);",
+                -1, &ins, NULL) == SQLITE_OK &&
+            sqlite3_prepare_v2(s_db,
+                "UPDATE users SET finger_vec=NULL WHERE user_id=?1;",
+                -1, &clr, NULL) == SQLITE_OK) {
+            while (sqlite3_step(q) == SQLITE_ROW) {
+                const char *uid = (const char *)sqlite3_column_text(q, 0);
+                const void *blob = sqlite3_column_blob(q, 1);
+                int nbytes = sqlite3_column_bytes(q, 1);
+                if (!uid || !blob || nbytes <= 0)
+                    continue;
+                sqlite3_reset(ins);
+                sqlite3_bind_text(ins, 1, uid, -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int(ins, 2, next_page);
+                sqlite3_bind_blob(ins, 3, blob, nbytes, SQLITE_TRANSIENT);
+                sqlite3_bind_int64(ins, 4, (sqlite3_int64)time(NULL));
+                if (sqlite3_step(ins) == SQLITE_DONE) {
+                    sqlite3_reset(clr);
+                    sqlite3_bind_text(clr, 1, uid, -1, SQLITE_TRANSIENT);
+                    if (sqlite3_step(clr) == SQLITE_DONE)
+                        migrated++;
+                    else
+                        DG_LOGW(TAG, "finger 迁移:清 users 列失败 uid=%s", uid);
+                    next_page++;
+                } else {
+                    DG_LOGW(TAG, "finger 迁移:插 fingerprints 失败 uid=%s", uid);
+                }
+            }
+        } else {
+            DG_LOGW(TAG, "finger 迁移:语句准备失败 %s", sqlite3_errmsg(s_db));
+        }
+        sqlite3_finalize(q);
+        sqlite3_finalize(ins);
+        sqlite3_finalize(clr);
+        if (migrated > 0)
+            DG_LOGI(TAG, "迁移:users.finger_vec → fingerprints 共 %d 枚", migrated);
     }
 
     DG_LOGI(TAG, "storage ready: %s", db_path);
@@ -861,8 +938,25 @@ int db_user_del(const char *user_id)
         return DG_ERR_DB;
     }
     sqlite3_bind_text(st, 1, user_id, -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(st) != SQLITE_DONE || sqlite3_changes(s_db) == 0)
+    if (sqlite3_step(st) != SQLITE_DONE || sqlite3_changes(s_db) == 0) {
         rc = sqlite3_changes(s_db) == 0 ? DG_ERR_NOT_FOUND : DG_ERR_DB;
+    } else {
+        /* 级联删指纹行(FINGERPRINT_AS608.md §5.3:DB 行必须删;模组侧模板
+         * 由调用方逐枚 DeletChar,通信失败不阻塞删用户,孤儿由对账暴露) */
+        sqlite3_stmt *st2;
+        if (sqlite3_prepare_v2(s_db, "DELETE FROM fingerprints WHERE user_id=?1",
+                               -1, &st2, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(st2, 1, user_id, -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(st2) != SQLITE_DONE) {
+                DG_LOGE(TAG, "finger 级联删失败 uid=%s: %s",
+                        user_id, sqlite3_errmsg(s_db));
+                rc = DG_ERR_DB;
+            }
+            sqlite3_finalize(st2);
+        } else {
+            rc = DG_ERR_DB;
+        }
+    }
     sqlite3_finalize(st);
     if (rc == DG_OK && cache_del_locked(user_id) != DG_OK) {
         DG_LOGE(TAG, "特征缓存增量更新失败(del),触发全量重载");
@@ -1136,6 +1230,264 @@ int db_find_by_ic(const char *ic, user_rec_t *out)
     else
         rc = DG_ERR_NOT_FOUND;
     sqlite3_finalize(st);
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
+/* ---- fingerprints(FINGERPRINT_AS608.md 决策 B;每用户 ≤3 枚,
+ *      PageID 全局唯一,DB 是映射唯一事实源) ---- */
+
+int db_finger_add(const char *user_id, int32_t page_id,
+                  const uint8_t *plain, size_t len)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!user_id || !*user_id || page_id < 0 || !plain || len == 0 ||
+        len > DG_FEATURE_MAX)
+        return DG_ERR_PARAM;
+
+    pthread_mutex_lock(&s_mtx);
+    uint8_t enc[DG_FEATURE_MAX + 16];
+    size_t enc_len = 0;
+    if (dg_feature_wrap(plain, len, enc, sizeof(enc), &enc_len) != DG_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_INTERNAL;
+    }
+    sqlite3_stmt *st;
+    int rc = DG_OK;
+    if (sqlite3_prepare_v2(s_db,
+            "INSERT INTO fingerprints(user_id,page_id,finger_vec,created_at)"
+            " VALUES(?1,?2,?3,?4);", -1, &st, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    sqlite3_bind_text(st, 1, user_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 2, page_id);
+    sqlite3_bind_blob(st, 3, enc, (int)enc_len, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 4, (sqlite3_int64)time(NULL));
+    if (sqlite3_step(st) != SQLITE_DONE) {
+        /* page_id UNIQUE 冲突 = PageID 分配与实际状态脱节,按状态错报 */
+        DG_LOGE(TAG, "finger add page=%d: %s", page_id, sqlite3_errmsg(s_db));
+        rc = DG_ERR_STATE;
+    }
+    sqlite3_finalize(st);
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
+int db_finger_del(const char *user_id, int32_t page_id)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!user_id || !*user_id || page_id < 0)
+        return DG_ERR_PARAM;
+
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    int rc;
+    if (sqlite3_prepare_v2(s_db,
+            "DELETE FROM fingerprints WHERE user_id=?1 AND page_id=?2",
+            -1, &st, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    sqlite3_bind_text(st, 1, user_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 2, page_id);
+    if (sqlite3_step(st) != SQLITE_DONE)
+        rc = DG_ERR_DB;
+    else
+        rc = sqlite3_changes(s_db) > 0 ? DG_OK : DG_ERR_NOT_FOUND;
+    sqlite3_finalize(st);
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
+int db_finger_del_all(void)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    pthread_mutex_lock(&s_mtx);
+    int rc = sqlite3_exec(s_db, "DELETE FROM fingerprints;", NULL, NULL, NULL)
+             == SQLITE_OK ? DG_OK : DG_ERR_DB;
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
+/** 读出特征副本(自动解密;换模组回灌用) */
+int db_finger_get_vec(int32_t page_id, uint8_t *out, size_t cap, size_t *out_len)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!out || !out_len || cap < DG_FEATURE_MAX || page_id < 0)
+        return DG_ERR_PARAM;
+
+    *out_len = 0;
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    int rc;
+    if (sqlite3_prepare_v2(s_db,
+            "SELECT finger_vec FROM fingerprints WHERE page_id=?1", -1, &st, NULL)
+        != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    sqlite3_bind_int(st, 1, page_id);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const void *blob = sqlite3_column_blob(st, 0);
+        int nbytes = sqlite3_column_bytes(st, 0);
+        if (!blob || nbytes <= 16) {
+            rc = DG_ERR_DB;              /* 空行/截断密文:显式暴露 */
+        } else if (dg_feature_unwrap(blob, (size_t)nbytes, out, cap, out_len)
+                   != DG_OK) {
+            rc = DG_ERR_DB;
+        } else {
+            rc = DG_OK;
+        }
+    } else {
+        rc = DG_ERR_NOT_FOUND;
+    }
+    sqlite3_finalize(st);
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
+int db_finger_count_user(const char *user_id, uint32_t *n)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!user_id || !*user_id || !n)
+        return DG_ERR_PARAM;
+
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    int rc = DG_OK;
+    if (sqlite3_prepare_v2(s_db,
+            "SELECT COUNT(*) FROM fingerprints WHERE user_id=?1",
+            -1, &st, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    sqlite3_bind_text(st, 1, user_id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW)
+        *n = (uint32_t)sqlite3_column_int(st, 0);
+    else
+        rc = DG_ERR_DB;
+    sqlite3_finalize(st);
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
+int db_finger_count_all(uint32_t *n)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!n)
+        return DG_ERR_PARAM;
+
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    int rc = DG_OK;
+    if (sqlite3_prepare_v2(s_db, "SELECT COUNT(*) FROM fingerprints", -1, &st, NULL)
+        != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    if (sqlite3_step(st) == SQLITE_ROW)
+        *n = (uint32_t)sqlite3_column_int(st, 0);
+    else
+        rc = DG_ERR_DB;
+    sqlite3_finalize(st);
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
+/** 全局最小空闲 PageID:按序号排空找第一个缺口(0 起连续段) */
+int db_finger_alloc_page(int32_t *out)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!out)
+        return DG_ERR_PARAM;
+
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    int rc = DG_OK;
+    if (sqlite3_prepare_v2(s_db,
+            "SELECT page_id FROM fingerprints ORDER BY page_id", -1, &st, NULL)
+        != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    int expect = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        int pid = sqlite3_column_int(st, 0);
+        if (pid > expect)
+            break;               /* 出现缺口,expect 即最小空闲 */
+        expect = pid + 1;
+    }
+    *out = expect;
+    sqlite3_finalize(st);
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
+/** Search 命中 PageID → user_id 反查;user_id 缓冲须 ≥DG_UID_LEN */
+int db_finger_page_user(int32_t page_id, char *user_id, size_t cap)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!user_id || cap < DG_UID_LEN || page_id < 0)
+        return DG_ERR_PARAM;
+
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    int rc;
+    if (sqlite3_prepare_v2(s_db,
+            "SELECT user_id FROM fingerprints WHERE page_id=?1", -1, &st, NULL)
+        != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    sqlite3_bind_int(st, 1, page_id);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        col_text_copy(st, 0, user_id, cap);
+        rc = DG_OK;
+    } else {
+        rc = DG_ERR_NOT_FOUND;
+    }
+    sqlite3_finalize(st);
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
+/** 该用户全部 PageID(1:1 验证逐枚 LoadChar 的数据源);pages 为调用方缓冲 */
+int db_finger_list_user(const char *user_id, int32_t *pages, uint32_t cap,
+                        uint32_t *out_n)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (!user_id || !*user_id || (!pages && cap > 0) || !out_n)
+        return DG_ERR_PARAM;
+
+    *out_n = 0;
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    int rc = DG_OK;
+    if (sqlite3_prepare_v2(s_db,
+            "SELECT page_id FROM fingerprints WHERE user_id=?1 ORDER BY page_id",
+            -1, &st, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
+    sqlite3_bind_text(st, 1, user_id, -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        if (*out_n < cap)
+            pages[*out_n] = sqlite3_column_int(st, 0);
+        (*out_n)++;
+    }
+    sqlite3_finalize(st);
+    if (cap < *out_n)
+        rc = DG_ERR_NO_MEMORY;   /* 缓冲不足:结果不完整,显式暴露 */
     pthread_mutex_unlock(&s_mtx);
     return rc;
 }

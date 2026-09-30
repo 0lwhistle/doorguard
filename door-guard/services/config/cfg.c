@@ -268,6 +268,9 @@ static void defaults_apply(dg_cfg_t *c)
     c->net_gw[0] = '\0';
     c->relay_gpio_line = 0;
     snprintf(c->relay_gpio_chip, sizeof(c->relay_gpio_chip), "/dev/gpiochip0");
+    c->fp_baud = 57600;
+    c->fp_wak_gpio = 94;
+    snprintf(c->fp_uart_dev, sizeof(c->fp_uart_dev), "/dev/ttyS8");
 }
 
 /* ---- 元表驱动:json → 快照(键缺失走默认,类型错 WARN 回退) ----
@@ -369,6 +372,15 @@ static void json_apply_extra(dg_cfg_t *c, const cJSON *root)
     if ((item = json_path_get(root, "access.relay_gpio_chip")) &&
         cJSON_IsString(item) && item->valuestring)
         copy_cstr(c->relay_gpio_chip, sizeof(c->relay_gpio_chip), item->valuestring);
+    if ((item = json_path_get(root, "finger.uart_dev")) &&
+        cJSON_IsString(item) && item->valuestring)
+        copy_cstr(c->fp_uart_dev, sizeof(c->fp_uart_dev), item->valuestring);
+    if ((item = json_path_get(root, "finger.baud")) &&
+        cJSON_IsNumber(item))
+        c->fp_baud = item->valueint;
+    if ((item = json_path_get(root, "finger.wak_gpio")) &&
+        cJSON_IsNumber(item))
+        c->fp_wak_gpio = item->valueint;
 }
 
 /* 快照重建:默认两层 → cur 层;写入另一份缓冲后切换(读端持旧快照不受影响) */

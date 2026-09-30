@@ -666,9 +666,158 @@ static void test_user_list_ids(void)
     DG_CHECK(db_user_list_ids(ids, 0, &n) == DG_ERR_PARAM || n == 0);
 }
 
+static void test_finger(void)
+{
+    printf("[S9] fingerprints: add/dup-page/count/alloc/reverse/list/del/cascade\n");
+    fresh_setup();
+    user_rec_t u1 = make_user("30001", "王五", "pwd1");
+    user_rec_t u2 = make_user("30002", "赵六", "pwd2");
+    DG_CHECK(db_user_add(&u1) == DG_OK);
+    DG_CHECK(db_user_add(&u2) == DG_OK);
+
+    uint8_t vec[512];
+    for (int i = 0; i < 512; i++)
+        vec[i] = (uint8_t)(i * 3 + 1);
+
+    /* 参数防御 */
+    DG_CHECK(db_finger_add("30001", -1, vec, sizeof(vec)) == DG_ERR_PARAM);
+    DG_CHECK(db_finger_add(NULL, 0, vec, sizeof(vec)) == DG_ERR_PARAM);
+    DG_CHECK(db_finger_add("30001", 0, vec, 0) == DG_ERR_PARAM);
+
+    DG_CHECK(db_finger_add("30001", 0, vec, sizeof(vec)) == DG_OK);
+    /* page_id UNIQUE */
+    DG_CHECK(db_finger_add("30002", 0, vec, sizeof(vec)) == DG_ERR_STATE);
+
+    uint32_t n = 99;
+    DG_CHECK(db_finger_count_user("30001", &n) == DG_OK && n == 1);
+    DG_CHECK(db_finger_count_user("30002", &n) == DG_OK && n == 0);
+    DG_CHECK(db_finger_count_all(&n) == DG_OK && n == 1);
+
+    /* 反查:命中页号 → uid;未命中 → NOT_FOUND */
+    char uid[DG_UID_LEN];
+    DG_CHECK(db_finger_page_user(0, uid, sizeof(uid)) == DG_OK);
+    DG_CHECK(strcmp(uid, "30001") == 0);
+    DG_CHECK(db_finger_page_user(9, uid, sizeof(uid)) == DG_ERR_NOT_FOUND);
+
+    /* 最小空闲页:0 被占 → 1;挖洞(删 1)后回收 */
+    int32_t page = -1;
+    DG_CHECK(db_finger_alloc_page(&page) == DG_OK && page == 1);
+    DG_CHECK(db_finger_add("30002", 1, vec, sizeof(vec)) == DG_OK);
+    DG_CHECK(db_finger_add("30002", 2, vec, sizeof(vec)) == DG_OK);
+    DG_CHECK(db_finger_alloc_page(&page) == DG_OK && page == 3);
+    DG_CHECK(db_finger_del("30002", 1) == DG_OK);
+    DG_CHECK(db_finger_alloc_page(&page) == DG_OK && page == 1);
+    DG_CHECK(db_finger_del("30002", 1) == DG_ERR_NOT_FOUND);   /* 重复删 */
+
+    /* 该用户页清单(1:1 逐枚验证数据源)+ 缓冲不足显式报错 */
+    int32_t pages[3];
+    uint32_t pn = 0;
+    DG_CHECK(db_finger_list_user("30002", pages, 3, &pn) == DG_OK && pn == 1);
+    DG_CHECK(pages[0] == 2);
+    DG_CHECK(db_finger_list_user("30001", pages, 3, &pn) == DG_OK && pn == 1);
+
+    /* 向量 roundtrip:密文落库 → 解密读出一致(备份/回灌路径) */
+    DG_CHECK(db_finger_add("30001", 5, vec, sizeof(vec)) == DG_OK);
+    {
+        uint8_t plain[DG_FEATURE_MAX];
+        size_t plen = 0;
+        DG_CHECK(db_finger_get_vec(5, plain, sizeof(plain), &plen) == DG_OK);
+        DG_CHECK(plen == sizeof(vec));
+        DG_CHECK(memcmp(plain, vec, sizeof(vec)) == 0);
+        memset(plain, 0, sizeof(plain));
+        DG_CHECK(db_finger_get_vec(99, plain, sizeof(plain), &plen)
+                 == DG_ERR_NOT_FOUND);
+    }
+
+    /* 删用户级联删指纹行 */
+    DG_CHECK(db_user_del("30001") == DG_OK);
+    DG_CHECK(db_finger_count_all(&n) == DG_OK && n == 1);   /* 只剩 30002 的 page2 */
+    DG_CHECK(db_finger_page_user(5, uid, sizeof(uid)) == DG_ERR_NOT_FOUND);
+    DG_CHECK(db_finger_page_user(2, uid, sizeof(uid)) == DG_OK);
+
+    /* 清空(恢复出厂) */
+    DG_CHECK(db_finger_del_all() == DG_OK);
+    DG_CHECK(db_finger_count_all(&n) == DG_OK && n == 0);
+    DG_CHECK(db_finger_alloc_page(&page) == DG_OK && page == 0);
+}
+
+/* 迁移(幂等):老库(users 带 finger_vec 数据、无 fingerprints 表)→
+ * storage_init 自动搬入 fingerprints 并把 users 列置 NULL。
+ * 新库(直接 storage_init)无迁移动作。2026-09-30 决策 B 落地配套 */
+static void test_finger_migration(void)
+{
+    printf("[S10] finger 迁移:老库搬数据/新库幂等\n");
+    storage_deinit();
+    snprintf(s_dir, sizeof(s_dir), "/tmp/dg_st_%d", (int)getpid());
+    char cmd[192];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s && mkdir -p %s", s_dir, s_dir);
+    if (system(cmd) != 0) {
+        printf("  FAIL: cannot prepare %s\n", s_dir);
+        exit(1);
+    }
+    char db[128], key[128];
+    snprintf(db, sizeof(db), "%s/db.sqlite", s_dir);
+    snprintf(key, sizeof(key), "%s/dg.key", s_dir);
+
+    /* 造"老库":users 表=当前列集(缺 fingerprints),两行带 finger_vec */
+    {
+        sqlite3 *raw = NULL;
+        DG_CHECK(sqlite3_open(db, &raw) == SQLITE_OK);
+        char *err = NULL;
+        DG_CHECK(sqlite3_exec(raw,
+            "CREATE TABLE users ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " user_id TEXT NOT NULL UNIQUE, user_name TEXT NOT NULL,"
+            " face_vec BLOB, finger_vec BLOB, pwd_hash BLOB NOT NULL,"
+            " pwd_salt BLOB NOT NULL, ic_card TEXT UNIQUE,"
+            " role INTEGER NOT NULL DEFAULT 0,"
+            " auth_flags INTEGER NOT NULL DEFAULT 0,"
+            " created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);"
+            "CREATE TABLE device_config (key TEXT PRIMARY KEY, value TEXT NOT NULL,"
+            " updated_at INTEGER NOT NULL);"
+            "INSERT INTO users(user_id,user_name,finger_vec,pwd_hash,pwd_salt,"
+            " role,auth_flags,created_at,updated_at) VALUES"
+            " ('40001','老张',X'0102030405',"
+            "  X'0000000000000000000000000000000000000000000000000000000000000000',"
+            "  X'00000000000000000000000000000000',0,0,1,1),"
+            " ('40002','老李',X'AABBCCDD',"
+            "  X'0000000000000000000000000000000000000000000000000000000000000000',"
+            "  X'00000000000000000000000000000000',0,0,1,1);",
+            NULL, NULL, &err) == SQLITE_OK);
+        sqlite3_free(err);
+        sqlite3_close(raw);
+    }
+
+    DG_CHECK(storage_init(db, key) == DG_OK);
+    uint32_t n = 0;
+    DG_CHECK(db_finger_count_all(&n) == DG_OK && n == 2);
+    char uid[DG_UID_LEN];
+    DG_CHECK(db_finger_page_user(0, uid, sizeof(uid)) == DG_OK
+             && strcmp(uid, "40001") == 0);
+    DG_CHECK(db_finger_page_user(1, uid, sizeof(uid)) == DG_OK
+             && strcmp(uid, "40002") == 0);
+
+    /* users 列已清:API 读回 finger_vec_len==0(占位列保留在库里) */
+    {
+        user_rec_t u = { 0 };
+        DG_CHECK(db_user_get("40001", &u) == DG_OK);
+        DG_CHECK(u.finger_vec_len == 0);
+        DG_CHECK(db_user_get("40002", &u) == DG_OK);
+        DG_CHECK(u.finger_vec_len == 0);
+    }
+
+    /* 幂等:deinit 再 init(表已存在)→ 不重复搬运、数据不动 */
+    storage_deinit();
+    DG_CHECK(storage_init(db, key) == DG_OK);
+    DG_CHECK(db_finger_count_all(&n) == DG_OK && n == 2);
+    DG_CHECK(db_finger_page_user(0, uid, sizeof(uid)) == DG_OK
+             && strcmp(uid, "40001") == 0);
+}
+
 int main(void)
 {
     test_add();          /* 含 2000 边界,最慢 */
+
     test_password();
     test_update_dup();
     test_field_valid();
@@ -678,6 +827,8 @@ int main(void)
     test_crypto();
     test_concurrency();
     test_avatar();
+    test_finger();
+    test_finger_migration();
 
     snprintf(s_dir, sizeof(s_dir), "/tmp/dg_st_%d", (int)getpid());
     char cmd[96];

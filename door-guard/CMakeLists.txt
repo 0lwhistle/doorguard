@@ -102,6 +102,11 @@ add_library(dg_storage STATIC
 target_include_directories(dg_storage PUBLIC ${CMAKE_SOURCE_DIR}/modules/sqlite)
 target_link_libraries(dg_storage PUBLIC dg_proto sqlite3 crypto)
 
+# 指纹 AS608 协议层(纯函数,不碰 IO;单测用官方例程 golden 锁码值)
+add_library(dg_fp_as608 STATIC services/verify/fingerprint/fp_as608.c)
+target_include_directories(dg_fp_as608 PUBLIC
+    ${CMAKE_SOURCE_DIR}/services/verify/fingerprint)
+
 # jpeg:头像 JPEG 编解码(内存↔内存,libjpeg 薄封装;视觉编码/UI 解码共用)
 add_library(dg_jpeg STATIC modules/jpeg/dg_jpeg.c)
 target_include_directories(dg_jpeg PUBLIC ${CMAKE_SOURCE_DIR}/modules/jpeg)

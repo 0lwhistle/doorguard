@@ -51,6 +51,8 @@ typedef enum {
     DG_ERR_METHOD_DISABLED = -33, /**< 指定验证方式未开启 */
     DG_ERR_BLACKLIST      = -34, /**< 黑名单用户拒绝 */
     DG_ERR_MISMATCH       = -35, /**< 生物特征 1:1 不匹配 */
+    DG_ERR_FINGER_FULL    = -36, /**< 指纹模组库容量已满(FINGERPRINT_AS608 决策 C) */
+    DG_ERR_FINGER_LIMIT   = -37, /**< 单用户指纹已达上限 3 枚(独立 fingerprints 表) */
 } dg_err_t;
 
 /** 错误码名称(日志/上位机用);未知名返回 "UNKNOWN" */

@@ -72,6 +72,10 @@ typedef struct {
     /* 硬件参数(json-only;引脚待硬件确认) */
     int  relay_gpio_line;      /**< 开门继电器 GPIO 行号,默认 0 */
     char relay_gpio_chip[32];  /**< GPIO 控制器(sysfs 模式下仅记录) */
+    /* 指纹模组 AS608(json-only;FINGERPRINT_AS608.md §8;2026-09-30 板上实测定值) */
+    char fp_uart_dev[32];      /**< 模组串口节点,默认 /dev/ttyS8(uart8,板上 status=okay 且空闲) */
+    int  fp_baud;              /**< 模组波特率,默认 57600(协议 v1 冻结值) */
+    int  fp_wak_gpio;          /**< WAK 触摸 GPIO 全局编号,默认 94(GPIO2_D6) */
 } dg_cfg_t;
 
 /**

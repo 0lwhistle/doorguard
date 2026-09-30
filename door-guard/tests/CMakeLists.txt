@@ -29,6 +29,8 @@ set_tests_properties(test_cfg PROPERTIES TIMEOUT 60)
 dg_add_test(test_auth_fsm dg_access)
 set_tests_properties(test_auth_fsm PROPERTIES TIMEOUT 60)
 dg_add_test(test_uart_mock dg_uart)
+
+dg_add_test(test_fp_proto dg_fp_as608)
 set_tests_properties(test_auth_fsm PROPERTIES TIMEOUT 60)
 dg_add_test(test_rknn_face dg_rknn_face)
 dg_add_test(test_face_quality dg_rknn_face)

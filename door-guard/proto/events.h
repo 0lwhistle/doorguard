@@ -72,9 +72,14 @@ extern "C" {
 
 /* HAL:硬件事件(HAL → 服务;指纹/IC/门磁驱动未接,事件两端皆死,
  * 契约保留待硬件接入——2026-09-27 硬件接入方案的对接面) */
-#define EV_FINGER_STATUS     EV_DEF(DG_MODULE_ID_HAL, 0x0001)    /**< [死契约·待硬件] 指纹按压/释放/错误 */
+#define EV_FINGER_STATUS     EV_DEF(DG_MODULE_ID_HAL, 0x0001)    /**< [死契约·待硬件] 指纹按压/释放/错误(fp_provider 落地后激活) */
 #define EV_IC_CARD           EV_DEF(DG_MODULE_ID_HAL, 0x0002)    /**< [死契约·待硬件] 读到卡号 */
 #define EV_DOOR_STATE        EV_DEF(DG_MODULE_ID_HAL, 0x0003)    /**< [死契约·待硬件] 门磁/门控反馈 */
+/* 指纹验证结果(FINGERPRINT_AS608.md §4;2026-09-30 新增)。
+ * 载荷与 vision 同构,复用 ev_match_t:matched/user_id/role/score_permille,
+ * 发布侧 fp_provider,订阅侧 access_service → FSM 指纹分支(method=2) */
+#define EV_FINGER_MATCH_1N   EV_DEF(DG_MODULE_ID_HAL, 0x0004)    /**< 1:N 检索结果(Search 命中→反查 DB) */
+#define EV_FINGER_VERIFY_11  EV_DEF(DG_MODULE_ID_HAL, 0x0005)    /**< 1:1 验证结果(v_finger 子步) */
 
 /* UI:待机与页面(UI 内部页面管理用) */
 #define EV_UI_STANDBY        EV_DEF(DG_MODULE_ID_UI, 0x0010)     /**< [死契约·被取代] 待机切换由 FSM 驱动 standby 页(经 EV_UI_GOTO_PAGE)+ 主页倒计时实现 */

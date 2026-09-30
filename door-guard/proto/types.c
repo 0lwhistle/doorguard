@@ -33,6 +33,8 @@ const char *dg_err_name(dg_err_t err)
     case DG_ERR_METHOD_DISABLED: return "METHOD_DISABLED";
     case DG_ERR_BLACKLIST:      return "BLACKLIST";
     case DG_ERR_MISMATCH:       return "MISMATCH";
+    case DG_ERR_FINGER_FULL:    return "FINGER_FULL";
+    case DG_ERR_FINGER_LIMIT:   return "FINGER_LIMIT";
     default:                    return "UNKNOWN";
     }
 }

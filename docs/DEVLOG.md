@@ -4,7 +4,31 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
-## 2026-09-30(续3)holder 健康管理推广:vision 心跳 / relay 开门失败 / storage 巡检 / 降级事件接入 UI
+## 2026-09-30(续4)指纹链路开工:硬件实测定位 uart8 时钟根因 + 协议冻结 + 基础层落地
+
+1. 硬件接线核验(板在线):AS608 → ttyS8(uart8,status=okay/pinctrl default/无占用),
+   WAK → GPIO2_D6(94,双未占用);GPIO3_B0 与 GPIO0_A5 均为板上 LED(SoC 强驱输出,
+   与模组推挽 WAK 互顶,已否);GPIO3 101~107 是以太网勿碰。VTI 必须 3.3V。
+2. **UART 全波特率无应答根因(实测)**:RK3576 BSP uart2~11 sclk 默认挂 187.5kHz
+   慢时钟,dmesg `base_baud=11718` = 上限 ~11.7k 波特,57600 物理不通;修复 =
+   DTS 给 uart8 加 assigned-clocks/rates 24MHz(抄 uart0 写法),`build.sh kernel`
+   + 只刷 boot。**WAK 节拍翻转与触摸无相关性**待时钟修复后复测。
+3. 协议冻结:`FINGERPRINT_PROTOCOL.md` v1(官方 51 例程 FPM10A.c 逐字节);
+   **协议坑**:应答包长度字段口径=确认码+参数+校验和-1,实际帧比长度字段多 1B
+   (51 例程读 12/16 少一字节、buffer[9]=确认码高字节的由来),解析器按 0x07/0x08
+   折算;UpChar 数据/结束包为标准推导,待真机验证(文档 §6 清单)。
+4. 代码落地:err -36/-37(+name)、EV_FINGER_MATCH_1N/VERIFY_11(复用 ev_match_t)、
+   cfg finger 组(uart_dev/baud/wak_gpio,json-only)、storage fingerprints 表 +
+   finger_vec 幂等迁移 + 8 个 db_finger_* API + 删用户级联删行、
+   fp_as608 纯函数层(组包/流式解析/确认码)、test_fp_proto(官方 golden)、
+   test_storage S9/S10(finger API + 迁移含幂等)。
+5. 测试:test_fp_proto 首轮挂——a) 我方测试 checksum 算错 0x22→0x17、应答向量
+   按错误口径;b) **死循环 bug**:sticky 用例 r<0 分支只记 FAIL 不 break,ctest
+   捕获无限输出把 ctest 吃到 std::bad_alloc(且打挂 WSL)。已修,全量重跑
+   **未完成:主机 WSL HCS 起不来(需重启主机),下次会话先 `env/bin/dg-test` 全绿再继续**。
+6. 交接单:`docs/tech/HW_BRINGUP_VM_TASK.md` 给 VM 编译+驱动侧一次性搞定
+   (uart8/4/6 时钟、SPI 启用+iccard 子节点、ko 契约指针、验收命令)。
+   下一步:VM 刷 boot → §6 验收 → gpio_hal wait_edge + fp_provider + FSM 分支。
 
 1. 背景:相机断流那套「事实→巡检→置态→提示」推广到其余模块。盘点结论:
    EV_SYS_SERVICE_STATE 看门狗一直在发但**零订阅**;vision_backend worker

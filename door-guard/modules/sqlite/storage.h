@@ -72,6 +72,31 @@ int db_user_count_role(int32_t role, uint32_t *n);
 int db_verify_password(const char *user_id, const char *pwd, user_rec_t *out);
 int db_find_by_ic(const char *ic, user_rec_t *out);
 
+/* ---- fingerprints(FINGERPRINT_AS608.md 决策 B:独立指纹表) ----
+ * DB 是"PageID ↔ user_id"映射的唯一事实源;模组 flash 才是模板主存储,
+ * finger_vec 加密副本仅用于备份/换模组回灌。向量明文进出,落库自动加密。 */
+
+/** 录入落库(Store 成功 + UpChar 读回后调用);page_id 重复 → DG_ERR_STATE */
+int db_finger_add(const char *user_id, int32_t page_id,
+                  const uint8_t *plain, size_t len);
+/** 逐枚删除(编辑页;配对模组 DeletChar,先删模组再删行) */
+int db_finger_del(const char *user_id, int32_t page_id);
+/** 清空指纹表(恢复出厂,配对模组 Empty) */
+int db_finger_del_all(void);
+/** 单用户指纹数(录入前置检查,≥3 → DG_ERR_FINGER_LIMIT 由调用方判定) */
+int db_finger_count_user(const char *user_id, uint32_t *n);
+/** 全库指纹数(boot 对账:与模组 ValidTempleteNum 比对暴露孤儿) */
+int db_finger_count_all(uint32_t *n);
+/** 全局最小空闲 PageID(0 起连续段第一个缺口) */
+int db_finger_alloc_page(int32_t *out);
+/** 读出特征副本(自动解密;换模组回灌用);cap 须 ≥DG_FEATURE_MAX */
+int db_finger_get_vec(int32_t page_id, uint8_t *out, size_t cap, size_t *out_len);
+/** Search 命中 PageID → user_id 反查;user_id 缓冲须 ≥DG_UID_LEN */
+int db_finger_page_user(int32_t page_id, char *user_id, size_t cap);
+/** 该用户全部 PageID(1:1 逐枚验证数据源);cap 不足 → DG_ERR_NO_MEMORY */
+int db_finger_list_user(const char *user_id, int32_t *pages, uint32_t cap,
+                        uint32_t *out_n);
+
 /* ---- 特征比对迭代器:enroll 编排查重遍历库内特征(解密后明文交回调) ---- */
 
 /** 回调返回非 0 中止遍历(如已判定重复);plain 在回调返回后立即擦除 */
