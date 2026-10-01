@@ -470,6 +470,10 @@ int main(void)
     DG_CHECK(atomic_load(&s_result_finger_cnt) == result_before);
     DG_CHECK(atomic_load(&F.store_page) == 0);  /* 从未 Store */
     DG_CHECK(atomic_load(&F.delet_calls) == 0);
+    /* 迟到按压已被 IDLE 分支消费:补释放沿,否则 provider 停在 wait_release,
+     * fp_provider_stop 的 pthread_join 挂死(ctest TIMEOUT) */
+    atomic_store(&F.release_req, 1);
+    usleep(300 * 1000);
 
     printf("[P7] 逐枚删除:DeletChar + 删行 + 末枚收方式位\n");
     fake_reset();

@@ -66,7 +66,7 @@ static void mask_card(const char *no, char *out, size_t cap)
 {
     size_t n = no ? strnlen(no, DG_IC_LEN) : 0;
     if (n < 8) {
-        snprintf(out, cap, "%s", _("********"));
+        snprintf(out, cap, "********");   /* 掩码常量不走翻译(无语言差异) */
         return;
     }
     snprintf(out, cap, "********%s", no + n - 4);
