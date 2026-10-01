@@ -47,8 +47,8 @@ dg_add_test(test_enroll_ic dg_enroll dg_card dg_iccard dg_storage dg_config
 set_tests_properties(test_enroll_ic PROPERTIES TIMEOUT 120)
 
 # 指纹录入端到端(假模组注入应答帧;覆盖 happy/查重/LIMIT/FULL/重采/取消/删除)
-dg_add_test(test_fp_enroll dg_fp dg_storage dg_config dg_tasker dg_event_bus
-                            dg_proto cjson)
+dg_add_test(test_fp_enroll dg_fp dg_enroll dg_storage dg_config dg_tasker
+                            dg_event_bus dg_proto cjson)
 set_tests_properties(test_fp_enroll PROPERTIES TIMEOUT 120)
 dg_add_test(test_rknn_face dg_rknn_face)
 dg_add_test(test_face_quality dg_rknn_face)

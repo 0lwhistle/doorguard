@@ -62,6 +62,11 @@ int vision_service_library_add(const char *user_id, const uint8_t *feature,
 /** 用户删除后调用(后端 DELETE) */
 int vision_service_library_remove(const char *user_id);
 
+/** 注入特征库操作函数(测试替身用;NULL = 恢复后端原 ops)。
+ *  装配层在后端 start 时接线;test_enroll_flow 用它模拟"库写失败"
+ *  的还原路径——此前只有定义没有声明,测试只能隐式调用(告警) */
+void vision_service_set_lib_ops(vision_lib_add_fn add, vision_lib_del_fn del);
+
 /** 特征槽位:视觉后端提交(vision 内部)/ 编排侧按 seq 取(enroll 调用) */
 int vision_service_submit_feature(const char *user_id, uint32_t seq,
                                   const uint8_t *feature, size_t len);

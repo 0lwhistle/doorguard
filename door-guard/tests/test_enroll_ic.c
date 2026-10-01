@@ -98,7 +98,7 @@ int main(void)
 
     char dir[128];
     snprintf(dir, sizeof(dir), "/tmp/dg_enroll_ic_%d", (int)getpid());
-    char cmd[256];
+    char cmd[320];   /* 两条 %s(dir 上限 127)满打满算不截断,同 test_enroll_flow */
     snprintf(cmd, sizeof(cmd), "rm -rf %s && mkdir -p %s", dir, dir);
     DG_CHECK(system(cmd) == 0);
 
