@@ -114,7 +114,9 @@ add_library(dg_fp STATIC
 )
 target_include_directories(dg_fp PUBLIC
     ${CMAKE_SOURCE_DIR}/services/verify/fingerprint)
-target_link_libraries(dg_fp PUBLIC dg_fp_as608 dg_proto dg_uart dg_gpio dg_storage dg_config)
+# dg_registry(降级状态枚举/装配约定)与 dg_timeutil(线程循环心跳时基)
+target_link_libraries(dg_fp PUBLIC dg_fp_as608 dg_proto dg_uart dg_gpio dg_storage
+                                   dg_config dg_registry dg_timeutil)
 
 # IC 读卡器 HAL(/dev/dg_iccard0 节点薄封装;sim 后端仅宿主,板上不进固件)
 add_library(dg_iccard STATIC drv/iccard/iccard_hal.c)
