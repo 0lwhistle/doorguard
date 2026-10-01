@@ -235,7 +235,7 @@ static int capture_to_buf(uint8_t buf_id, bool *quality_fail)
 {
     uint8_t b[FP_A608_FRAME_MAX];
     fp_frame_t ack;
-    uint16_t c;
+    uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
     *quality_fail = false;
 
     size_t n = fp_as608_get_image(b, sizeof(b));
@@ -263,7 +263,7 @@ static int search_all(uint16_t *page, uint16_t *score)
 {
     uint8_t b[FP_A608_FRAME_MAX];
     fp_frame_t ack;
-    uint16_t c;
+    uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
     size_t n = fp_as608_search(b, sizeof(b), FP_A608_BUF1, 0, FP_SEARCH_PAGES);
     if (cmd_xchg(b, n, &ack, &c, 3000) != DG_OK)
         return DG_ERR_IO;
@@ -354,7 +354,7 @@ static void seq_verify_11(const char *uid)
 
     uint8_t b[FP_A608_FRAME_MAX];
     fp_frame_t ack;
-    uint16_t c;
+    uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
     for (uint32_t i = 0; i < n && !m.matched; i++) {
         size_t len = fp_as608_load_char(b, sizeof(b), FP_A608_BUF2,
                                         (uint16_t)pages[i]);
@@ -388,7 +388,7 @@ static void enroll_rollback(void)
         return;
     uint8_t b[FP_A608_FRAME_MAX];
     fp_frame_t ack;
-    uint16_t c;
+    uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
     size_t n = fp_as608_delet_char(b, sizeof(b), (uint16_t)s_stored_page, 1);
     if (cmd_xchg(b, n, &ack, &c, 2000) == DG_OK && c == FP_ACK_OK)
         DG_LOGI(TAG, "录入回滚:PageID %d 已删", s_stored_page);
@@ -450,7 +450,7 @@ static void seq_enroll(void)
     }
     uint8_t b[FP_A608_FRAME_MAX];
     fp_frame_t ack;
-    uint16_t c;
+    uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
     size_t n = fp_as608_valid_num(b, sizeof(b));
     if (cmd_xchg(b, n, &ack, &c, 2000) != DG_OK || c != FP_ACK_OK) {
         pub_enroll_result(DG_ENROLL_FINGER, uid, s_cur.seq, DG_ERR_IO);
@@ -634,7 +634,7 @@ static void seq_del_one(void)
 {
     uint8_t b[FP_A608_FRAME_MAX];
     fp_frame_t ack;
-    uint16_t c;
+    uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
     size_t n = fp_as608_delet_char(b, sizeof(b), (uint16_t)s_cur.arg, 1);
     int err;
     if (cmd_xchg(b, n, &ack, &c, 2000) != DG_OK) {
@@ -664,7 +664,7 @@ static void seq_del_user_pages(void)
 {
     uint8_t b[FP_A608_FRAME_MAX];
     fp_frame_t ack;
-    uint16_t c;
+    uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
     for (int i = 0; i < s_cur.page_cnt; i++) {
         size_t n = fp_as608_delet_char(b, sizeof(b), s_cur.pages[i], 1);
         if (cmd_xchg(b, n, &ack, &c, 2000) != DG_OK || c != FP_ACK_OK)
@@ -756,7 +756,7 @@ static bool ensure_link(void)
     }
     uint8_t b[FP_A608_FRAME_MAX];
     fp_frame_t ack;
-    uint16_t c;
+    uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
     size_t n = fp_as608_verify_psw(b, sizeof(b), 0);   /* 出厂口令 0 */
     if (cmd_xchg(b, n, &ack, &c, 1000) != DG_OK || c != FP_ACK_OK) {
         DG_LOGW(TAG, "握手失败(confirm=%u),重试", c);
