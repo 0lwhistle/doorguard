@@ -104,12 +104,13 @@ static void t_parse_ack(void)
     fp_parser_t p;
     fp_frame_t f;
 
-    /* Search 命中 17B:07 0007 | 确认 0000 | 页 0005 | 得分 0032 | sum 0046
-     * (sum=07+00+07+00+00+00+05+00+32=0x46;注意应答长度字段口径:确认码
-     * 2B 按 1B 计,实际帧比长度字段多 1 字节,见 fp_as608.c after_len_of) */
+    /* Search 命中 17B:07 0007 | 确认 0000 | 页 0005 | 得分 0032 | sum 0045
+     * (sum=07+00+07+00+00+00+05+00+32=0x45;协议文档 §3 示例曾写 0046 系
+     * 手算错,2026-10-01 随解析器修一并更正;长度字段口径:确认码 2B 按 1B
+     * 计,实际帧比长度字段多 1 字节,见 fp_as608.c after_len_of) */
     uint8_t srch_ack[] = { 0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
                            0x07, 0x00, 0x07, 0x00, 0x00, 0x00, 0x05,
-                           0x00, 0x32, 0x00, 0x46 };
+                           0x00, 0x32, 0x00, 0x45 };
     fp_as608_parser_init(&p);
     DG_CHECK(fp_as608_parse(&p, srch_ack, sizeof(srch_ack), &f, NULL) == 1);
     DG_CHECK(f.type == FP_A608_TYPE_ACK);

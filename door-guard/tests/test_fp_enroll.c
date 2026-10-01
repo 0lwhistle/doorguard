@@ -12,6 +12,7 @@
  */
 #include "dg_test.h"
 #include "cfg.h"
+#include "err.h"
 #include "enroll_service.h"
 #include "event_bus.h"
 #include "events.h"
@@ -238,7 +239,7 @@ static int fk_recv(uint8_t *buf, size_t cap, int timeout_ms, size_t *out_len)
         pthread_mutex_unlock(&F.mtx);
         usleep(5000);
     }
-    return -1;                            /* 超时 */
+    return DG_ERR_TIMEOUT;                /* 契约码:provider 区分"无帧"与链路错 */
 }
 
 static int fk_wak_wait(int timeout_ms, int *level)
@@ -256,7 +257,7 @@ static int fk_wak_wait(int timeout_ms, int *level)
         }
         usleep(5000);
     }
-    return -1;                            /* 超时 */
+    return DG_ERR_TIMEOUT;                /* 契约码:provider 区分"无沿"与链路错 */
 }
 
 static int fk_wak_level(int *level)
