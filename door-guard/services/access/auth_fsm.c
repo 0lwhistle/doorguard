@@ -321,6 +321,10 @@ static void on_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now_ms)
 
 static void on_finger_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now_ms)
 {
+    if (fsm->state == ST_STANDBY)
+        wake_up(fsm);               /* 待机中按指纹 = 显式动作:唤醒后照常验证
+                                       (provider 在待机保持 SCAN_1N,同 IC §7.2) */
+
     if (fsm->state == ST_ADMIN_AUTH) {
         if (!m->matched)
             return;                     /* 未命中不打断管理员等待(同 face) */

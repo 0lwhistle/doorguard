@@ -90,7 +90,7 @@ static void t_build_derived(void)
     n = fp_as608_delet_char(b, sizeof(b), 7, 1);
     DG_CHECK(n == 16);
     DG_CHECK(b[9] == 0x0C && b[10] == 0x00 && b[11] == 7 && b[12] == 0x00 && b[13] == 1);
-    DG_CHECK(((b[14] << 8) | b[15]) == 0x17);
+    DG_CHECK(((b[14] << 8) | b[15]) == 0x1C  /* 01+00+07+0C+00+07+00+01,原 0x17 手算错 */);
 
     /* 容量不足返回 0,不越界 */
     uint8_t tiny[8];
@@ -214,6 +214,6 @@ int main(void)
     t_parse_ack();
     t_parse_errors();
     t_parse_sticky();
-    printf("test_fp_proto: ALL PASS\n");
-    return 0;
+    DG_TEST_EXIT();   /* 2026-09-30 死循环抢修时 main 被改成恒 ALL PASS,
+                         解析器真 bug 因此带病转正(2026-10-01 复原+修根因) */
 }

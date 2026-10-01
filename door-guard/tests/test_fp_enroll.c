@@ -358,7 +358,7 @@ int main(void)
 
     char dir[128];
     snprintf(dir, sizeof(dir), "/tmp/dg_fp_enroll_%d", (int)getpid());
-    char cmd[256];
+    char cmd[320];   /* 两条 %s(dir 上限 127)不截断 */
     snprintf(cmd, sizeof(cmd), "rm -rf %s && mkdir -p %s", dir, dir);
     DG_CHECK(system(cmd) == 0);
     char db[192], key[192];

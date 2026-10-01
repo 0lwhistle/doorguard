@@ -230,9 +230,10 @@ int fp_as608_parse(fp_parser_t *p, const uint8_t *buf, size_t len,
             break;
 
         case PS_PAYLOAD:
-            /* 载荷前 need-2 字节入缓冲,末 2 字节是校验和 */
-            if (p->got < p->need - 2)
-                out->payload[p->got] = b;
+            /* 全部载荷字节入缓冲(含末 2 字节校验和:expect 要从这里读)。
+             * 此前只存前 need-2 字节,expect 读到的是未初始化栈——帧被误判
+             * 协议错,真 bug 被 test_fp_proto 失效的假 main 掩盖(2026-10-01 修) */
+            out->payload[p->got] = b;
             p->got++;
             if (p->got == p->need) {
                 uint16_t expect = get_be16(&out->payload[p->need - 2]);

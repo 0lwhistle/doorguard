@@ -172,7 +172,9 @@ int main(void)
     snprintf(p2, sizeof(p2), "%s/ui/lang/en-US.json", DG_SOURCE_DIR);
     FILE *f1 = fopen(p1, "rb"), *f2 = fopen(p2, "rb");
     DG_CHECK(f1 && f2);
-    char b1[8192], b2[8192];
+    /* 语言表持续增长:8KB 静态缓冲已溢出(207 键 ~11KB),截断 → cJSON 解析
+     * 失败 → 下方 NULL 解引用段错误(2026-10-01 实测) */
+    static char b1[65536], b2[65536];
     size_t n1 = f1 ? fread(b1, 1, sizeof(b1) - 1, f1) : 0;
     size_t n2 = f2 ? fread(b2, 1, sizeof(b2) - 1, f2) : 0;
     if (f1) fclose(f1);
@@ -180,6 +182,11 @@ int main(void)
     b1[n1] = b2[n2] = '\0';
     cJSON *zh = cJSON_Parse(b1), *en = cJSON_Parse(b2);
     DG_CHECK(zh && en);
+    if (!zh || !en) {
+        printf("  语言表解析失败(截断/语法?),zh=%p en=%p\n",
+               (void *)zh, (void *)en);
+        return 1;
+    }
 
     for (int i = 0; i < s_key_cnt; i++) {
         const cJSON *vz = cJSON_GetObjectItemCaseSensitive(zh, s_keys[i]);

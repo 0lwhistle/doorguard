@@ -166,6 +166,8 @@ static void home_on_evt(const ui_evt_t *evt)
     case UI_EVT_PICK_METHOD:
         show_method_picker(evt->methods.auth_flags);
         break;
+    case UI_EVT_ENROLL_PROGRESS:
+        break;   /* 指纹录入进度归编辑页,主页忽略 */
     case UI_EVT_RESULT: {
         const ev_ui_result_t *r = &evt->result_popup;
         if (r->ok) {
