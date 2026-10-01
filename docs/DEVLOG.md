@@ -35,9 +35,22 @@
 8. 坑:cfg_load 任一路径为 NULL 即纯内置默认——测试想用出厂模板必须两路都给;
    Windows 侧 py 常量串与文件不可见字符差异导致 replace 断言偶发失配,改锚点
    定位手术。
-9. 下一步:WSL 全量构建 + dg-test 全绿 → 推 GitHub;用户侧交付 DTS(uart8
-   24MHz)+ IC .ko 后按 HW_BRINGUP §6 验收(握手/ValidNum/WAK 复测/真卡),
-   WAK 极性与 Search 实测耗时在验收时回填协议文档 §6。
+9. 构建收尾:dg-test **44/44 全绿**(38 旧 + 6 新)、dg-build 交叉零告警产物出链。
+   首轮三失败挖出三个带病旧账(修完记录):
+   - **test_fp_proto 的 main 在 2026-09-30 死循环抢修时被改成恒 ALL PASS exit=0**
+     ——fp_as608 解析器"expect 读未入缓冲字节"的真 bug 被掩盖带病转正(应答帧
+     全被误判协议错);已修解析器(全字节入缓冲)+ 复原 main。协议文档 §3
+     Search 示例校验和 0046 系手算错,一并更正 0045。
+   - **test_i18n 语言表读缓冲 8KB 溢出**(207 键 ~11KB):截断→cJSON 解析失败
+     →NULL 解引用段错误;改静态 64KB + 解析失败显式 return。
+   - 指纹分支漏待机唤醒(照 IC §7.2 补);假模组超时须回契约码 DG_ERR_TIMEOUT
+     (回 -1 会被 provider 当链路错,录入等待一超时就误发 RESULT(IO))。
+   - **工具链 arm_neon.h 在爆盘事故中损坏一处**(1527-1528 行 `__t`+`__ibute__`
+     错位)——交叉编译 NEON 文件全挂;已手工修复该处(备份 .bak-corrupt),
+     其余 5974 个头未逐一校验,若再遇怪异编译错误优先怀疑工具链其他文件。
+10. 下一步:用户侧交付 DTS(uart8 24MHz)+ IC .ko → 按 HW_BRINGUP §6 验收
+   (握手/ValidNum/WAK 复测/真卡);WAK 极性(fp.wak_active_level)与 Search
+   实测耗时在验收时回填;板上人工验收清单在两份协议文档与 README。
 
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
