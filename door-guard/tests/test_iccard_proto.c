@@ -7,6 +7,7 @@
  */
 #include "dg_test.h"
 #include "iccard_hal.h"
+#include "types.h"                    /* DG_IC_LEN(卡号串容量) */
 
 #include <stdio.h>
 #include <string.h>
