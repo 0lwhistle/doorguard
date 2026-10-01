@@ -19,8 +19,14 @@
 static const char *TAG = "[ICCARD]";
 
 /* sim 后端("sim" 设备名):pipe 读端即句柄,poll/read/close 全走原生路径,
- * 无任何分派分支;注入端见 iccard_hal_sim.c(仅宿主编译) */
+ * HAL 主体零分派,注入端见 iccard_hal_sim.c(仅宿主编译) */
 int iccard_sim_open(void);
+
+/* 板上构建没有 sim 源文件:弱符号桩顶住链接,真配 "sim" 名返回不支持 */
+__attribute__((weak)) int iccard_sim_open(void)
+{
+    return DG_ERR_UNSUPPORTED;
+}
 
 int iccard_hal_open(const char *dev_path)
 {
