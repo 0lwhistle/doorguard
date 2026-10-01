@@ -1,6 +1,12 @@
 # IC 卡读卡器 驱动-应用层协议设计(SPI 读头接入)
 
+> 状态:**应用侧已落地(2026-10-01)**——drv/iccard + card_provider + FSM 分支 +
+> 录入/UI 全链按本文实现(`services/verify/ic/README.md`);驱动 .ko 与 DTS 待用户交付,
+> 交付前 provider 停降级态,整机不受影响(§10)。
 > 面向:**驱动作者**(SPI 读卡器 Linux 驱动)与**应用层实现者**(door-guard 卡服务/FSM/UI)。
+> 状态:**应用侧已落地(2026-10-01)**——drv/iccard + card_provider + FSM 分支 +
+> 录入/UI 全链按本文实现(services/verify/ic/README.md);驱动 .ko 与 DTS 待交付,
+> 交付前 provider 停降级态,整机不受影响(§10 失败隔离)。
 > 本文是双方的**接口契约**:驱动按 §2~§5 实现,应用层按 §2~§7 消费;任何一侧要改协议,
 > 必须先改本文并双向确认,禁止单方面变更。
 > 总体方案评审结论见会话记录(2026-09-27);业务细则以 `spec-auth-business.md`、

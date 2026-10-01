@@ -314,6 +314,55 @@ static void on_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now_ms)
         succeed(fsm, DG_METHOD_FACE_1N, now_ms);
 }
 
+/* ---- 指纹 1:N 命中(2026-10-01;语义 = FINGERPRINT_AS608 §5.1 + ICCARD
+ * §7.2 同表:ST_NORMAL 开门 / ST_ADMIN_AUTH 管理员检索 / 其余忽略,method=2)。
+ * 与 face 的差异:判定闸在 provider(一次按压一次判定,RELEASED 前不再触发),
+ * FSM 不用 window_done;普通模式未命中也弹窗+落日志(按压是显式动作) */
+
+static void on_finger_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now_ms)
+{
+    if (fsm->state == ST_ADMIN_AUTH) {
+        if (!m->matched)
+            return;                     /* 未命中不打断管理员等待(同 face) */
+        if (m->role == DG_ROLE_ADMIN) {
+            cancel_timers(fsm);
+            fsm->state = ST_MENU;
+            fsm->menu_idle_s = 0;       /* 进菜单:无操作计时从这里开始 */
+            hint_clear(fsm);
+            goto_page(fsm, "menu");
+            DG_LOGI(TAG, "管理员指纹通过进菜单");
+        } else {
+            /* 非管理员:红弹窗+日志,停留本模式继续尝试;每次按压=独立动作 */
+            popup_fail_reason(fsm, DG_REASON_STRANGER);
+            write_log(fsm, m->user_id, m->user_name, DG_METHOD_FINGER,
+                      DG_RESULT_REJECT, DG_REASON_STRANGER, now_ms);
+            set_timer(fsm, FSM_TMR_ADMIN_5S, 5000);
+        }
+        return;
+    }
+
+    if (fsm->state != ST_NORMAL || !fsm->match_enabled)
+        return;
+
+    if (!m->matched) {
+        /* 未命中:陌生人失败+日志(§5.1;user_id=NULL) */
+        popup_fail_reason(fsm, DG_REASON_STRANGER);
+        write_log(fsm, NULL, NULL, DG_METHOD_FINGER, DG_RESULT_REJECT,
+                  DG_REASON_STRANGER, now_ms);
+        return;
+    }
+
+    snprintf(fsm->cur_uid, sizeof(fsm->cur_uid), "%s", m->user_id);
+    snprintf(fsm->cur_name, sizeof(fsm->cur_name), "%s", m->user_name);
+
+    if (m->role == DG_ROLE_BLACKLIST)
+        fail_and_back(fsm, DG_METHOD_FINGER, DG_REASON_BLACKLIST, now_ms);
+    else if (!(m->auth_flags & DG_AUTH_FINGER))
+        fail_and_back(fsm, DG_METHOD_FINGER, DG_REASON_METHOD_DISABLED, now_ms);
+    else
+        succeed(fsm, DG_METHOD_FINGER, now_ms);
+}
+
 /* ST_VERIFY 子步推进 */
 static void verify_start(auth_fsm_t *fsm)
 {
@@ -426,6 +475,83 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
     case FSM_EV_MATCH_1N:
         on_match_1n(fsm, &data->match, 0);
         return;
+
+    case FSM_EV_FINGER_MATCH_1N:
+        on_finger_match_1n(fsm, &data->match, 0);
+        return;
+
+    case FSM_EV_FINGER_VERIFY_11:
+        /* 指纹 1:1 结果并入统一结果处理(v_finger 子步;method=2) */
+        if (fsm->state == ST_VERIFY && fsm->step == V_FINGER) {
+            fsm_verify_result_t r;
+            memset(&r, 0, sizeof(r));
+            r.method = DG_METHOD_FINGER;
+            r.ok = data->match.matched && data->match.role != DG_ROLE_BLACKLIST;
+            r.reason = r.ok ? DG_REASON_OK : DG_REASON_MISMATCH;
+            snprintf(r.user_id, sizeof(r.user_id), "%s", data->match.user_id);
+            snprintf(r.user_name, sizeof(r.user_name), "%s", data->match.user_name);
+            fsm_event_data_t rd;
+            memset(&rd, 0, sizeof(rd));
+            rd.result = r;
+            auth_fsm_handle(fsm, FSM_EV_VERIFY_RESULT, &rd);
+        }
+        return;
+
+    case FSM_EV_FINGER_STATE:
+        fsm->finger_ready = data->finger_ready;
+        return;
+
+    case FSM_EV_IC_STATE:
+        fsm->ic_ready = data->ic_ready;
+        return;
+
+    case FSM_EV_IC_CARD: {
+        /* 刷卡(ICCARD_PROTOCOL §7.2):待机先唤醒再走分支;防重窗在服务层
+         * 普通分支执行,FSM 收到的每帧都是一次判定。v_ic 子步的 1:1 比对
+         * 在服务层完成(同密码模式),经 VERIFY_RESULT 进来,不走这里 */
+        const fsm_ic_t *ic = &data->ic;
+        if (fsm->state == ST_STANDBY)
+            wake_up(fsm);
+
+        if (fsm->state == ST_NORMAL && fsm->match_enabled) {
+            if (!ic->found) {
+                popup_fail_reason(fsm, DG_REASON_STRANGER);
+                write_log(fsm, NULL, NULL, DG_METHOD_IC, DG_RESULT_REJECT,
+                          DG_REASON_STRANGER, 0);
+                return;
+            }
+            snprintf(fsm->cur_uid, sizeof(fsm->cur_uid), "%s", ic->user_id);
+            snprintf(fsm->cur_name, sizeof(fsm->cur_name), "%s", ic->user_name);
+            if (ic->role == DG_ROLE_BLACKLIST)
+                fail_and_back(fsm, DG_METHOD_IC, DG_REASON_BLACKLIST, 0);
+            else if (!(ic->auth_flags & DG_AUTH_IC))
+                fail_and_back(fsm, DG_METHOD_IC, DG_REASON_METHOD_DISABLED, 0);
+            else
+                succeed(fsm, DG_METHOD_IC, 0);
+            return;
+        }
+        if (fsm->state == ST_ADMIN_AUTH) {
+            /* 在 role=1 管理员中查:命中管理员进菜单(不开门);否则红弹窗+
+             * 日志,停留本模式继续尝试(§7.2;陌生卡也落日志留审计) */
+            if (ic->found && ic->role == DG_ROLE_ADMIN) {
+                cancel_timers(fsm);
+                fsm->state = ST_MENU;
+                fsm->menu_idle_s = 0;
+                hint_clear(fsm);
+                goto_page(fsm, "menu");
+                DG_LOGI(TAG, "管理员刷卡进菜单");
+            } else {
+                popup_fail_reason(fsm, DG_REASON_STRANGER);
+                write_log(fsm, ic->found ? ic->user_id : NULL,
+                          ic->found ? ic->user_name : NULL, DG_METHOD_IC,
+                          DG_RESULT_REJECT, DG_REASON_STRANGER, 0);
+                set_timer(fsm, FSM_TMR_ADMIN_5S, 5000);
+            }
+            return;
+        }
+        /* ST_VERIFY(非 v_ic)/ST_MENU/编辑页:忽略,不落日志(§7.2) */
+        return;
+    }
 
     case FSM_EV_VERIFY_11:
         /* 1:1 结果并入统一结果处理 */
@@ -599,16 +725,28 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
             fail_and_back(fsm, m, DG_REASON_METHOD_DISABLED, 0);
             return;
         }
-        /* 相机断流或识别后端被禁:人脸不可用(spec-auth §5-113:验证路径
-         * 立刻失败 reason=9,不得卡死等待);密码/指纹/IC 不经人脸,照常 */
+        /* 超时日志口径从选定方式起算(设备不可用的失败也归到该方式) */
+        fsm->step_method = m;
+
+        /* 设备不可用:该方式立即失败 reason=9,不得卡死等待(spec §5-113;
+         * 2026-10-01 扩到指纹/IC——模组没接/驱动未上线时选了就明确报) */
         if (m == DG_METHOD_FACE_11 && (!fsm->cam_ready || !fsm->vision_ready)) {
             DG_LOGW(TAG, "人脸不可用(相机断流=%d 识别后端挂=%d),1:1 直接失败"
                          "(reason=9)", !fsm->cam_ready, !fsm->vision_ready);
             fail_and_back(fsm, DG_METHOD_FACE_11, DG_REASON_DEVICE_ERR, 0);
             return;
         }
+        if (m == DG_METHOD_FINGER && !fsm->finger_ready) {
+            DG_LOGW(TAG, "指纹模组未就绪,验证直接失败(reason=9)");
+            fail_and_back(fsm, DG_METHOD_FINGER, DG_REASON_DEVICE_ERR, 0);
+            return;
+        }
+        if (m == DG_METHOD_IC && !fsm->ic_ready) {
+            DG_LOGW(TAG, "读卡器未就绪,验证直接失败(reason=9)");
+            fail_and_back(fsm, DG_METHOD_IC, DG_REASON_DEVICE_ERR, 0);
+            return;
+        }
 
-        fsm->step_method = m;
         fsm->step = (m == DG_METHOD_FACE_11)  ? V_FACE_1V1
                     : (m == DG_METHOD_FINGER) ? V_FINGER
                     : (m == DG_METHOD_PWD)    ? V_PWD
@@ -692,6 +830,8 @@ void auth_fsm_init(auth_fsm_t *fsm, int32_t door_open_ms, int32_t standby_timeou
     fsm->admin_count = -1;              /* 未知:菜单入口保守要求管理员认证 */
     fsm->cam_ready = true;              /* 乐观值:capture 只在断流时发 false */
     fsm->vision_ready = true;           /* 同上:看门狗只在禁后端时发 false */
+    fsm->finger_ready = true;           /* 同上:provider 只在降级时发 false */
+    fsm->ic_ready = true;               /* 同上:card_provider 只在降级时发 false */
     fsm->door_open_ms = door_open_ms;
     fsm->standby_timeout_s = standby_timeout_s;
     fsm->menu_timeout_s = menu_timeout_s;

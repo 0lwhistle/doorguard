@@ -34,6 +34,24 @@ int gpio_hal_set_level(int level);
 /** 读回引脚号(-1 未初始化) */
 int gpio_hal_line(void);
 
+/* ---- 输入引脚边沿等待(FINGERPRINT_AS608:指纹 WAK 触摸事件源) ---- */
+
+/**
+ * 等待输入引脚电平跳变(sysfs edge=both + poll POLLPRI;阻塞至多 timeout_ms)。
+ * @param level 出参:跳变后的电平(0/1)
+ * @return DG_OK 有边沿 / DG_ERR_TIMEOUT 超时 / DG_ERR_IO 引脚不可用
+ * @note 首次调用做 export+direction=in+edge=both(幂等);引脚被内核占用
+ *       返回 DG_ERR_IO。当前设计同一时刻只有一个输入引脚用户(指纹 WAK),
+ *       换引脚号自动重建;多输入引脚并存待需要时扩展。
+ */
+int gpio_hal_edge_wait(int line_no, int timeout_ms, int *level);
+
+/** 解除阻塞中的 gpio_hal_edge_wait(停服务用;等待方收到 DG_ERR_IO) */
+int gpio_hal_edge_abort(void);
+
+/** 指定输入引脚电平直读(消抖复核用;与继电器单例无关) */
+int gpio_hal_in_level(int line_no, int *level);
+
 void gpio_hal_deinit(void);
 
 #ifdef __cplusplus

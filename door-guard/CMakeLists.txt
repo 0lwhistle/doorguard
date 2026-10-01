@@ -107,6 +107,29 @@ add_library(dg_fp_as608 STATIC services/verify/fingerprint/fp_as608.c)
 target_include_directories(dg_fp_as608 PUBLIC
     ${CMAKE_SOURCE_DIR}/services/verify/fingerprint)
 
+# 指纹业务线程(WAK→采集序列→事件;链路 ops 可注入,板级 = uart_hal+gpio_hal)
+add_library(dg_fp STATIC
+    services/verify/fingerprint/fp_provider.c
+    services/verify/fingerprint/fp_link_uart.c
+)
+target_include_directories(dg_fp PUBLIC
+    ${CMAKE_SOURCE_DIR}/services/verify/fingerprint)
+target_link_libraries(dg_fp PUBLIC dg_fp_as608 dg_proto dg_uart dg_gpio dg_storage dg_config)
+
+# IC 读卡器 HAL(/dev/dg_iccard0 节点薄封装;sim 后端仅宿主,板上不进固件)
+add_library(dg_iccard STATIC drv/iccard/iccard_hal.c)
+target_include_directories(dg_iccard PUBLIC ${CMAKE_SOURCE_DIR}/drv/iccard
+                                            ${CMAKE_SOURCE_DIR}/proto)
+target_link_libraries(dg_iccard PUBLIC dg_log)
+if(DG_SIM OR DG_BUILD_TESTS)
+    target_sources(dg_iccard PRIVATE drv/iccard/iccard_hal_sim.c)
+endif()
+
+# IC 读卡服务(poll/read→HEX→事件线程;防重窗/降级策略)
+add_library(dg_card STATIC services/verify/ic/card_provider.c)
+target_include_directories(dg_card PUBLIC ${CMAKE_SOURCE_DIR}/services/verify/ic)
+target_link_libraries(dg_card PUBLIC dg_iccard dg_proto dg_config dg_registry)
+
 # jpeg:头像 JPEG 编解码(内存↔内存,libjpeg 薄封装;视觉编码/UI 解码共用)
 add_library(dg_jpeg STATIC modules/jpeg/dg_jpeg.c)
 target_include_directories(dg_jpeg PUBLIC ${CMAKE_SOURCE_DIR}/modules/jpeg)
@@ -208,8 +231,10 @@ add_library(dg_access STATIC
     services/access/access_service.c
 )
 target_include_directories(dg_access PUBLIC ${CMAKE_SOURCE_DIR}/services/access
-                                            ${CMAKE_SOURCE_DIR}/services/vision)
-target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker dg_relay dg_registry)
+                                            ${CMAKE_SOURCE_DIR}/services/vision
+                                            ${CMAKE_SOURCE_DIR}/services/verify/ic)
+# dg_card:IC 防重窗纯函数在 access_service 普通分支调用(ICCARD §7.1)
+target_link_libraries(dg_access PUBLIC dg_proto dg_config dg_tasker dg_relay dg_registry dg_card)
 
 # vision:视觉服务(槽位/模式/后端注册表 + sim mock / rockiva 板上后端)
 add_library(dg_vision STATIC services/vision/vision_service.c)
@@ -452,6 +477,7 @@ target_link_libraries(door-guard PRIVATE
     -Wl,--start-group
     dg_event_bus dg_tasker dg_holder dg_registry dg_proto dg_storage dg_config
     lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_relay dg_timeutil dg_uart dg_net dg_sysctl dg_display dg_camera
+    dg_fp dg_card dg_iccard
     -Wl,--end-group)
 
 if(DG_SIM)

@@ -9,6 +9,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -127,6 +128,85 @@ int gpio_hal_set_level(int level)
 int gpio_hal_line(void)
 {
     return s_line;
+}
+
+/* ---- 输入引脚边沿等待(独立于继电器单例;指纹 WAK 触摸事件源) ----
+ *
+ * sysfs 路线(FINGERPRINT_AS608 §1:rootfs 无 libgpiod):export + edge=both,
+ * poll value fd 的 POLLPRI。坑:设置 edge 后首次 poll 会立即因"当前电平"
+ * 报一次 POLLPRI(不是真边沿),先读一次清掉再进入等待。
+ * fd 由本函数持有至 deinit;多引脚不并存(当前唯一用户 = 指纹 WAK)。
+ */
+static int s_in_line = -1;
+static int s_in_fd = -1;
+
+int gpio_hal_edge_wait(int line_no, int timeout_ms, int *level)
+{
+    if (line_no < 0 || !level)
+        return DG_ERR_PARAM;
+    if (s_in_line != line_no) {
+        if (s_in_fd >= 0) {
+            close(s_in_fd);
+            s_in_fd = -1;
+        }
+        char path[64], val[16];
+        snprintf(path, sizeof(path), "/sys/class/gpio/export");
+        snprintf(val, sizeof(val), "%d", line_no);
+        write_sysfs(path, val);             /* 已导出 EBUSY,幂等继续 */
+        snprintf(path, sizeof(path), "/sys/class/gpio/gpio%d/direction", line_no);
+        if (write_sysfs(path, "in") != DG_OK)
+            return DG_ERR_IO;
+        snprintf(path, sizeof(path), "/sys/class/gpio/gpio%d/edge", line_no);
+        if (write_sysfs(path, "both") != DG_OK)
+            return DG_ERR_IO;
+        snprintf(path, sizeof(path), "/sys/class/gpio/gpio%d/value", line_no);
+        s_in_fd = open(path, O_RDONLY);
+        if (s_in_fd < 0) {
+            DG_LOGE(TAG, "open %s: %s", path, strerror(errno));
+            return DG_ERR_IO;
+        }
+        s_in_line = line_no;
+        /* 清"设 edge 后首个假边沿":读走当前电平(见函数头注) */
+        char buf[16];
+        (void)!read(s_in_fd, buf, sizeof(buf) - 1);
+    }
+
+    struct pollfd pfd = { .fd = s_in_fd, .events = POLLPRI | POLLERR };
+    int pr = poll(&pfd, 1, timeout_ms);
+    if (pr < 0)
+        return (errno == EINTR) ? DG_ERR_TIMEOUT : DG_ERR_IO;
+    if (pr == 0)
+        return DG_ERR_TIMEOUT;
+    if (lseek(s_in_fd, 0, SEEK_SET) < 0)
+        return DG_ERR_IO;
+    char buf[16] = { 0 };
+    ssize_t n = read(s_in_fd, buf, sizeof(buf) - 1);
+    if (n <= 0)
+        return DG_ERR_IO;
+    *level = atoi(buf);
+    return DG_OK;
+}
+
+int gpio_hal_edge_abort(void)
+{
+    if (s_in_fd < 0)
+        return DG_ERR_NOT_INIT;
+    /* 边沿等待阻塞在 poll,没有可靠的线程外唤醒手段;停线 = 关 fd 使
+     * poll 返回 POLLNVAL(s_in_fd 置 -1 前先记值,避免竞态双重关闭) */
+    int fd = s_in_fd;
+    s_in_fd = -1;
+    s_in_line = -1;
+    close(fd);
+    return DG_OK;
+}
+
+int gpio_hal_in_level(int line_no, int *level)
+{
+    if (line_no < 0 || !level)
+        return DG_ERR_PARAM;
+    char path[64];
+    snprintf(path, sizeof(path), "/sys/class/gpio/gpio%d/value", line_no);
+    return read_sysfs_int(path, level);
 }
 
 void gpio_hal_deinit(void)

@@ -76,6 +76,11 @@ typedef struct {
     char fp_uart_dev[32];      /**< 模组串口节点,默认 /dev/ttyS8(uart8,板上 status=okay 且空闲) */
     int  fp_baud;              /**< 模组波特率,默认 57600(协议 v1 冻结值) */
     int  fp_wak_gpio;          /**< WAK 触摸 GPIO 全局编号,默认 94(GPIO2_D6) */
+    int  fp_wak_active;        /**< WAK"按下"电平,默认 1(高有效);极性是
+                                    FINGERPRINT_PROTOCOL §6.④ 同一开放项,真机
+                                    复测不符时改配置即可,不改码 */
+    /* IC 读卡器(json-only;ICCARD_PROTOCOL §8;最终节点名由驱动定,只改配置) */
+    char iccard_dev_path[32];  /**< 读卡器节点,默认 /dev/dg_iccard0;"sim"=宿主模拟后端 */
 } dg_cfg_t;
 
 /**

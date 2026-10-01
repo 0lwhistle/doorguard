@@ -17,12 +17,17 @@
 | 指纹驱动 | **无内核驱动**(纯应用层 UART) | 无 |
 
 ## 1. 应用侧现状(无需 VM 侧操心,刷机即生效)
+> **2026-10-01 更新:应用层全链已落地**——fp_provider(WAK→采集序列→事件)、
+> card_provider(/dev/dg_iccard0 线程)、FSM 指纹/IC 分支、录入编排、UI 全部就位
+> (services/verify/{fingerprint,ic}/README.md)。模组/驱动没上时两路 provider
+> 自动降级(EV_SYS_SERVICE_STATE + 退避重试),整机照常——刷不刷机都不怕。
 
 - 协议:AS608 帧协议已按官方 51 例程逐字节冻结(`FINGERPRINT_PROTOCOL.md`),
   组包/解析纯函数层 `services/verify/fingerprint/fp_as608.c` + 单测(官方 golden)。
 - 存储:fingerprints 独立表 + users.finger_vec 幂等迁移已落(storage.c)。
 - 配置:`configs/default.json` 新增 `"finger"` 组:`uart_dev=/dev/ttyS8`、
-  `baud=57600`、`wak_gpio=94`(2026-09-30 板上实测定值)。
+  `baud=57600`、`wak_gpio=94`(2026-09-30 板上实测定值)、`wak_active_level=1`(极性开放项)。
+- `configs/default.json` `"iccard"` 组:`dev_path=/dev/dg_iccard0`(驱动最终定名后只改配置不改码);"sim"=宿主模拟后端。
 - 硬件已接线并核验:AS608 TXD/RXD ↔ uart8(ttyS8,status=okay、pinctrl default、
   无占用)、WAK → **GPIO2_D6**(sysfs 号 94,MUX/GPIO 双未占用)、VTI → 3.3V。
 

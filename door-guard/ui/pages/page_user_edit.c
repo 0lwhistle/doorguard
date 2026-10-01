@@ -55,6 +55,35 @@ static lv_obj_t *s_btn_pwd, *s_btn_face;
 static lv_obj_t *s_btn_finger, *s_btn_ic;
 static lv_obj_t *s_row_del;                     /* 「删除用户」行(EDIT 才显示) */
 
+/* 指纹/IC 录入流状态(2026-10-01):页面退出时撤销,防流程悬挂 */
+static int32_t  s_fp_pages[DG_FINGER_PAGES_MAX];
+static uint32_t s_fp_cnt;
+static bool     s_fp_enrolling;                 /* 指纹两次按压进行中 */
+static bool     s_ic_enrolling;                 /* 等待刷卡绑定中 */
+
+/* 卡号展示掩码(********+末4;spec-database §3,UI 本地呈现不改数据) */
+static void mask_card(const char *no, char *out, size_t cap)
+{
+    size_t n = no ? strnlen(no, DG_IC_LEN) : 0;
+    if (n < 8) {
+        snprintf(out, cap, "%s", _("********"));
+        return;
+    }
+    snprintf(out, cap, "********%s", no + n - 4);
+}
+
+static void cancel_bio_flows(void)
+{
+    if (s_fp_enrolling) {
+        bridge_enroll_request(s_uid, DG_ENROLL_FINGER_CANCEL);
+        s_fp_enrolling = false;
+    }
+    if (s_ic_enrolling) {
+        bridge_enroll_request(s_uid, DG_ENROLL_IC_CANCEL);
+        s_ic_enrolling = false;
+    }
+}
+
 /* 错误码 → 文案(UI 唯一映射点;修正旧版把 DUP_UID 映射成“该卡已绑定”的错误) */
 static const char *err_text(int rc)
 {
@@ -64,6 +93,8 @@ static const char *err_text(int rc)
     case DG_ERR_DUP_IC:       return _("该卡已绑定其他用户");
     case DG_ERR_DUP_FACE:     return _("该人脸已绑定其他用户");
     case DG_ERR_DUP_FINGER:   return _("该指纹已绑定其他用户");
+    case DG_ERR_FINGER_FULL:  return _("指纹库已满");
+    case DG_ERR_FINGER_LIMIT: return _("该用户指纹已达上限");
     case DG_ERR_USER_LIMIT:   return _("用户数已达上限");
     case DG_ERR_BAD_NAME:     return _("姓名不合法");
     case DG_ERR_BAD_PWD:      return _("密码不合法");
@@ -208,10 +239,33 @@ static void refresh(void)
         val_set(s_val_face, rec.face_vec_len > 0 ? _("已录入") : _("无"));
     dg_btn_set_label(s_btn_face, _("修改"));
 
-    val_set(s_val_finger, rec.finger_vec_len > 0 ? _("已录入") : _("无"));
-    dg_btn_set_label(s_btn_finger, rec.finger_vec_len > 0 ? _("修改") : _("录入"));
-    val_set(s_val_ic, rec.ic_card[0] ? _("已录入") : _("无"));
-    dg_btn_set_label(s_btn_ic, rec.ic_card[0] ? _("修改") : _("录入"));
+    /* 指纹行:已录 n/3(独立 fingerprints 表是唯一事实源;users.finger_vec
+     * 废弃列不再读取)。录入中显示进度文案 */
+    if (enroll_service_finger_pages(s_uid, s_fp_pages, DG_FINGER_PAGES_MAX,
+                                    &s_fp_cnt) != DG_OK)
+        s_fp_cnt = 0;
+    if (s_fp_enrolling)
+        val_set(s_val_finger, _("请按压指纹…"));
+    else if (s_fp_cnt > 0) {
+        char fv[32];
+        snprintf(fv, sizeof(fv), _("已录 %d/3 枚"), (int)s_fp_cnt);
+        val_set(s_val_finger, fv);
+    } else
+        val_set(s_val_finger, _("无"));
+    dg_btn_set_label(s_btn_finger, s_fp_cnt > 0 ? _("修改") : _("录入"));
+
+    /* IC 行:卡号展示一律掩码(spec-database §3) */
+    if (s_ic_enrolling)
+        val_set(s_val_ic, _("请刷卡…"));
+    else if (rec.ic_card[0]) {
+        char masked[16];
+        mask_card(rec.ic_card, masked, sizeof(masked));
+        val_set(s_val_ic, masked);
+        dg_btn_set_label(s_btn_ic, _("修改"));
+    } else {
+        val_set(s_val_ic, _("无"));
+        dg_btn_set_label(s_btn_ic, _("录入"));
+    }
 
     /* 头像预览:草稿期用内存图(dg_avatar_decode),已落库才走 DB 缓存。
      * 人脸行加高到 128,预览 96×96 */
@@ -351,16 +405,123 @@ static void apply_face_pick(void *ud, int idx)
     refresh();
 }
 
+/* ---- 指纹(2026-10-01:每用户 ≤3 枚,录入/逐枚删除走 enroll 事件) ---- */
+
+static void apply_finger_del(void *ud, int idx)
+{
+    int32_t page = (int32_t)(uintptr_t)ud;
+    (void)idx;                            /* 单选项确认弹窗:仅「删除」 */
+    bridge_enroll_request_arg(s_uid, DG_ENROLL_FINGER_DEL, page);
+    refresh();
+}
+
+static void apply_finger_pick(void *ud, int idx)
+{
+    (void)ud;
+    if (s_fp_enrolling) {                 /* 录入中再点 = 取消本次 */
+        cancel_bio_flows();
+        refresh();
+        return;
+    }
+    if (idx == 0) {
+        if (s_fp_cnt >= DG_FINGER_PAGES_MAX) {
+            dg_popup_fail(_("该用户指纹已达上限"), 1500, NULL, NULL);
+            return;
+        }
+        s_fp_enrolling = true;
+        bridge_enroll_request(s_uid, DG_ENROLL_FINGER);
+        refresh();
+        return;
+    }
+    /* idx>0:删除第 idx-1 枚(红色确认,破坏性操作;模式同「删除用户」) */
+    int32_t page = s_fp_pages[idx - 1];
+    const char *const del_opts[] = { _("删除") };
+    dg_popup_choice_ex(_("确认删除该指纹"), del_opts, 1, 1u << 0,
+                       apply_finger_del, NULL, (void *)(uintptr_t)page);
+}
+
 static void on_finger(lv_event_t *e)
 {
     (void)e;
-    dg_popup_fail(_("指纹模块未接入"), 1500, NULL, NULL);
+    if (s_add_mode) {
+        dg_popup_fail(_("请先保存用户"), 1500, NULL, NULL);
+        return;
+    }
+    if (enroll_service_finger_pages(s_uid, s_fp_pages, DG_FINGER_PAGES_MAX,
+                                    &s_fp_cnt) != DG_OK)
+        s_fp_cnt = 0;
+
+    if (s_fp_enrolling) {
+        dg_popup_fail(_("正在录入，请按压指纹"), 1200, NULL, NULL);
+        return;
+    }
+
+    /* 选项 = [录入新指纹(未满时)] + 逐枚 [删除 指纹N] */
+    char labels[1 + DG_FINGER_PAGES_MAX][48];
+    const char *opts[1 + DG_FINGER_PAGES_MAX];
+    int n = 0;
+    if (s_fp_cnt < DG_FINGER_PAGES_MAX)
+        opts[n++] = _("录入新指纹");
+    for (uint32_t i = 0; i < s_fp_cnt; i++) {
+        snprintf(labels[n], sizeof(labels[n]), _("删除 第%d枚指纹"), (int)i + 1);
+        opts[n] = labels[n];
+        n++;
+    }
+    if (n == 1)
+        apply_finger_pick(NULL, 0);       /* 未录任何枚:免选择直达录入 */
+    else
+        dg_popup_choice(_("指纹"), opts, n, apply_finger_pick, NULL, NULL);
+}
+
+/* ---- IC 卡(绑卡 = 下一张刷入的卡;解绑红色确认) ---- */
+
+static void apply_ic_unbind(void *ud, int idx);
+
+static void apply_ic_pick(void *ud, int idx)
+{
+    (void)ud;
+    if (idx == 0) {                       /* 录入/重新录入 */
+        s_ic_enrolling = true;
+        bridge_enroll_request(s_uid, DG_ENROLL_IC);
+        refresh();
+        return;
+    }
+    /* 解绑:红色确认(模式同「删除用户」) */
+    const char *const unbind_opts[] = { _("解绑") };
+    dg_popup_choice_ex(_("确认解绑该IC卡"), unbind_opts, 1, 1u << 0,
+                       apply_ic_unbind, NULL, NULL);
+}
+
+static void apply_ic_unbind(void *ud, int idx)
+{
+    (void)ud;
+    (void)idx;
+    bridge_enroll_request(s_uid, DG_ENROLL_IC_CLEAR);
+    refresh();
 }
 
 static void on_ic(lv_event_t *e)
 {
     (void)e;
-    dg_popup_fail(_("读卡器未接入"), 1500, NULL, NULL);
+    if (s_add_mode) {
+        dg_popup_fail(_("请先保存用户"), 1500, NULL, NULL);
+        return;
+    }
+    if (s_ic_enrolling) {                 /* 再点 = 取消等待 */
+        cancel_bio_flows();
+        refresh();
+        return;
+    }
+    user_rec_t rec;
+    if (enroll_service_user_get(s_uid, &rec) != DG_OK)
+        return;
+    if (rec.ic_card[0]) {
+        const char *const opts[] = { _("重新录入"), _("解绑") };
+        dg_popup_choice_ex(_("IC卡"), opts, 2, 1u << 1, apply_ic_pick,
+                           NULL, NULL);
+    } else {
+        apply_ic_pick(NULL, 0);
+    }
 }
 
 /* 保存(右上按钮 / 「保存退出」共用):ADD 建用户;EDIT 提交草稿。
@@ -465,9 +626,11 @@ static bool nav_is_dirty(void)
     return s_face_clear_pending;
 }
 
-/* 「直接退出」:丢弃全部未保存草稿(字段草稿随页面静态清零) */
+/* 「直接退出」:丢弃全部未保存草稿(字段草稿随页面静态清零);
+ * 指纹/IC 录入流一并撤销(未落库模板由 provider 回滚) */
 static void nav_discard(void)
 {
+    cancel_bio_flows();
     enroll_service_discard_draft(s_uid);
     s_face_clear_pending = false;
     s_dirty = false;
@@ -484,22 +647,78 @@ static const dg_edit_nav_ops_t s_nav_ops = {
 
 /* ---- 录入结果回执(桥转发,UI 线程;人脸录入的回执由拍摄页处理,这里只管清除/删除) ---- */
 
+/* 指纹录入中间提示(两次按压;文案映射 progress.step) */
+static void show_fp_progress(int32_t step)
+{
+    const char *text = _("请再次按压同一手指");
+    if (step == DG_ENROLL_FP_STEP_PRESS1)
+        text = _("请按压指纹");
+    else if (step == DG_ENROLL_FP_STEP_RETRY2)
+        text = _("两次按压指纹不一致，请用同一手指");
+    dg_popup_fail(text, 2500, NULL, NULL);   /* 中性提示走醒目样式,自动消失 */
+}
+
 static void on_evt(const ui_evt_t *evt)
 {
+    if (evt->kind == UI_EVT_ENROLL_PROGRESS) {
+        if (strcmp(evt->progress.user_id, s_uid) != 0 ||
+            evt->progress.kind != DG_ENROLL_FINGER)
+            return;
+        show_fp_progress(evt->progress.step);
+        return;
+    }
     if (evt->kind != UI_EVT_ENROLL_RESULT)
         return;
     if (strcmp(evt->enroll.user_id, s_uid) != 0)
         return;
-    if (evt->enroll.kind == DG_ENROLL_FACE_CLEAR && evt->enroll.err == DG_OK) {
-        dg_avatar_invalidate(s_uid);     /* 头像随人脸清除,缓存同步作废 */
-        dg_popup_success(_("已清除"), 800, NULL, NULL);
+    const int err = evt->enroll.err;
+
+    switch (evt->enroll.kind) {
+    case DG_ENROLL_FINGER:
+        s_fp_enrolling = false;          /* 终态:成功/失败都收流 */
+        if (err == DG_OK)
+            dg_popup_success(_("指纹已录入"), 1200, NULL, NULL);
+        else if (err != DG_ERR_DUP_FINGER)
+            dg_popup_fail(err_text(err), 2000, NULL, NULL);
+        /* DUP_FINGER 文案更具体:直接红字提示重复 */
+        if (err == DG_ERR_DUP_FINGER)
+            dg_popup_fail(_("该指纹已绑定其他用户"), 2000, NULL, NULL);
+        break;
+    case DG_ENROLL_FINGER_DEL:
+        if (err == DG_OK)
+            dg_popup_success(_("已删除"), 800, NULL, NULL);
+        else
+            dg_popup_fail(err_text(err), 2000, NULL, NULL);
+        break;
+    case DG_ENROLL_IC:
+        s_ic_enrolling = false;
+        if (err == DG_OK)
+            dg_popup_success(_("已绑定"), 1200, NULL, NULL);
+        else
+            dg_popup_fail(err == DG_ERR_DUP_IC ? _("该卡已绑定其他用户")
+                                               : err_text(err), 2000, NULL, NULL);
+        break;
+    case DG_ENROLL_IC_CLEAR:
+        if (err == DG_OK)
+            dg_popup_success(_("已解绑"), 800, NULL, NULL);
+        else
+            dg_popup_fail(err_text(err), 2000, NULL, NULL);
+        break;
+    case DG_ENROLL_FACE_CLEAR:
+        if (err == DG_OK) {
+            dg_avatar_invalidate(s_uid); /* 头像随人脸清除,缓存同步作废 */
+            dg_popup_success(_("已清除"), 800, NULL, NULL);
+        }
+        break;
+    default:
+        break;                           /* FACE/DELETE 由拍摄页/确认弹窗处理 */
     }
     refresh();
 }
 
 void page_user_edit_evt(const ui_evt_t *evt)
 {
-    if (evt->kind != UI_EVT_ENROLL_RESULT)
+    if (evt->kind != UI_EVT_ENROLL_RESULT && evt->kind != UI_EVT_ENROLL_PROGRESS)
         return;
     on_evt(evt);
 }
@@ -585,6 +804,7 @@ void page_user_edit_destroy(void)
     s_btn_pwd = s_btn_face = NULL;
     s_btn_finger = s_btn_ic = NULL;
     s_row_del = NULL;
+    cancel_bio_flows();                  /* 页面销毁:录入流不悬挂 */
     memset(s_pending_pwd, 0, sizeof(s_pending_pwd));
     memset(s_draft_pwd, 0, sizeof(s_draft_pwd));   /* 页面销毁即擦:明文不留静态区 */
 }

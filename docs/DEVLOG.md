@@ -1,6 +1,44 @@
 # 开发日志(DEVLOG)
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
+---
+## 2026-10-01 指纹/IC 应用层全链落地(硬件未接先施工,holder/registry 兜底降级)
+
+1. 目标:按已冻结协议把指纹(AS608)与 IC 读卡应用层全部做完——设备树/驱动
+   由用户侧交付,交付前两路 provider 停降级态(退避重试 + EV_SYS_SERVICE_STATE),
+   整机照常;装配进 registry("finger"/"iccard" 可选服务,finger 带循环心跳)。
+2. 契约扩展(events.h):EV_FINGER_SET_MODE(六模式,忙序列只认 IDLE=取消)、
+   EV_ICCARD_CTRL(FLUSH)、enroll kinds +4~8(arg=page_id)、EV_ENROLL_PROGRESS
+   按原约"接入时回填"复活(指纹两次按压 step 语义)、ev_ui_result_t 加 method
+   (reason=9 文案按方式区分)、ev_match_t 加 auth_flags("未开方式"判定归 FSM)。
+3. 指纹:fp_provider(WAK 消抖→GenImg/Img2Tz/Search/Match/RegModel/Store/UpChar
+   序列→事件;查重在按压①后,同指校验在②后;取消自动 DeletChar 回滚)+
+   fp_link_uart(板级 ops:uart_hal 单例 + gpio_hal WAK 边沿)+ 链路 ops 注入
+   seam(测试假模组)。gpio_hal 新增 edge_wait/edge_abort/in_level(sysfs
+   POLLPRI;设 edge 后首个假边沿先读清)。录入进度改阶段前置发(按压前提示)。
+4. IC:drv/iccard(24B 帧契约+节点封装+pipe sim 后端,sim 零分派复用原生
+   poll/read;16B UID 超 DG_IC_LEN 承载力→hex 拒收 WARN)+ card_provider
+   (poll/read→HEX→EV_IC_CARD;防重窗按协议只在 FSM 普通分支,access_service
+   执行)+ enroll 绑卡态(查重排除自身/幂等重绑/写 IC 方式位/解绑清位)。
+5. FSM/业务:指纹分支(普通四路/管理员三态/待机唤醒/v_finger 1:1,method=2)、
+   IC 分支(§7.2 表,method=4,v_ic 在服务层比对)、finger_ready/ic_ready
+   就绪门禁(选方式即 reason=9);sync_finger_mode 派生 SCAN_1N(含待机)/
+   VERIFY_11/IDLE。删用户级联:页表快照随 DELETE_USER 命令下发,模组删除
+   失败留痕不阻塞 DB 删除。
+6. UI:编辑页指纹行改 n/3+逐枚删除(红色确认),IC 行掩码展示+绑卡/重录/解绑,
+   录入流页面退出自动撤销;进度 toast 按 step 映射文案;主页 reason=9 按
+   method 区分(指纹模块未就绪/读卡器未就绪/人脸识别不可用);语言表 21 新键。
+7. 测试 +6(test_iccard_proto/card_dedup/fsm_ic/fsm_finger/enroll_ic/
+   fp_enroll,fp_enroll 为假模组端到端:happy/DUP/LIMIT/FULL/RETRY2/取消/
+   逐枚删除)。cfg 新键 iccard.dev_path、finger.wak_active_level(极性开放项,
+   §6.④ 同源)。
+8. 坑:cfg_load 任一路径为 NULL 即纯内置默认——测试想用出厂模板必须两路都给;
+   Windows 侧 py 常量串与文件不可见字符差异导致 replace 断言偶发失配,改锚点
+   定位手术。
+9. 下一步:WSL 全量构建 + dg-test 全绿 → 推 GitHub;用户侧交付 DTS(uart8
+   24MHz)+ IC .ko 后按 HW_BRINGUP §6 验收(握手/ValidNum/WAK 复测/真卡),
+   WAK 极性与 Search 实测耗时在验收时回填协议文档 §6。
+
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---

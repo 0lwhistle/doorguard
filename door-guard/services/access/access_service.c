@@ -14,6 +14,7 @@
  */
 #include "access_service.h"
 #include "auth_fsm.h"
+#include "card_provider.h"
 #include "cfg.h"
 #include "dg_log.h"
 #include "event_bus.h"
@@ -22,6 +23,7 @@
 #include "relay.h"
 #include "storage.h"
 #include "tasker.h"
+#include "timeutil.h"
 #include "vision_service.h"
 
 #include <pthread.h>
@@ -42,10 +44,14 @@ static void copy_cstr(char *dst, size_t cap, const char *src)
 static const char *TAG = "[ACCESS]";
 
 static auth_fsm_t s_fsm;
-static event_subscription_t *s_subs[14];
+static event_subscription_t *s_subs[18];
 static int s_sub_cnt = 0;
 static struct task_node s_tick_node;
 static bool s_running = false;
+
+/* IC 普通分支防重窗(ICCARD_PROTOCOL §7.1:普通开门分支专用;v_ic/录入
+ * 天然单发不需要窗)。仅总线线程访问 */
+static card_dedup_t s_ic_dedup;
 
 /* ---- FSM 入口:处理后派生视觉工作模式(状态一变即下发,不等 1s tick) ----
  *
@@ -87,10 +93,43 @@ static void sync_vision_mode(void)
     EVENT_BUS_PUBLISH(EV_VISION_SET_MODE, &ev);
 }
 
+static void sync_finger_mode(void);       /* 定义在 fsm_feed 之后 */
+
 static void fsm_feed(fsm_event_t ev, const fsm_event_data_t *data)
 {
     auth_fsm_handle(&s_fsm, ev, data);
     sync_vision_mode();
+    sync_finger_mode();
+}
+
+/* ---- 指纹工作模式派生(2026-10-01;与 sync_vision_mode 同构) ----
+ * 录入/删除模式归 enroll 流程(fp_provider 忙序列时忽略这里的常规模式,
+ * 事件契约已注明),access 只在常规三态间切换 */
+static void sync_finger_mode(void)
+{
+    int32_t mode = (int32_t)DG_FMODE_IDLE;
+    const char *uid = "";
+
+    if (s_fsm.state == ST_VERIFY && s_fsm.step == V_FINGER) {
+        mode = (int32_t)DG_FMODE_VERIFY_11;
+        uid = s_fsm.cur_uid;
+    } else if ((s_fsm.state == ST_NORMAL && s_fsm.match_enabled) ||
+               s_fsm.state == ST_ADMIN_AUTH || s_fsm.state == ST_STANDBY) {
+        mode = (int32_t)DG_FMODE_SCAN_1N;  /* 待机中按压指纹 = 显式动作,唤醒即验 */
+    }
+
+    static int32_t last_mode = -1;
+    static char last_uid[DG_UID_LEN];
+    if (mode == last_mode && !strcmp(uid, last_uid))
+        return;
+    last_mode = mode;
+    snprintf(last_uid, sizeof(last_uid), "%s", uid);
+
+    ev_finger_mode_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.mode = mode;
+    snprintf(ev.user_id, sizeof(ev.user_id), "%s", uid);
+    EVENT_BUS_PUBLISH(EV_FINGER_SET_MODE, &ev);
 }
 
 /* ---- 动作执行 ---- */
@@ -125,12 +164,15 @@ static void act_log_write(const fsm_log_act_t *l)
     pub_auth_result(&log);                          /* web 上位机同源 */
 }
 
-/* FSM 结果弹窗延迟到日志落库后(UI 弹窗文案取自 EV_UI_RESULT/EV_AUTH_RESULT) */
+/* FSM 结果弹窗延迟到日志落库后(UI 弹窗文案取自 EV_UI_RESULT/EV_AUTH_RESULT)。
+ * method = 弹窗时的子步方式:reason=9 文案按方式区分(人脸/指纹/IC 各自的
+ * "未就绪"表述),拿不到语境时 -1 */
 static struct {
     bool pending;
     bool ok;
     int32_t reason;
     bool not_admin;
+    int32_t method;
 } s_popup_defer;
 
 /* 查库解析用户 → 回 FSM_EV_UID_RESOLVED(FSM 不碰 DB)。ID 输入流程与
@@ -261,6 +303,7 @@ static void on_fsm_action(fsm_action_t act, const fsm_action_data_t *d, void *ud
         s_popup_defer.ok = (act == FSM_ACT_POPUP_SUCCESS);
         s_popup_defer.reason = d->fail.reason;
         s_popup_defer.not_admin = d->fail.not_admin;
+        s_popup_defer.method = s_fsm.step_method;
         break;
     case FSM_ACT_HINT_TEXT: {
         /* 提示条:UI 按 method 选文案(>=0 验证方式;-1 管理员认证;-2 无管理员) */
@@ -336,12 +379,14 @@ static void on_fsm_action(fsm_action_t act, const fsm_action_data_t *d, void *ud
     case FSM_ACT_WRITE_LOG:
         act_log_write(&d->log);
         if (s_popup_defer.pending) {
-            /* 结果弹窗:UI 按 reason 映射文案(ok=false 时才用 reason) */
+            /* 结果弹窗:UI 按 reason 映射文案(ok=false 时才用 reason;
+             * method 语境用于 reason=9 的设备区分文案) */
             ev_ui_result_t ev;
             memset(&ev, 0, sizeof(ev));
             ev.ok = s_popup_defer.ok;
             ev.reason = s_popup_defer.reason;
             ev.not_admin = s_popup_defer.not_admin;
+            ev.method = s_popup_defer.method;
             snprintf(ev.user_name, sizeof(ev.user_name), "%s", d->log.user_name);
             EVENT_BUS_PUBLISH(EV_UI_RESULT, &ev);
             s_popup_defer.pending = false;
@@ -403,18 +448,99 @@ static int on_capture_state(const event_t *e, void *ud)
 }
 
 /* 看门狗处置结果 → FSM:人脸路径上只有识别后端(capture 已另有通道)。
- * vision_service/backend 挂死/被禁 → 人脸不可用;其余服务与验证无关不转发 */
+ * 2026-10-01 扩:指纹模组/读卡器降级同样喂入(选了对应方式 reason=9);
+ * 其余服务与验证无关不转发 */
 static int on_service_state(const event_t *e, void *ud)
 {
     (void)ud;
     const ev_sys_service_state_t *s = (const ev_sys_service_state_t *)e->data;
-    if (strcmp(s->name, "vision_service") != 0 &&
-        strcmp(s->name, "vision_backend") != 0)
-        return 0;
     fsm_event_data_t d;
     memset(&d, 0, sizeof(d));
-    d.vision_ready = (s->state == REG_STATE_READY);
-    fsm_feed(FSM_EV_VISION_STATE, &d);
+    if (!strcmp(s->name, "vision_service") || !strcmp(s->name, "vision_backend")) {
+        d.vision_ready = (s->state == REG_STATE_READY);
+        fsm_feed(FSM_EV_VISION_STATE, &d);
+    } else if (!strcmp(s->name, "finger")) {
+        d.finger_ready = (s->state == REG_STATE_READY);
+        fsm_feed(FSM_EV_FINGER_STATE, &d);
+    } else if (!strcmp(s->name, "iccard")) {
+        d.ic_ready = (s->state == REG_STATE_READY);
+        fsm_feed(FSM_EV_IC_STATE, &d);
+    }
+    return 0;
+}
+
+/* ---- 指纹/IC 事件 → FSM(2026-10-01;HAL 事件首接) ---- */
+
+static int on_finger_match(const event_t *e, void *ud)
+{
+    (void)ud;
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.match = *(const ev_match_t *)e->data;
+    fsm_feed(FSM_EV_FINGER_MATCH_1N, &d);
+    return 0;
+}
+
+static int on_finger_verify(const event_t *e, void *ud)
+{
+    (void)ud;
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.match = *(const ev_match_t *)e->data;
+    fsm_feed(FSM_EV_FINGER_VERIFY_11, &d);
+    return 0;
+}
+
+/* 刷卡:v_ic 子步 = 服务层 1:1 比对(同密码模式,FSM 不碰 DB);
+ * 其余状态解析卡→用户后交 FSM 分支(防重窗只在普通分支做) */
+static int on_ic_card(const event_t *e, void *ud)
+{
+    (void)ud;
+    const ev_ic_card_t *c = (const ev_ic_card_t *)e->data;
+
+    if (s_fsm.state == ST_VERIFY && s_fsm.step == V_IC) {
+        fsm_event_data_t d;
+        memset(&d, 0, sizeof(d));
+        d.result.method = DG_METHOD_IC;
+        d.result.now_ms = (int64_t)time(NULL) * 1000;
+        user_rec_t rec;
+        int rc = db_user_get(s_fsm.cur_uid, &rec);
+        bool ok = (rc == DG_OK && rec.ic_card[0] &&
+                   strcmp(rec.ic_card, c->card_no) == 0);
+        d.result.ok = ok;
+        d.result.reason = ok ? DG_REASON_OK : DG_REASON_MISMATCH;
+        if (ok) {
+            snprintf(d.result.user_id, sizeof(d.result.user_id), "%s", rec.user_id);
+            snprintf(d.result.user_name, sizeof(d.result.user_name), "%s",
+                     rec.user_name);
+        }
+        fsm_feed(FSM_EV_VERIFY_RESULT, &d);
+        return 0;
+    }
+
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    snprintf(d.ic.card_no, sizeof(d.ic.card_no), "%s", c->card_no);
+    user_rec_t rec;
+    int rc = db_find_by_ic(c->card_no, &rec);
+    d.ic.found = (rc == DG_OK);
+    if (rc == DG_OK) {
+        snprintf(d.ic.user_id, sizeof(d.ic.user_id), "%s", rec.user_id);
+        snprintf(d.ic.user_name, sizeof(d.ic.user_name), "%s", rec.user_name);
+        d.ic.role = rec.role;
+        d.ic.auth_flags = rec.auth_flags;
+    } else if (rc != DG_ERR_NOT_FOUND) {
+        DG_LOGW(TAG, "查卡失败(rc=%d),按陌生卡处理", rc);
+    }
+
+    /* 防重窗(§7.1):同一张卡在 door_open_ms 内只算一次验证;只挂普通分支,
+     * 弹窗期间误碰他人卡仍照常忽略(v_ic 分支上方已返回,不受窗影响) */
+    if (s_fsm.state == ST_NORMAL && s_fsm.match_enabled &&
+        !card_dedup_allow(&s_ic_dedup, c->card_no, now_ms(),
+                          cfg_get()->door_open_ms))
+        return 0;
+
+    fsm_feed(FSM_EV_IC_CARD, &d);
     return 0;
 }
 
@@ -576,6 +702,9 @@ int access_service_start(void)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_ACCESS_TICK, on_access_tick, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_CAPTURE_STATE, on_capture_state, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_SYS_SERVICE_STATE, on_service_state, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_FINGER_MATCH_1N, on_finger_match, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_FINGER_VERIFY_11, on_finger_verify, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_IC_CARD, on_ic_card, NULL);
 
     if (tasker_task_init_li(&s_tick_node, 1000, TASK_CNT_INF, "access_tick",
                             tick_task, NULL) != TASK_OK ||

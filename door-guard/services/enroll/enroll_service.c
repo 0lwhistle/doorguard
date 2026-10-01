@@ -25,8 +25,31 @@
 
 static const char *TAG = "[ENROLL]";
 
-static event_subscription_t *s_subs[2];
+static event_subscription_t *s_subs[3];
 static int s_sub_cnt = 0;
+
+/* ---- IC 录入态(enroll 独有;ICCARD_PROTOCOL §7.3) ----
+ * 编辑页发起 → 置态 + FLUSH;下一张 EV_IC_CARD 即绑定目标;页面退出取消。
+ * 单飞无并发(UI 只有一个编辑页)。 */
+typedef struct {
+    bool     active;
+    char     uid[DG_UID_LEN];
+    uint32_t seq;
+} ic_enroll_t;
+
+static ic_enroll_t s_ic;
+
+static void ic_state_clear(void)
+{
+    s_ic.active = false;
+    s_ic.uid[0] = '\0';
+}
+
+static void ic_flush_req(void)
+{
+    ev_iccard_ctrl_t ev = { .op = DG_ICCARD_CTRL_FLUSH };
+    EVENT_BUS_PUBLISH(EV_ICCARD_CTRL, &ev);
+}
 
 /* ---- 人脸草稿槽(单槽,单用户) ----
  * 总线线程写(on_feature),UI 线程读写(commit/discard/预览);互斥锁
@@ -190,6 +213,14 @@ int enroll_service_clear_face(const char *user_id)
     return DG_OK;
 }
 
+int enroll_service_finger_pages(const char *user_id, int32_t *pages,
+                                uint32_t cap, uint32_t *out_n)
+{
+    if (!user_id || !user_id[0] || !pages || !out_n)
+        return DG_ERR_PARAM;
+    return db_finger_list_user(user_id, pages, cap, out_n);
+}
+
 /* ---- 用户生命周期读/写(A1 收口;登记见 enroll_service.h 与 proposal §1)---- */
 
 int enroll_service_user_get(const char *user_id, user_rec_t *out)
@@ -326,13 +357,90 @@ static int on_feature(const event_t *e, void *ud)
     return 0;
 }
 
+/* ---- 指纹/IC 编排(2026-10-01;FINGERPRINT_AS608 / ICCARD_PROTOCOL)----
+ * 指纹的模组序列全部在 fp_provider(独占 UART);本服务只翻译请求为
+ * EV_FINGER_SET_MODE,进度/结果由 provider 直发 ENROLL 事件。IC 的绑定
+ * 判定在本服务(查重/落库/方式位),卡片事件在这里消费。 */
+
+static void finger_mode(int32_t mode, const char *uid, int32_t arg, uint32_t seq)
+{
+    ev_finger_mode_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.mode = mode;
+    snprintf(ev.user_id, sizeof(ev.user_id), "%s", uid ? uid : "");
+    ev.arg = arg;
+    ev.seq = seq;
+    EVENT_BUS_PUBLISH(EV_FINGER_SET_MODE, &ev);
+}
+
+/* 卡号绑定公共尾:写 ic_card + 开方式位(录入路径写位,spec-auth §4.2) */
+static int ic_bind(const char *uid, const char *card_no)
+{
+    user_rec_t rec;
+    if (db_user_get(uid, &rec) != DG_OK)
+        return DG_ERR_NOT_FOUND;
+    snprintf(rec.ic_card, sizeof(rec.ic_card), "%s", card_no);
+    rec.auth_flags |= DG_AUTH_IC;
+    return db_user_update(&rec);
+}
+
+/* IC 卡事件:录入态消费绑定;其余状态忽略(FSM 分支归 access_service) */
+static int on_ic_card(const event_t *e, void *ud)
+{
+    (void)ud;
+    const ev_ic_card_t *c = (const ev_ic_card_t *)e->data;
+    if (!s_ic.active)
+        return 0;
+
+    char uid[DG_UID_LEN];
+    uint32_t seq = s_ic.seq;
+    snprintf(uid, sizeof(uid), "%s", s_ic.uid);
+    ic_state_clear();
+    ic_flush_req();                       /* 会话结束清缓冲(协议 §4) */
+
+    user_rec_t hit;
+    int rc = db_find_by_ic(c->card_no, &hit);
+    if (rc == DG_OK) {
+        /* 重绑同一张卡 = 幂等成功;他人卡 = 重复(排除自身语义同指纹) */
+        rc = (strcmp(hit.user_id, uid) == 0) ? DG_OK : DG_ERR_DUP_IC;
+    } else if (rc == DG_ERR_NOT_FOUND) {
+        rc = ic_bind(uid, c->card_no);
+    }
+    if (rc == DG_OK)
+        DG_LOGI(TAG, "绑卡成功 %s <- %s", uid, c->card_no);
+    else
+        DG_LOGW(TAG, "绑卡失败 %s <- %s (rc=%d)", uid, c->card_no, rc);
+    publish_result(uid, DG_ENROLL_IC, seq, rc);
+    return 0;
+}
+
+/* 删用户的指纹级联:列表快照随命令下发,模组删除异步进行,失败留痕不阻塞
+ * (FINGERPRINT_AS608 §5.3:孤儿由对账暴露) */
+static void finger_cascade_delete(const char *uid)
+{
+    int32_t pages[DG_FINGER_PAGES_MAX];
+    uint32_t n = 0;
+    if (db_finger_list_user(uid, pages, DG_FINGER_PAGES_MAX, &n) != DG_OK || n == 0)
+        return;
+    ev_finger_mode_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.mode = DG_FMODE_DELETE_USER;
+    snprintf(ev.user_id, sizeof(ev.user_id), "%s", uid);
+    for (uint32_t i = 0; i < n && i < DG_FINGER_PAGES_MAX; i++)
+        ev.pages[i] = (uint16_t)pages[i];
+    ev.page_cnt = (uint16_t)(n < DG_FINGER_PAGES_MAX ? n : DG_FINGER_PAGES_MAX);
+    EVENT_BUS_PUBLISH(EV_FINGER_SET_MODE, &ev);
+}
+
 static int on_request(const event_t *e, void *ud)
 {
     (void)ud;
     const ev_enroll_request_t *r = (const ev_enroll_request_t *)e->data;
 
     if (r->kind == DG_ENROLL_DELETE) {
+        ic_state_clear();                 /* 用户即删:挂起的绑卡态作废 */
         enroll_service_discard_draft(r->user_id);   /* 用户即删:草稿不得残留 */
+        finger_cascade_delete(r->user_id);
         int rc = db_user_del(r->user_id);
         const int lrc = vision_service_library_remove(r->user_id);  /* 特征库 DELETE */
         /* 同 clear_face:NOT_INIT=内存库本空;其余异常留痕(search_1n 命中
@@ -356,8 +464,45 @@ static int on_request(const event_t *e, void *ud)
         EVENT_BUS_PUBLISH(EV_VISION_CAPTURE_REQ, &req);
         return 0;
     }
-    /* 指纹录入:AS608 uart_hal 接入后实现 */
-    publish_result(r->user_id, r->kind, r->seq, DG_ERR_NOT_INIT);
+    if (r->kind == DG_ENROLL_FINGER) {
+        finger_mode(DG_FMODE_ENROLL, r->user_id, 0, r->seq);
+        return 0;
+    }
+    if (r->kind == DG_ENROLL_FINGER_CANCEL) {
+        /* 切 IDLE 即取消:未落库模板由 provider 回滚(fp_provider.c) */
+        finger_mode(DG_FMODE_IDLE, r->user_id, 0, r->seq);
+        return 0;
+    }
+    if (r->kind == DG_ENROLL_FINGER_DEL) {
+        finger_mode(DG_FMODE_FINGER_DEL, r->user_id, r->arg, r->seq);
+        return 0;
+    }
+    if (r->kind == DG_ENROLL_IC) {
+        snprintf(s_ic.uid, sizeof(s_ic.uid), "%s", r->user_id);
+        s_ic.seq = r->seq;
+        s_ic.active = true;
+        ic_flush_req();                   /* 录入态切换时清缓冲(协议 §4) */
+        DG_LOGI(TAG, "进入绑卡态:%s(下一张刷入的卡生效)", r->user_id);
+        return 0;
+    }
+    if (r->kind == DG_ENROLL_IC_CANCEL) {
+        if (s_ic.active) {
+            ic_state_clear();
+            ic_flush_req();
+        }
+        return 0;
+    }
+    if (r->kind == DG_ENROLL_IC_CLEAR) {
+        user_rec_t rec;
+        int rc = db_user_get(r->user_id, &rec);
+        if (rc == DG_OK && rec.ic_card[0]) {
+            rec.ic_card[0] = '\0';        /* 覆盖语义:空 = 解绑 */
+            rec.auth_flags &= ~(uint32_t)DG_AUTH_IC;
+            rc = db_user_update(&rec);
+        }
+        publish_result(r->user_id, r->kind, r->seq, rc);
+        return 0;
+    }
     return 0;
 }
 
@@ -367,6 +512,7 @@ int enroll_service_start(void)
         return DG_OK;
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_ENROLL_REQUEST, on_request, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_FEATURE, on_feature, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_IC_CARD, on_ic_card, NULL);
     DG_LOGI(TAG, "enroll 服务启动");
     return DG_OK;
 }

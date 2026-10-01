@@ -25,7 +25,11 @@
   "finger": {
     "uart_dev": "/dev/ttyS8",
     "baud": 57600,
-    "wak_gpio": 94
+    "wak_gpio": 94,
+    "wak_active_level": 1
+  },
+  "iccard": {
+    "dev_path": "/dev/dg_iccard0"
   },
   "network": {
     "ntp_server": "ntp.aliyun.com",

@@ -86,6 +86,13 @@ void enroll_service_discard_draft(const char *user_id);
  *  同步版,供 UI「保存」路径直调;web 侧仍走 DG_ENROLL_FACE_CLEAR 事件 */
 int enroll_service_clear_face(const char *user_id);
 
+/* ---- 指纹/IC 查询包装(2026-10-01;UI 不直触 storage,同 user_get 惯例) ---- */
+
+/** 该用户已录指纹 PageID 列表(编辑页 n/3 与逐枚删除数据源;≤3 枚)。
+ *  cap < 实际数 → DG_ERR_NO_MEMORY;用户无指纹返回 DG_OK 且 *out_n=0 */
+int enroll_service_finger_pages(const char *user_id, int32_t *pages,
+                                uint32_t cap, uint32_t *out_n);
+
 #ifdef __cplusplus
 }
 #endif

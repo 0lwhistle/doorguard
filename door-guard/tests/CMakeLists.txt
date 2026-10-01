@@ -32,6 +32,24 @@ dg_add_test(test_uart_mock dg_uart)
 
 dg_add_test(test_fp_proto dg_fp_as608)
 set_tests_properties(test_auth_fsm PROPERTIES TIMEOUT 60)
+
+# 指纹/IC 应用层(2026-10-01):协议纯函数 / 防重窗 / FSM 分支 / 两条录入链
+dg_add_test(test_iccard_proto dg_iccard)
+dg_add_test(test_card_dedup dg_card)
+dg_add_test(test_fsm_ic dg_access)
+set_tests_properties(test_fsm_ic PROPERTIES TIMEOUT 60)
+dg_add_test(test_fsm_finger dg_access)
+set_tests_properties(test_fsm_finger PROPERTIES TIMEOUT 60)
+
+# IC 绑卡端到端(sim 后端注入帧;覆盖绑定/查重/取消/FLUSH/解绑)
+dg_add_test(test_enroll_ic dg_enroll dg_card dg_iccard dg_storage dg_config
+                             dg_tasker dg_event_bus dg_proto cjson)
+set_tests_properties(test_enroll_ic PROPERTIES TIMEOUT 120)
+
+# 指纹录入端到端(假模组注入应答帧;覆盖 happy/查重/LIMIT/FULL/重采/取消/删除)
+dg_add_test(test_fp_enroll dg_fp dg_storage dg_config dg_tasker dg_event_bus
+                            dg_proto cjson)
+set_tests_properties(test_fp_enroll PROPERTIES TIMEOUT 120)
 dg_add_test(test_rknn_face dg_rknn_face)
 dg_add_test(test_face_quality dg_rknn_face)
 # 反欺骗纯算法件(crop 几何/通道/中位数平滑,宿主可测)

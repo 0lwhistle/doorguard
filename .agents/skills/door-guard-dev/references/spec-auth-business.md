@@ -81,7 +81,8 @@ ST_VERIFY ←──每步 5s 超时/用户取消──(各子步)
 2. **v_pick_method**:按该用户 `auth_flags` 列出方式:1:1 人脸 / 指纹 / 密码 / IC 卡
    (只列开启的;若只有一种则直接进入该方式,不再多一次点击)
    - 收到未开启的方式(陈旧弹窗/上位机注入)→ 红弹窗 reason=6,退回
-   - **指纹/IC 位在硬件接入前自然不出现**(2026-09-28 B2 拍板钉死):
+   - **指纹/IC 位在硬件接入前自然不出现**(2026-09-28 B2 拍板钉死):  **→ 2026-10-01 已接入**:指纹/IC 录入路径把位写进 auth_flags,
+     方式选择自然列出,机制如约未改(实现见 fp_provider/enroll_service)。
      指纹/IC 事件两端皆未接驱动,无法录入也无法验证;两处建用户入口——
      设备端编辑页 ADD(经 `enroll_service_user_save`)与 web /api/users/add
      ——的**默认 auth_flags 均为 FACE|PWD**(web 表单默认只勾人脸+密码;
@@ -101,6 +102,20 @@ ST_VERIFY ←──每步 5s 超时/用户取消──(各子步)
      (用户不存在/密码错误/该方式未开启…),陌生人/黑名单/超时统一显示"验证失败"
 6. **用户取消**(弹窗"取消"或返回)→ 直接回 ST_NORMAL,**不写日志**(取消不是验证动作);
    若本流程由管理员入口发起,则退回 ST_ADMIN_AUTH 并重置 5s 计时
+
+### 4.5 指纹/IC 分支(2026-10-01 接入,细节以两份协议文档为权威)
+
+- 事件:指纹 1:N/1:1 = `EV_FINGER_MATCH_1N/VERIFY_11`(载荷 ev_match_t,
+  provider 反查 DB 填 user/role/auth_flags);刷卡 = `EV_IC_CARD`(access_service
+  解析卡→用户后喂 `FSM_EV_IC_CARD`;v_ic 的 1:1 比对在服务层,走 VERIFY_RESULT,
+  同密码模式)。判定闸:指纹一次按压一次判定(provider 收口,RELEASED 前不再触发);
+  IC 防重窗只在普通开门分支(同一卡号 door_open_ms 内一次,access_service 执行)。
+- 分支表:`ICCARD_PROTOCOL.md §7.2`(指纹同表,method=2/4):普通命中开门/
+  黑名单 reason=2/未开方式 reason=6/陌生 reason=1;管理员模式命中进菜单不开门、
+  其余弹窗+日志停留;弹窗非本方式阶段忽略不落日志;待机中刷卡/按压先唤醒再验证。
+- **设备不可用门禁**:指纹模组/读卡器未就绪(provider 降级广播)时,选对应方式
+  立即失败 reason=9(不空等 5s 超时),popup 文案按方式区分
+  「指纹模块未就绪/读卡器未就绪」(ev_ui_result_t.method 语境)。
 
 ## 5. 全局规则与边界(实现时逐条自测)
 

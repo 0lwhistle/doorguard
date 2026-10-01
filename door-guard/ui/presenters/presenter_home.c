@@ -36,7 +36,13 @@ static const char *result_text(const ev_ui_result_t *r)
     case DG_REASON_WRONG_PWD:         return _("密码错误");
     case DG_REASON_METHOD_DISABLED:   return _("该方式未开启");
     case DG_REASON_AUTH_DISABLED:     return _("全部验证方式已关闭");
-    case DG_REASON_DEVICE_ERR:        return _("人脸识别不可用");
+    case DG_REASON_DEVICE_ERR:        /* 设备异常按方式给具体文案(2026-10-01 起
+                                           指纹/IC 未就绪同样走 reason=9) */
+        if (r->method == DG_METHOD_FINGER)
+            return _("指纹模块未就绪");
+        if (r->method == DG_METHOD_IC)
+            return _("读卡器未就绪");
+        return _("人脸识别不可用");
     default:                          return _("验证失败");   /* 陌生人/黑名单/超时… */
     }
 }

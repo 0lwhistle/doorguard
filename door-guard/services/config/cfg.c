@@ -270,7 +270,9 @@ static void defaults_apply(dg_cfg_t *c)
     snprintf(c->relay_gpio_chip, sizeof(c->relay_gpio_chip), "/dev/gpiochip0");
     c->fp_baud = 57600;
     c->fp_wak_gpio = 94;
+    c->fp_wak_active = 1;   /* 极性开放项:真机复测不符改 default.json,不改码 */
     snprintf(c->fp_uart_dev, sizeof(c->fp_uart_dev), "/dev/ttyS8");
+    snprintf(c->iccard_dev_path, sizeof(c->iccard_dev_path), "/dev/dg_iccard0");
 }
 
 /* ---- 元表驱动:json → 快照(键缺失走默认,类型错 WARN 回退) ----
@@ -381,6 +383,12 @@ static void json_apply_extra(dg_cfg_t *c, const cJSON *root)
     if ((item = json_path_get(root, "finger.wak_gpio")) &&
         cJSON_IsNumber(item))
         c->fp_wak_gpio = item->valueint;
+    if ((item = json_path_get(root, "finger.wak_active_level")) &&
+        cJSON_IsNumber(item))
+        c->fp_wak_active = item->valueint;
+    if ((item = json_path_get(root, "iccard.dev_path")) &&
+        cJSON_IsString(item) && item->valuestring)
+        copy_cstr(c->iccard_dev_path, sizeof(c->iccard_dev_path), item->valuestring);
 }
 
 /* 快照重建:默认两层 → cur 层;写入另一份缓冲后切换(读端持旧快照不受影响) */

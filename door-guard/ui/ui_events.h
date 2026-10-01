@@ -29,6 +29,7 @@ typedef enum {
     UI_EVT_WEB_STATE,      /**< web 上位机状态快照(Web 管理页显示) */
     UI_EVT_WEB_SET_RESULT, /**< web 账号/口令修改结果(Web 管理页弹窗) */
     UI_EVT_ENROLL_RESULT,  /**< 录入结果(用户编辑页:人脸录入/清除/删除) */
+    UI_EVT_ENROLL_PROGRESS,/**< 录入中间进度(指纹两次按压提示;2026-10-01) */
     UI_EVT_QUALITY,        /**< 人脸质量判定(拍摄页:可拍/太糊/太小提示) */
     UI_EVT_NET_CFG_RESULT, /**< 网络配置应用结果(网络配置页弹窗) */
     UI_EVT_CAPTURE,        /**< 相机可用态(EV_CAPTURE_STATE;主页/拍摄页
@@ -51,6 +52,7 @@ typedef struct {
     ev_web_state_t web_state;      /* UI_EVT_WEB_STATE */
     ev_web_set_result_t web_set_result; /* UI_EVT_WEB_SET_RESULT */
     ev_enroll_result_t enroll;     /* UI_EVT_ENROLL_RESULT */
+    ev_enroll_progress_t progress; /* UI_EVT_ENROLL_PROGRESS */
     ev_vision_quality_t quality;   /* UI_EVT_QUALITY */
     ev_net_cfg_result_t net_cfg_result; /* UI_EVT_NET_CFG_RESULT */
     bool cam_ready;                /* UI_EVT_CAPTURE */

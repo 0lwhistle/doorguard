@@ -197,6 +197,18 @@ static int on_enroll_result(const event_t *e, void *ud)
     return 0;
 }
 
+/* 录入中间进度(指纹两次按压)→ 用户编辑页提示 */
+static int on_enroll_progress(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_ENROLL_PROGRESS;
+    evt.progress = *(const ev_enroll_progress_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
 /* 网络配置应用结果 → 网络配置页弹窗 */
 static int on_net_cfg_result(const event_t *e, void *ud)
 {
@@ -250,11 +262,12 @@ void bridge_init(void)
     event_bus_subscribe(EV_NET_WEB_STATE, on_web_state, NULL);
     event_bus_subscribe(EV_NET_WEB_SET_RESULT, on_web_set_result, NULL);
     event_bus_subscribe(EV_ENROLL_RESULT, on_enroll_result, NULL);
+    event_bus_subscribe(EV_ENROLL_PROGRESS, on_enroll_progress, NULL);
     event_bus_subscribe(EV_VISION_QUALITY, on_vision_quality, NULL);
     event_bus_subscribe(EV_NET_CFG_RESULT, on_net_cfg_result, NULL);
     event_bus_subscribe(EV_CAPTURE_STATE, on_capture_state, NULL);
     event_bus_subscribe(EV_SYS_SERVICE_STATE, on_service_state, NULL);
-    DG_LOGI("[BRIDGE]", "事件桥就绪(19 订阅)");
+    DG_LOGI("[BRIDGE]", "事件桥就绪(20 订阅)");
 }
 
 void bridge_btn(const ev_ui_btn_t *btn)
@@ -343,10 +356,16 @@ void bridge_net_cfg_set(bool is_static, const char *ip, const char *mask,
 
 void bridge_enroll_request(const char *uid, int32_t kind)
 {
+    bridge_enroll_request_arg(uid, kind, 0);
+}
+
+void bridge_enroll_request_arg(const char *uid, int32_t kind, int32_t arg)
+{
     ev_enroll_request_t ev;
     memset(&ev, 0, sizeof(ev));
     snprintf(ev.user_id, sizeof(ev.user_id), "%s", uid ? uid : "");
     ev.kind = kind;
+    ev.arg = arg;
     ev.seq = (uint32_t)time(NULL);       /* 进程内唯一即可(与原页面语义同) */
     EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
 }

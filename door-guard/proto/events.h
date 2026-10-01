@@ -51,9 +51,33 @@ extern "C" {
 /* CAPTURE:取流状态(capture → UI/服务) */
 #define EV_CAPTURE_STATE     EV_DEF(DG_MODULE_ID_CAPTURE, 0x0001) /**< [预留] 就绪/断流;待上位机/降级提示接入 */
 
-/* ENROLL:录入编排(UI → enroll → UI) */
+/* ---- ENROLL:录入编排(UI → enroll → UI) ---- */
+
+/** EV_ENROLL_REQUEST:op 决定语义 */
+typedef enum {
+    DG_ENROLL_FACE = 0,                   /**< 采集人脸特征 */
+    DG_ENROLL_FINGER = 1,                 /**< 采集指纹特征(两次按压) */
+    DG_ENROLL_DELETE = 2,                 /**< 删除用户(含指纹模组模板级联) */
+    DG_ENROLL_FACE_CLEAR = 3,             /**< 清除已录人脸(保留用户) */
+    /* 2026-10-01 指纹/IC 应用层接入新增(硬件侧就绪前 UI 已按本契约施工) */
+    DG_ENROLL_FINGER_CANCEL = 4,          /**< 取消指纹录入(页面退出;未存模板自动回滚) */
+    DG_ENROLL_IC = 5,                     /**< 绑定 IC 卡(下一张刷入的卡生效) */
+    DG_ENROLL_IC_CANCEL = 6,              /**< 取消绑卡 */
+    DG_ENROLL_FINGER_DEL = 7,             /**< 删除单枚指纹(arg = page_id) */
+    DG_ENROLL_IC_CLEAR = 8,               /**< 解绑 IC 卡 */
+} dg_enroll_kind_t;
+
+typedef struct {
+    char    user_id[DG_UID_LEN];
+    int32_t kind;                         /**< dg_enroll_kind_t */
+    uint32_t seq;                         /**< 请求序号:结果回执按 seq 配对 */
+    int32_t arg;                          /**< kind 专用参数(FINGER_DEL:page_id;其余 0) */
+} ev_enroll_request_t;
 #define EV_ENROLL_REQUEST    EV_DEF(DG_MODULE_ID_ENROLL, 0x0001) /**< 录入/删除请求 */
-#define EV_ENROLL_PROGRESS   EV_DEF(DG_MODULE_ID_ENROLL, 0x0002) /**< [死契约·被取代] 两段式草稿后进度语义由 EV_ENROLL_RESULT(草稿就绪/终态)承载 */
+/* 进度事件(2026-10-01 复活,原 2026-09-28 死契约):两段式草稿场景仍由
+ * EV_ENROLL_RESULT 承载(人脸),指纹两次按压的"请再次按压"中间态没有
+ * 终态可替代——按原约定"接入时回填"恢复本号,语义 = 指纹录入中间提示 */
+#define EV_ENROLL_PROGRESS   EV_DEF(DG_MODULE_ID_ENROLL, 0x0002) /**< 录入中间进度(指纹两次按压) */
 #define EV_ENROLL_RESULT     EV_DEF(DG_MODULE_ID_ENROLL, 0x0003) /**< 终态(含错误码) */
 
 /* NET:网络侧(net → UI/web) */
@@ -80,6 +104,13 @@ extern "C" {
  * 发布侧 fp_provider,订阅侧 access_service → FSM 指纹分支(method=2) */
 #define EV_FINGER_MATCH_1N   EV_DEF(DG_MODULE_ID_HAL, 0x0004)    /**< 1:N 检索结果(Search 命中→反查 DB) */
 #define EV_FINGER_VERIFY_11  EV_DEF(DG_MODULE_ID_HAL, 0x0005)    /**< 1:1 验证结果(v_finger 子步) */
+/* 指纹工作模式(access_service 状态派生 / enroll 编排下发 → fp_provider;
+ * 2026-10-01,与 EV_VISION_SET_MODE 同构)。provider 忙于录入/删除序列时
+ * 忽略 IDLE/SCAN/VERIFY 三种常规模式,防状态互踩 */
+#define EV_FINGER_SET_MODE   EV_DEF(DG_MODULE_ID_HAL, 0x0006)    /**< 指纹工作模式切换 */
+/* 读卡器控制(enroll 编排 → card_provider):换模式时清驱动帧缓冲与防重窗,
+ * 防半秒前的旧卡串进新会话(ICCARD_PROTOCOL §4 FLUSH 时点) */
+#define EV_ICCARD_CTRL       EV_DEF(DG_MODULE_ID_HAL, 0x0007)    /**< 读卡器控制命令 */
 
 /* UI:待机与页面(UI 内部页面管理用) */
 #define EV_UI_STANDBY        EV_DEF(DG_MODULE_ID_UI, 0x0010)     /**< [死契约·被取代] 待机切换由 FSM 驱动 standby 页(经 EV_UI_GOTO_PAGE)+ 主页倒计时实现 */
@@ -139,12 +170,15 @@ typedef struct {
     int32_t face_px;                     /**< 人脸框较小边(像素) */
 } ev_vision_quality_t;
 
-/** EV_VISION_MATCH_1N / EV_VISION_VERIFY_11 共用 */
+/** EV_VISION_MATCH_1N / EV_VISION_VERIFY_11 共用;指纹 1:N/1:1 同构复用
+ *  (EV_FINGER_MATCH_1N / EV_FINGER_VERIFY_11) */
 typedef struct {
     bool    matched;
     char    user_id[DG_UID_LEN];
     char    user_name[DG_NAME_LEN];
     int32_t role;                         /**< dg_role_t(黑名单命中即拒,spec-auth §2) */
+    uint32_t auth_flags;                  /**< 方式位(FSM 判"该方式未开启"用;
+                                               vision 后端不填=0,无影响) */
     int32_t score_permille;               /**< 相似度千分比(0~1000) */
     int32_t spoof_challenge;              /**< 1 = 反欺骗判"疑似假体":命中不放行,
                                                发起多模态二次验证(2026-09-27);
@@ -163,26 +197,24 @@ typedef struct {
     char    user_id[DG_UID_LEN];          /**< VERIFY_11:比对目标用户 */
 } ev_vision_mode_t;
 
-/** EV_ENROLL_REQUEST:op 决定语义 */
-typedef enum {
-    DG_ENROLL_FACE = 0,                   /**< 采集人脸特征 */
-    DG_ENROLL_FINGER = 1,                 /**< 采集指纹特征 */
-    DG_ENROLL_DELETE = 2,                 /**< 删除用户 */
-    DG_ENROLL_FACE_CLEAR = 3,             /**< 清除已录人脸(保留用户) */
-} dg_enroll_kind_t;
-
-typedef struct {
-    char    user_id[DG_UID_LEN];
-    int32_t kind;                         /**< dg_enroll_kind_t */
-    uint32_t seq;                         /**< 请求序号:结果回执按 seq 配对 */
-} ev_enroll_request_t;
+/** EV_ENROLL_REQUEST:op 决定语义(枚举与请求结构见上方 ENROLL 段) */
 
 typedef struct {
     char    user_id[DG_UID_LEN];
     int32_t kind;                         /**< dg_enroll_kind_t */
     uint32_t seq;                         /**< 对应请求的 seq */
     int32_t percent;                      /**< 0~100 */
+    int32_t step;                         /**< 进度语义(见 DG_ENROLL_FP_STEP_*;
+                                               0 = 无细分,仅 percent) */
 } ev_enroll_progress_t;
+
+/** 指纹录入进度细分(指纹两次按压的中间态提示;文案由 UI 映射) */
+typedef enum {
+    DG_ENROLL_FP_STEP_NONE = 0,
+    DG_ENROLL_FP_STEP_PRESS1 = 1,         /**< 请按压指纹 */
+    DG_ENROLL_FP_STEP_PRESS2 = 2,         /**< 请再次按压同一手指 */
+    DG_ENROLL_FP_STEP_RETRY2 = 3,         /**< 两次按压不一致,请用同一手指 */
+} dg_enroll_fp_step_t;
 
 typedef struct {
     char    user_id[DG_UID_LEN];
@@ -288,6 +320,37 @@ typedef struct {
     char card_no[DG_IC_LEN];              /**< 卡号字符串(展示掩码前原文) */
 } ev_ic_card_t;
 
+/** EV_FINGER_SET_MODE:模式枚举与语义(access 派生常规模式,enroll 下发
+ *  录入/删除;provider 忙于录入/删除序列时忽略常规模式,见 events.h 事件注) */
+typedef enum {
+    DG_FMODE_IDLE = 0,                    /**< 不做模组业务(WAK 只记状态事件) */
+    DG_FMODE_SCAN_1N,                     /**< 1:N 检索(普通/管理员/待机) */
+    DG_FMODE_VERIFY_11,                   /**< 1:1 验证(user_id 生效) */
+    DG_FMODE_ENROLL,                      /**< 录入(两次按压,进度/结果经 ENROLL 事件) */
+    DG_FMODE_FINGER_DEL,                  /**< 删单枚模板(arg = page_id) */
+    DG_FMODE_DELETE_USER,                 /**< 删用户全部模板(pages[] 生效) */
+} dg_finger_mode_t;
+
+#define DG_FINGER_PAGES_MAX 3             /**< 每用户指纹上限(FINGERPRINT_AS608 决策 B) */
+
+typedef struct {
+    int32_t  mode;                        /**< dg_finger_mode_t */
+    char     user_id[DG_UID_LEN];         /**< ENROLL/VERIFY_11:目标用户 */
+    int32_t  arg;                         /**< FINGER_DEL:page_id;其余 0 */
+    uint16_t pages[DG_FINGER_PAGES_MAX];  /**< DELETE_USER:待删 PageID 列表 */
+    uint16_t page_cnt;                    /**< 上列有效个数 */
+    uint32_t seq;                         /**< ENROLL 请求 seq(结果回执配对) */
+} ev_finger_mode_t;
+
+/** EV_ICCARD_CTRL:op 见 dg_iccard_ctrl_t */
+typedef enum {
+    DG_ICCARD_CTRL_FLUSH = 1,             /**< 清驱动帧缓冲+应用防重窗(换会话) */
+} dg_iccard_ctrl_t;
+
+typedef struct {
+    int32_t op;                           /**< dg_iccard_ctrl_t */
+} ev_iccard_ctrl_t;
+
 /** EV_DOOR_STATE */
 typedef struct {
     bool open;                            /**< true = 门处于开启 */
@@ -362,6 +425,9 @@ typedef struct {
     int32_t reason;                       /**< dg_auth_reason_t(ok 时 0) */
     bool    not_admin;                    /**< 管理员入口专用:提示「非管理员」 */
     char    user_name[DG_NAME_LEN];       /**< 成功弹窗显示用 */
+    int32_t method;                       /**< 语境方式(dg_auth_method_t):reason=9
+                                               文案按方式区分(2026-10-01 增补;
+                                               -1 = 无语境,UI 取默认文案) */
 } ev_ui_result_t;
 
 /** EV_UI_FACEBOX:服务侧脸框操作;state=-1 → 隐藏;w=0 → 只改颜色不挪位置 */
@@ -413,6 +479,8 @@ _Static_assert(sizeof(ev_sys_service_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_s
 _Static_assert(sizeof(ev_sys_reboot_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_sys_reboot_t 超限");
 _Static_assert(sizeof(ev_finger_status_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_finger_status_t 超限");
 _Static_assert(sizeof(ev_ic_card_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ic_card_t 超限");
+_Static_assert(sizeof(ev_finger_mode_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_finger_mode_t 超限");
+_Static_assert(sizeof(ev_iccard_ctrl_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_iccard_ctrl_t 超限");
 _Static_assert(sizeof(ev_door_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_door_state_t 超限");
 _Static_assert(sizeof(ev_standby_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_standby_t 超限");
 _Static_assert(sizeof(ev_ui_btn_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ui_btn_t 超限");

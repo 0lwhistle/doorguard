@@ -5,8 +5,8 @@
  *   holder(components/holder):基础设施与 modules 层
  *     event_bus → tasker → storage → config → camera
  *   registry(components/registry):services 层(依赖可跨表解析到 holder)
- *     capture → vision_service → vision_backend → access → enroll → liveness
- *     → ntp → sysctl → net_cfg → web → mdns → ui
+ *     capture → vision_service → vision_backend → access → enroll → finger
+ *     → iccard → liveness → ntp → sysctl → net_cfg → web → mdns → ui
  *
  * 初始化完成后 main 线程转看门狗(5s 巡检):
  *   - 可选服务异常/心跳超龄 → 重启一次 → 仍异常置 DISABLED + EV_SYS_SERVICE_STATE
@@ -20,12 +20,14 @@
  */
 #include "modules/camera/camera.h"
 #include "access_service.h"
+#include "card_provider.h"
 #include "capture_service.h"
 #include "cfg.h"
 #include "dg_log.h"
 #include "enroll_service.h"
 #include "event_bus.h"
 #include "events.h"
+#include "fp_provider.h"
 #include "holder.h"
 #include "liveness_service.h"
 #include "mdns/mdns_responder.h"
@@ -181,6 +183,19 @@ static int mod_enroll(void)
     return enroll_service_start();
 }
 
+/* 指纹模组业务线程(2026-10-01):模组没接/串口不通由 provider 内部降级
+ * (EV_SYS_SERVICE_STATE + 退避重试),注册为可选服务不阻塞整机 */
+static int mod_finger(void)
+{
+    return fp_provider_start();
+}
+
+/* IC 读卡服务(2026-10-01):ko 未加载同样走内部降级(协议 §10 失败隔离) */
+static int mod_iccard(void)
+{
+    return card_provider_start();
+}
+
 static int mod_liveness(void)
 {
     return liveness_service_start();
@@ -269,6 +284,11 @@ static registry_err_t register_services(void)
           vision_backend_heartbeat_ms },
         { "access",         mod_access,         true,  DEP_TASKER_ONLY, 1, NULL },
         { "enroll",         mod_enroll,         false, DEP_TASKER_ONLY, 1, NULL },
+        /* 指纹/读卡:线程循环即心跳(wak 等待 200ms 粒度自醒,序列执行中
+         * 按步刷新)——线程挂死 15s 会被看门狗判 stale 重启一次 */
+        { "finger",         mod_finger,         false, DEP_CONFIG,      1,
+          fp_provider_heartbeat_ms },
+        { "iccard",         mod_iccard,         false, DEP_CONFIG,      1, NULL },
         { "liveness",       mod_liveness,       false, DEP_TASKER_ONLY, 1, NULL },
         { "ntp",            mod_ntp,            false, DEP_EVENT_BUS,   1, NULL },
         { "sysctl",         mod_sysctl,         false, DEP_EVENT_BUS,   1, NULL },

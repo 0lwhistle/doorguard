@@ -61,6 +61,11 @@ typedef enum {
     FSM_EV_FACE_LOST,
     FSM_EV_MATCH_1N,            /**< 1:N 结果(data: ev_match_t) */
     FSM_EV_VERIFY_11,           /**< 1:1 结果(data: ev_match_t) */
+    FSM_EV_FINGER_MATCH_1N,     /**< 指纹 1:N 结果(data: ev_match_t;method=2) */
+    FSM_EV_FINGER_VERIFY_11,    /**< 指纹 1:1 结果(data: ev_match_t;v_finger 子步) */
+    FSM_EV_IC_CARD,             /**< 刷卡(data: fsm_ic_t;卡→用户解析在服务层) */
+    FSM_EV_FINGER_STATE,        /**< 指纹模组就绪态(data: bool) */
+    FSM_EV_IC_STATE,            /**< 读卡器就绪态(data: bool) */
     FSM_EV_UID_SUBMIT,          /**< 输入弹窗确认(data: uid 字符串) */
     FSM_EV_UID_RESOLVED,        /**< ID 查询回执(data: uid_resolved_t) */
     FSM_EV_METHOD_PICK,         /**< 选择方式(data: method) */
@@ -78,6 +83,17 @@ typedef enum {
 typedef struct {
     int32_t x, y, w, h;
 } fsm_face_box_t;
+
+/** FSM_EV_IC_CARD 数据:卡→用户解析(access_service 查库,FSM 不碰 DB)。
+ *  found=false = 陌生卡;防重窗在服务层普通分支执行,FSM 每帧都是一次判定 */
+typedef struct {
+    bool found;
+    char card_no[DG_IC_LEN];
+    char user_id[DG_UID_LEN];
+    char user_name[DG_NAME_LEN];
+    int32_t role;                  /**< dg_role_t */
+    uint32_t auth_flags;           /**< DG_AUTH_*(IC 位过滤由 FSM 做) */
+} fsm_ic_t;
 
 typedef struct {
     bool found;                    /**< ID 不存在 = false(reason=5) */
@@ -106,6 +122,7 @@ typedef struct {
 typedef union {
     fsm_face_box_t box;
     ev_match_t match;
+    fsm_ic_t ic;
     char uid[DG_UID_LEN];
     fsm_uid_resolved_t uid_res;
     int32_t method;
@@ -115,6 +132,8 @@ typedef union {
     int64_t now_ms;
     bool cam_ready;                /**< FSM_EV_CAM_STATE:相机断流检测(capture) */
     bool vision_ready;             /**< FSM_EV_VISION_STATE:识别后端可用 */
+    bool finger_ready;             /**< FSM_EV_FINGER_STATE:指纹模组就绪 */
+    bool ic_ready;                 /**< FSM_EV_IC_STATE:读卡器就绪 */
 } fsm_event_data_t;
 
 /* ---- 定时器用途(FSM 声明,外部实现) ---- */
@@ -248,6 +267,11 @@ typedef struct {
      *  与 cam_ready 任一为假 → 人脸方式立即 reason=9,提示具体文案由 UI 按
      *  哪个坏了决定) */
     bool vision_ready;
+
+    /** 指纹模组/读卡器就绪(同上乐观值;选了对应方式但未就绪 → 立即
+     *  reason=9,popup 按 method 区分「指纹模块未就绪/读卡器未就绪」) */
+    bool finger_ready;
+    bool ic_ready;
 
     /** 管理员人数(FSM_EV_ADMIN_COUNT 回填;<0 = 未知)。=0 时菜单免认证进入:
      *  新机/管理员被删光的情形下,要求管理员认证会让菜单永远进不去(鸡生蛋) */
