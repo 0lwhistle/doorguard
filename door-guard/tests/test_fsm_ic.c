@@ -232,7 +232,7 @@ static void t_verify_flow(void)
     enter_v_ic(DG_AUTH_IC);
     /* PICK 已被门禁拦下:失败弹窗 + 日志 reason=9,不进 v_ic 子步 */
     DG_CHECK(s_fsm.step != V_IC);
-    const act_rec_t *log = last_act(FSM_ACT_WRITE_LOG);
+    log = last_act(FSM_ACT_WRITE_LOG);
     DG_CHECK(log && log->d.log.reason == DG_REASON_DEVICE_ERR);
     DG_CHECK(log->d.log.method == DG_METHOD_IC);
 }
