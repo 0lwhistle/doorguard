@@ -4,6 +4,28 @@
 > 本日志记"过程与坑",当前状态看 `DEV_HANDBOOK.md`,方案看 `PROJECT_PLAN.md`。
 
 ---
+## 2026-10-01 WSL 爆盘事故:root cause / 抢救过程 / 防复发(教训条目)
+
+1. **根因(本人责任)**:test_fp_proto 死循环 bug 的调试方式错误——直接跑二进制把
+   无限 FAIL 输出重定向到 WSL 内 /tmp/fp_test.log(约 2 分钟写了 ~48GB),加上
+   bad_alloc 的 core dump,ext4.vhdx 膨胀到 110GB 顶满 F 盘(盘上仅此一文件);
+   F 盘满 → vhdx 无法增长 → 下次启动 ext4 日志恢复写盘 I/O error → WSL 起不来。
+2. **抢救(零数据损失)**:① `wsl --shutdown` 后把 vhdx 复制到 G 盘(USB 固态,
+   110G/约 40 分钟);② `wsl --import-inplace Ubuntu-rescue` 从 G 盘启动——
+   F 盘满只挡"写",G 盘有空间则日志恢复正常;③ fstrim(943GiB trimmed)+
+   删 dg_dbg 旧 core 560MB;④ sparse 转换被拒(INVALID_FUNCTION),改
+   diskpart(管理员)compact vdisk:**110G → 69G**;⑤ unregister F 盘原件 →
+   `wsl --manage Ubuntu-rescue --move F:\wsl\ubuntu22.04` 回迁 → 注册表
+   DistributionName 改回 Ubuntu-22.04。
+3. **防复发**:`/etc/sysctl.d/99-no-coredump.conf` core_pattern=/dev/null +
+   /etc/profile.d ulimit -c 0;test_fp_proto 死循环已修(上条);G 盘残留清理。
+4. **验证**:WSL 克隆(位于 /home/olwhistle/doorguard,注意不是 ~/doorguard,
+   root 登录时 ~ 是 /root)git pull 对齐 5a4fa51;**dg-test 38/38 全绿**
+   (含 test_fp_proto P1~P5、test_storage S9/S10)。板 ssh 待板上线复验。
+5. 教训:测试死循环必须带退出护栏(r<0 即 break);大输出严禁落 WSL 盘不设限;
+   vhdx 只涨不缩,fstrim 后还需 diskpart compact(或 sparse)才真正还空间给宿主盘。
+
+---
 ## 2026-09-30(续4)指纹链路开工:硬件实测定位 uart8 时钟根因 + 协议冻结 + 基础层落地
 
 1. 硬件接线核验(板在线):AS608 → ttyS8(uart8,status=okay/pinctrl default/无占用),
