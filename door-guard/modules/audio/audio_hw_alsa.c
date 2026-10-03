@@ -14,6 +14,7 @@
 #include "dg_log.h"
 
 #include <alsa/asoundlib.h>
+#include <stdbool.h>
 
 static const char *TAG = "[AUDIO]";
 
