@@ -563,6 +563,8 @@ static void seq_enroll(void)
          * 提示请再按一次」自相矛盾,第二按边沿也要等释放后才可能出现 */
         pub_progress(DG_ENROLL_FINGER, uid, s_cur.seq, 30, DG_ENROLL_FP_STEP_LIFT);
         wait_release();
+        if (enroll_canceled())            /* 等释放期间的取消检查点 */
+            goto cancel;
 
         uint16_t page = 0, score = 0;
         rc = search_all(&page, &score);
@@ -805,12 +807,20 @@ static int wait_press_once(int active)
     return 0;
 }
 
+/* 等释放期间也要按步应用模式命令:命令在信箱里等抬手 = 模式切换响应性
+ * 丢失(2026-10-04 宿主测试暴露:上一流程残留的按压电平把 IDLE 分支带进
+ * 本函数,后续 ENROLL 命令全被无视,整条录入链饿死)。模式一变立即让位,
+ * 由主循环 switch 重新分派;正常释放照旧发 RELEASED 状态 */
 static void wait_release(void)
 {
     int active = wak_active_level();
+    const dg_finger_mode_t mode0 = s_mode;
     int lvl;
     for (;;) {
         s_hb_ms = now_mono_ms();          /* 等释放同 wait_press_once:按步刷心跳 */
+        apply_cmd();
+        if (s_mode != mode0)
+            return;                       /* 命令切走:让位,不吞 RELEASED 状态 */
         int rc = s_link->wak_wait(200, &lvl);
         if (rc == DG_OK && lvl != active) {
             if (debounce_press(lvl))

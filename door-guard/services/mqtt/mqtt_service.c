@@ -68,7 +68,7 @@ static bool enabled_now(void)
 
 typedef struct {
     char suffix[48];
-    char json[160];
+    char json[224];        /* 与 on_auth_result 的 json 同容(最坏 ~194) */
     bool retain;
 } mbox_item_t;
 static mbox_item_t s_mbox[MQTT_MAILBOX_DEPTH];
@@ -411,7 +411,7 @@ static int on_auth_result(const event_t *e, void *ud)
     const ev_auth_result_t *r = (const ev_auth_result_t *)e->data;
     char name[DG_NAME_LEN * 2];
     json_sanitize(name, sizeof(name), r->user_name);
-    char json[160];
+    char json[224];                           /* 最坏 ~47 字面+127 名+20 ts */
     if (r->has_user)
         snprintf(json, sizeof(json),
                  "{\"ok\":%s,\"method\":%d,\"user\":\"%s\",\"ts\":%lld}",
@@ -511,6 +511,7 @@ int mqtt_publish_json(const char *suffix, const char *json, bool retain)
 
 int mqtt_cmd_register(const char *name, mqtt_cmd_fn fn)
 {
+    static const char *const BUILTIN[] = { "ping", "status", "open" };
     if (!name || !fn || !name[0] || strlen(name) >= MQTT_CMD_NAME_MAX)
         return DG_ERR_PARAM;
     if (s_cmd_cnt >= MQTT_CMD_MAX)
@@ -518,6 +519,10 @@ int mqtt_cmd_register(const char *name, mqtt_cmd_fn fn)
     for (int i = 0; i < s_cmd_cnt; i++) {
         if (!strcmp(s_cmds[i].name, name))
             return DG_ERR_PARAM;              /* 重名:已注册命令不可遮蔽 */
+    }
+    for (size_t i = 0; i < sizeof(BUILTIN) / sizeof(BUILTIN[0]); i++) {
+        if (!strcmp(BUILTIN[i], name))
+            return DG_ERR_PARAM;              /* 内置命令不可遮蔽 */
     }
     snprintf(s_cmds[s_cmd_cnt].name, MQTT_CMD_NAME_MAX, "%s", name);
     s_cmds[s_cmd_cnt].fn = fn;

@@ -249,7 +249,7 @@ int main(void)
     DG_CHECK(event_bus_init() == EVENT_BUS_OK);
 
     snprintf(s_dir, sizeof(s_dir), "/tmp/dg_mqtt_%d", (int)getpid());
-    char cmd[256];
+    char cmd[480];   /* 两个 s_dir 拼接余量 */
     snprintf(cmd, sizeof(cmd), "rm -rf %s && mkdir -p %s", s_dir, s_dir);
     DG_CHECK(system(cmd) == 0);
 

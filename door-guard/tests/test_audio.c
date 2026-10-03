@@ -260,6 +260,7 @@ static void t_player(void)
     write_prompt("fail", 48000, 1);
     audio_sink_reset();
     EVENT_BUS_PUBLISH_EMPTY(EV_AUTH_DOOR_OPEN);
+    usleep(150 * 1000);
     audio_player_test_wait_idle(2000);
     DG_CHECK(audio_sink_frames() == 480);
 
@@ -270,12 +271,14 @@ static void t_player(void)
     rej.result = DG_RESULT_REJECT;
     rej.method = DG_METHOD_PWD;
     EVENT_BUS_PUBLISH(EV_AUTH_RESULT, &rej);
+    usleep(150 * 1000);
     audio_player_test_wait_idle(2000);
     DG_CHECK(audio_sink_frames() == 480);                   /* fail.wav 单声道 480 帧 */
 
     audio_sink_reset();
     rej.result = DG_RESULT_PASS;
     EVENT_BUS_PUBLISH(EV_AUTH_RESULT, &rej);
+    usleep(150 * 1000);
     audio_player_test_wait_idle(2000);
     DG_CHECK(audio_sink_frames() == 0);
 
@@ -289,7 +292,7 @@ int main(void)
     DG_CHECK(event_bus_init() == EVENT_BUS_OK);
 
     snprintf(s_dir, sizeof(s_dir), "/tmp/dg_audio_%d", (int)getpid());
-    char cmd[256];
+    char cmd[480];   /* 两个 s_dir 拼接余量 */
     snprintf(cmd, sizeof(cmd), "rm -rf %s && mkdir -p %s", s_dir, s_dir);
     DG_CHECK(system(cmd) == 0);
 

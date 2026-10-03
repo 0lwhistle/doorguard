@@ -375,6 +375,18 @@ static void json_apply_table2(dg_cfg_t *c, const cJSON *root)
 }
 
 /* json-only 键(部署参数/硬件参数,不进 set/迁移) */
+
+/* 布尔读法:json 里 true/false 与 0/1 都收(出厂模板习惯写 true/false,
+ * 表驱动那边 cJSON_IsBool 特判同款,META 表 §table_field_set 注) */
+static int json_bool(const cJSON *item, int dflt)
+{
+    if (cJSON_IsBool(item))
+        return cJSON_IsTrue(item) ? 1 : 0;
+    if (cJSON_IsNumber(item))
+        return item->valueint ? 1 : 0;
+    return dflt;
+}
+
 static void json_apply_extra(dg_cfg_t *c, const cJSON *root)
 {
     const cJSON *item;
@@ -409,8 +421,8 @@ static void json_apply_extra(dg_cfg_t *c, const cJSON *root)
     if ((item = json_path_get(root, "iccard.dev_path")) &&
         cJSON_IsString(item) && item->valuestring)
         copy_cstr(c->iccard_dev_path, sizeof(c->iccard_dev_path), item->valuestring);
-    if ((item = json_path_get(root, "mqtt.enabled")) && cJSON_IsNumber(item))
-        c->mqtt_enabled = item->valueint ? 1 : 0;
+    if ((item = json_path_get(root, "mqtt.enabled")) != NULL)
+        c->mqtt_enabled = json_bool(item, c->mqtt_enabled);
     if ((item = json_path_get(root, "mqtt.uri")) &&
         cJSON_IsString(item) && item->valuestring)
         copy_cstr(c->mqtt_uri, sizeof(c->mqtt_uri), item->valuestring);
@@ -427,11 +439,10 @@ static void json_apply_extra(dg_cfg_t *c, const cJSON *root)
     if ((item = json_path_get(root, "mqtt.password")) &&
         cJSON_IsString(item) && item->valuestring)
         copy_cstr(c->mqtt_password, sizeof(c->mqtt_password), item->valuestring);
-    if ((item = json_path_get(root, "mqtt.allow_remote_open")) &&
-        cJSON_IsNumber(item))
-        c->mqtt_allow_remote_open = item->valueint ? 1 : 0;
-    if ((item = json_path_get(root, "audio.enabled")) && cJSON_IsNumber(item))
-        c->audio_enabled = item->valueint ? 1 : 0;
+    if ((item = json_path_get(root, "mqtt.allow_remote_open")) != NULL)
+        c->mqtt_allow_remote_open = json_bool(item, c->mqtt_allow_remote_open);
+    if ((item = json_path_get(root, "audio.enabled")) != NULL)
+        c->audio_enabled = json_bool(item, c->audio_enabled);
     if ((item = json_path_get(root, "audio.device")) &&
         cJSON_IsString(item) && item->valuestring)
         copy_cstr(c->audio_device, sizeof(c->audio_device), item->valuestring);
