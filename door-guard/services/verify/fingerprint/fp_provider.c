@@ -168,6 +168,9 @@ static int wait_frame(fp_frame_t *out, int timeout_ms)
         pthread_mutex_unlock(&s_rx_mtx);
         if (len > 0) {
             int r = fp_as608_parse(&s_parser, s_rx, len, &f, &consumed);
+            fprintf(stderr, "[DBG] parse len=%u r=%d consumed=%zu b0=%02x
+",
+                    len, r, consumed, s_rx[0]);
                         if (consumed)
                 rx_pull((uint16_t)consumed);
             if (r == 1) {
@@ -194,11 +197,16 @@ static int cmd_xchg(const uint8_t *frame, size_t len, fp_frame_t *ack,
                     uint16_t *confirm, int timeout_ms)
 {
     s_hb_ms = now_ms();
+    fprintf(stderr, "[DBG] send %zuB
+", len);
     if (s_link->send(frame, len) != DG_OK) {
         s_err_streak++;
         return DG_ERR_IO;
     }
     int rc = wait_frame(ack, timeout_ms);
+    fprintf(stderr, "[DBG] xf rc=%d type=%02x plen=%u
+", rc, ack->type,
+            rc == DG_OK ? ack->payload_len : 0);
     if (rc != DG_OK) {
         if (rc == DG_ERR_IO)
             s_err_streak++;
@@ -206,6 +214,8 @@ static int cmd_xchg(const uint8_t *frame, size_t len, fp_frame_t *ack,
     }
     if (confirm)
         *confirm = fp_as608_ack_confirm(ack);
+    fprintf(stderr, "[DBG] confirm=%u
+", *confirm);
     return DG_OK;
 }
 
@@ -755,6 +765,8 @@ static bool ensure_link(void)
             degrade();
         return false;
     }
+    fprintf(stderr, "[DBG] link open ok
+");
     uint8_t b[FP_A608_FRAME_MAX];
     fp_frame_t ack;
     uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
@@ -766,6 +778,8 @@ static bool ensure_link(void)
             degrade();
         return false;
     }
+    fprintf(stderr, "[DBG] handshake done
+");
     recover();
     return true;
 }

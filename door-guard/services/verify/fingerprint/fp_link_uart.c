@@ -28,6 +28,8 @@ static size_t s_ring_len;
 static void on_uart_rx(const uint8_t *data, size_t len, void *ud)
 {
     (void)ud;
+    fprintf(stderr, "[DBG] uart rx %zuB b0=%02x
+", len, data[0]);
     pthread_mutex_lock(&s_ring_mtx);
     if (len > sizeof(s_ring) - s_ring_len)
         len = sizeof(s_ring) - s_ring_len;
