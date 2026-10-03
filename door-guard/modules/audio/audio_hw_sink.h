@@ -19,6 +19,9 @@ size_t audio_sink_frames(void);
 bool audio_sink_frame(size_t idx, int16_t *l, int16_t *r);
 int audio_sink_peak(void);
 
+/** 测试后端 ops(经 audio_hw_attach 注入) */
+extern const audio_hw_ops_t audio_sink_ops;
+
 #ifdef __cplusplus
 }
 #endif

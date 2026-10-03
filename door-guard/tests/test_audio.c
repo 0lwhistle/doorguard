@@ -150,7 +150,7 @@ static char s_dir[160];
 
 static void write_prompt(const char *name, unsigned rate, unsigned ch)
 {
-    char path[256];
+    char path[384];   /* s_dir(159)+文件名,防 -Wformat-truncation */
     snprintf(path, sizeof(path), "%s/%s.wav", s_dir, name);
     FILE *f = fopen(path, "wb");
     if (!f)
@@ -208,7 +208,7 @@ static void t_player(void)
     DG_CHECK(audio_play_tone(1000.0, 20000) == DG_ERR_PARAM);
 
     /* 立体声 WAV:10ms = 480 帧 */
-    char path[256];
+    char path[384];   /* s_dir(159)+文件名,防 -Wformat-truncation */
     snprintf(path, sizeof(path), "%s/st.wav", s_dir);
     f = fopen(path, "wb");
     wav_blob_t st = mk_wav(48000, 2, 16, 1, 480, 12000);
