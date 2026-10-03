@@ -244,18 +244,18 @@ static void test_dup_cmp_fail_closed(void)
     fresh_setup();
     DG_CHECK(storage_set_feature_cmp(cmp_err, NULL, NULL) == DG_OK);
 
-    user_rec_t a = make_user("60001", "甲", "pwd");
+    user_rec_t a = make_user("60001", "甲", "pwd6001");
     memset(a.face_vec, 0xAA, 64);
     a.face_vec_len = 64;
     DG_CHECK(db_user_add(&a) == DG_OK);         /* 库内已有一条人脸 */
 
-    user_rec_t b = make_user("60002", "乙", "pwd");
+    user_rec_t b = make_user("60002", "乙", "pwd6002");
     memset(b.face_vec, 0xBB, 64);
     b.face_vec_len = 64;
     DG_CHECK(db_user_add(&b) == DG_ERR_DB);     /* 全部行比较失败 → 拒绝添加 */
 
     /* update 同样 fail-closed(草稿 commit 路径) */
-    user_rec_t c = make_user("60003", "丙", "pwd");
+    user_rec_t c = make_user("60003", "丙", "pwd6003");
     DG_CHECK(db_user_add(&c) == DG_OK);
     memset(c.face_vec, 0xCC, 64);
     c.face_vec_len = 64;
@@ -263,7 +263,7 @@ static void test_dup_cmp_fail_closed(void)
 
     /* 部分行正常时仍以正常行为准:恢复可比较后同特征照常报 DUP */
     DG_CHECK(storage_set_feature_cmp(cmp_bytes, cmp_bytes, NULL) == DG_OK);
-    user_rec_t d = make_user("60004", "丁", "pwd");
+    user_rec_t d = make_user("60004", "丁", "pwd6004");
     memset(d.face_vec, 0xAA, 64);
     d.face_vec_len = 64;
     DG_CHECK(db_user_add(&d) == DG_ERR_DUP_FACE);

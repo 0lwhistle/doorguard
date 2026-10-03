@@ -685,7 +685,7 @@ static void on_evt(const ui_evt_t *evt)
         if (err == DG_OK)
             dg_popup_success(_("指纹已录入"), 1200, NULL, NULL);
         else if (err == DG_ERR_DUP_FINGER)
-            /* 同指重复不分"自己/他人":按手指说,文案两边都成立(§9) */
+            /* 同指重复不分自己还是他人:按手指说,文案两边都成立(§9) */
             dg_popup_fail(_("该指纹已录入过，请更换手指"), 2000, NULL, NULL);
         else
             dg_popup_fail(err_text(err), 2000, NULL, NULL);
