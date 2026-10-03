@@ -30,6 +30,8 @@
 | NPU | `librknnrt.so` 在板 `/usr/lib`(6.6M);实测运行时 `api=2.0.0b0 drv=0.9.8`;6 TOPS 是 **int8** 口径,FP16 图会显著更慢(实测同一检测器 int8 320 输入 6.7ms vs F16 640 输入 178ms) |
 | 相机输出格式 | NV12 **1280×720, stride=1280**(= 宽,紧凑排布;日志 `mainpath 格式 … stride=1280` 可直接确认) |
 | 板上可用工具 | 有 `sqlite3`;**没有 python3**(板端脚本一律用 shell/sqlite3) |
+| 板上时钟(2026-10-03 实测) | **RTC=2021-01-01,SNTP 未通,REALTIME 与 MONOTONIC 差 ~1.6e12ms**。健康/心跳/超时/帧新鲜度比较**必须 MONOTONIC**(now_mono_ms);混用 REALTIME 会把开机十几秒内全部健康服务误判为断流/心跳超龄(白屏+看门狗连环误伤已实锤,DEVLOG 2026-10-03 晚)。NTP 校时步进后结论不变 |
+| 指纹 WAK(2026-10-03 实测) | GPIO 94 sysfs 可读,**静息=0**,应用启动自校准得按下=1(采样 12:0);`finger.wak_active_level` 默认 **-1=自动**(fp_provider wak_calibrate),产线已知极性可写 0/1 强制。按压→电平相关性仍待真人复测;等待已带 ~1s 电平直读兜底,边沿丢失不再卡死 |
 | 显示/渲染硬件(2026-09-22 实测) | **VOP2**:6 plane(3 Primary+3 Overlay),crtc 100(720×1280 DSI)上空闲 Overlay 132(Esmart3)/148(Cluster0)均支持 **NV12+缩放**,zpos 0..7 可写、alpha/CSC 齐;**Esmart/Cluster 均无 90° 硬件旋转**(仅 rotate-0/reflect)→ 旋转靠 RGA。**GPU**:Mali-G52(libmali-bifrost blob,EGL/GLES/OpenCL 可用,**无 Vulkan**),当前未使用。**dma_heap**:/dev/dma_heap/reserved(CMA)+ system,可导 dmabuf 给 DRM |
 | LVGL8 透明陷阱(实测) | ①`screen_transp` 运行时开关被编译宏 **LV_COLOR_SCREEN_TRANSP**(lv_conf.h)门控,宏不开则渲染脏区前被 bg_color(白)预填,ARGB fb 永不透明;②页容器 `remove_style_all` 本透明,页面"白底"实为 screen/display 层自带(lv_disp bg_opa 默认 COVER)——透明化须三层同改(ui.c scr+disp、navigator 页容器、dg_preview 透明页) |
 
