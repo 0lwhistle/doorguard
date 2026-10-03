@@ -62,7 +62,10 @@ int i18n_apply_locked(const char *lang)
         DG_LOGW(TAG, "语言表 %s 不存在,保持原文", path);
         return DG_ERR_NOT_FOUND;
     }
-    char buf[8192];
+    /* 语言表已增长到 ~9.5KB(213 键):栈上 8KB 缓冲截断 → cJSON 解析必败
+     * → 整张表静默回退原文(英文模式整体失效)。与 test_i18n 10-01 的修复
+     * 同源,静态 64KB 留足增长余量 */
+    static char buf[65536];
     size_t n = fread(buf, 1, sizeof(buf) - 1, f);
     fclose(f);
     buf[n] = '\0';
