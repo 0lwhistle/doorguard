@@ -439,7 +439,7 @@ int main(void)
     fake_reset();
     F.upchar_no_data = 1;
     publish_req("30001", DG_ENROLL_FINGER, 0);
-    wait_ge(&s_progress_cnt, 1, 3000);    /* PRESS1 */
+    wait_step(DG_ENROLL_FP_STEP_PRESS1);   /* 阶段门控:计数会跨用例残留 */
     press();
     wait_step(DG_ENROLL_FP_STEP_LIFT);
     release();
@@ -465,7 +465,7 @@ int main(void)
     F.search_hit = 1;
     F.search_page = 500;
     publish_req("30001", DG_ENROLL_FINGER, 0);
-    wait_ge(&s_progress_cnt, 1, 3000);
+    wait_step(DG_ENROLL_FP_STEP_PRESS1);  /* 门控见 P1b 注:绝对计数已残留 */
     press();
     wait_step(DG_ENROLL_FP_STEP_LIFT);    /* 查重前先抬手 */
     release();
@@ -478,7 +478,7 @@ int main(void)
     F.search_hit = 1;
     F.search_page = (uint16_t)p1_page;    /* P1 落库的 30001 自己的页 */
     publish_req("30001", DG_ENROLL_FINGER, 0);
-    wait_ge(&s_progress_cnt, 1, 3000);
+    wait_step(DG_ENROLL_FP_STEP_PRESS1);  /* 门控见 P1b 注 */
     press();
     wait_step(DG_ENROLL_FP_STEP_LIFT);
     release();
