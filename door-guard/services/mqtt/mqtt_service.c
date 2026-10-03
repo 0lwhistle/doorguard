@@ -234,9 +234,12 @@ static void cmd_dispatch(const char *name, const char *payload)
 static void mqtt_cb(struct mg_connection *c, int ev, void *ev_data)
 {
     if (ev == MG_EV_MQTT_OPEN) {
-        struct mg_mqtt_message *m = (struct mg_mqtt_message *)ev_data;
-        if (m->ack != 0) {
-            DG_LOGW(TAG, "CONNACK 拒绝(ack=%u)", m->ack);
+        /* 注意:OPEN 的 ev_data 是 &ack(uint8_t*,返回码)而非
+         * mg_mqtt_message*(mongoose.h 注释与实现不一致,读错就是
+         * 随机"拒绝码") */
+        const uint8_t ack = *(const uint8_t *)ev_data;
+        if (ack != 0) {
+            DG_LOGW(TAG, "CONNACK 拒绝(ack=%u)", ack);
             c->is_closing = 1;               /* 走 CLOSE → 退避重连 */
             return;
         }
