@@ -140,7 +140,7 @@ static void pub_now(const char *suffix, const char *json, bool retain)
 {
     if (!s_conn || !atomic_load(&s_connected))
         return;
-    char topic[64];
+    char topic[96];   /* prefix(31)+suffix(47)+分隔,64 会截断 */
     topic_full(topic, sizeof(topic), suffix);
     struct mg_mqtt_opts o = { 0 };
     o.topic = mg_str(topic);
@@ -250,7 +250,7 @@ static void mqtt_cb(struct mg_connection *c, int ev, void *ev_data)
         atomic_store(&s_connected, true);
         DG_LOGI(TAG, "broker 已连接(%s)", cfg_get()->mqtt_uri);
 
-        char topic[64];
+        char topic[96];   /* prefix(31)+suffix(47)+分隔,64 会截断 */
         topic_full(topic, sizeof(topic), "cmd/+");
         struct mg_mqtt_opts so = { .topic = mg_str(topic), .qos = 1 };
         mg_mqtt_sub(s_conn, &so);
@@ -404,7 +404,7 @@ static void timer_stop(void *arg)
          * 轮询循环对 is_closing 连接跳过写阶段直接关,待发的告别包会被
          * 吞掉;draining = 排空 send 后才关(mongoose 的优雅收尾语义) */
         struct mg_mqtt_opts o = { 0 };
-        char topic[64];
+        char topic[96];   /* prefix(31)+suffix(47)+分隔,64 会截断 */
         topic_full(topic, sizeof(topic), "status");
         o.topic = mg_str(topic);
         o.message = mg_str("{\"state\":\"offline\"}");
