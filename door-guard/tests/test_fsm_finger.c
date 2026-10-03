@@ -191,8 +191,7 @@ static void t_standby(void)
 
 static void t_press_wake(void)
 {
-    printf("[P13] 待机中按压沿即时亮屏(不等检索结果)
-");
+    printf("[P13] 待机中按压沿即时亮屏(不等检索结果)\n");
     auth_fsm_init(&s_fsm, 3000, 1, 15, 5, 60, rec_on_action, NULL);
     s_rec_cnt = 0;
     auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
@@ -205,8 +204,7 @@ static void t_press_wake(void)
     DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 0); /* 仅亮屏,不开门 */
     DG_CHECK(count_act(FSM_ACT_WRITE_LOG) == 0); /* 不落日志(结果事件才算动作) */
 
-    printf("[P14] 非待机状态按压沿忽略
-");
+    printf("[P14] 非待机状态按压沿忽略\n");
     fsm_reset();
     auth_fsm_handle(&s_fsm, FSM_EV_FINGER_PRESS, NULL);
     DG_CHECK(count_act(FSM_ACT_GOTO_PAGE) == 0);
