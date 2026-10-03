@@ -202,6 +202,7 @@ add_library(dg_ui STATIC
     ui/pages/page_web_set.c
     ui/pages/page_net_set.c
     ui/pages/page_face_set.c
+    ui/pages/page_finger_set.c
     ui/presenters/presenter_home.c
     ui/presenters/presenter_standby.c
     ui/presenters/presenter_menu.c
@@ -214,6 +215,7 @@ add_library(dg_ui STATIC
     ui/presenters/presenter_web_set.c
     ui/presenters/presenter_net_set.c
     ui/presenters/presenter_face_set.c
+    ui/presenters/presenter_finger_set.c
     ui/ui_events.c
     ui/font/dg_font_cn_16.c
     ui/font/dg_font_cn_26.c

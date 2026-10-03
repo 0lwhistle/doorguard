@@ -13,7 +13,6 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 static int on_face_box(const event_t *e, void *ud)
 {
@@ -354,18 +353,22 @@ void bridge_net_cfg_set(bool is_static, const char *ip, const char *mask,
     EVENT_BUS_PUBLISH(EV_NET_CFG_SET, &ev);
 }
 
-void bridge_enroll_request(const char *uid, int32_t kind)
+uint32_t bridge_enroll_request(const char *uid, int32_t kind)
 {
-    bridge_enroll_request_arg(uid, kind, 0);
+    return bridge_enroll_request_arg(uid, kind, 0);
 }
 
-void bridge_enroll_request_arg(const char *uid, int32_t kind, int32_t arg)
+/* seq 进程内自增(同秒内连发也不撞;时间戳口径会让取消+重发拿到同 seq) */
+static uint32_t s_enroll_seq;
+
+uint32_t bridge_enroll_request_arg(const char *uid, int32_t kind, int32_t arg)
 {
     ev_enroll_request_t ev;
     memset(&ev, 0, sizeof(ev));
     snprintf(ev.user_id, sizeof(ev.user_id), "%s", uid ? uid : "");
     ev.kind = kind;
     ev.arg = arg;
-    ev.seq = (uint32_t)time(NULL);       /* 进程内唯一即可(与原页面语义同) */
+    ev.seq = ++s_enroll_seq;
     EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
+    return ev.seq;
 }

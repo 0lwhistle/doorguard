@@ -745,6 +745,11 @@ static bool debounce_press(int lvl)
  * 电平直读不依赖事件,≤1s 即能见到按下。1=按下,0=无,-1=链路错 */
 static int wait_press_once(int active)
 {
+    /* 等按压 = 线程活着在等输入,不是挂死:必须按步刷心跳。否则录入等
+     * 按压超过看门狗窗口(15s)即判 stale → registry_restart 对本服务
+     * 只是空转(fp_provider_start 见 s_running 直接返回),下轮即 DISABLED
+     * 粘死 → 验证按钮永远「指纹模块未就绪」(模组明明在线,2026-10-03) */
+    s_hb_ms = now_mono_ms();
     int lvl;
     int rc = s_link->wak_wait(200, &lvl);
     if (rc == DG_OK) {
@@ -770,6 +775,7 @@ static void wait_release(void)
     int active = wak_active_level();
     int lvl;
     for (;;) {
+        s_hb_ms = now_mono_ms();          /* 等释放同 wait_press_once:按步刷心跳 */
         int rc = s_link->wak_wait(200, &lvl);
         if (rc == DG_OK && lvl != active) {
             if (debounce_press(lvl))

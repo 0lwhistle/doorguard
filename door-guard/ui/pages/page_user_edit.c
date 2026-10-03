@@ -21,6 +21,7 @@
 #include "bridge/bridge.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
+#include "page_finger_set.h"
 #include "presenters/presenter_capture.h"
 #include "theme.h"
 #include "types.h"
@@ -55,10 +56,9 @@ static lv_obj_t *s_btn_pwd, *s_btn_face;
 static lv_obj_t *s_btn_finger, *s_btn_ic;
 static lv_obj_t *s_row_del;                     /* 「删除用户」行(EDIT 才显示) */
 
-/* 指纹/IC 录入流状态(2026-10-01):页面退出时撤销,防流程悬挂 */
+/* 槽位快照(refresh 显示 已录 n/3 用;录入/删除流已迁指纹管理页) */
 static int32_t  s_fp_pages[DG_FINGER_PAGES_MAX];
 static uint32_t s_fp_cnt;
-static bool     s_fp_enrolling;                 /* 指纹两次按压进行中 */
 static bool     s_ic_enrolling;                 /* 等待刷卡绑定中 */
 
 /* 卡号展示掩码(********+末4;spec-database §3,UI 本地呈现不改数据) */
@@ -74,37 +74,17 @@ static void mask_card(const char *no, char *out, size_t cap)
 
 static void cancel_bio_flows(void)
 {
-    if (s_fp_enrolling) {
-        bridge_enroll_request(s_uid, DG_ENROLL_FINGER_CANCEL);
-        s_fp_enrolling = false;
-    }
+    /* 指纹录入流已迁指纹管理页(页面自带撤销);本页只剩 IC 等待 */
     if (s_ic_enrolling) {
         bridge_enroll_request(s_uid, DG_ENROLL_IC_CANCEL);
         s_ic_enrolling = false;
     }
 }
 
-/* 错误码 → 文案(UI 唯一映射点;修正旧版把 DUP_UID 映射成“该卡已绑定”的错误) */
+/* 录入/特征操作错误文案(UI 唯一映射点在 valid_ui,本页是消费方之一) */
 static const char *err_text(int rc)
 {
-    switch (rc) {
-    case DG_ERR_NO_PASSWORD:  return _("请先设置密码");
-    case DG_ERR_DUP_UID:      return _("该用户ID已存在");
-    case DG_ERR_DUP_IC:       return _("该卡已绑定其他用户");
-    case DG_ERR_DUP_FACE:     return _("该人脸已绑定其他用户");
-    case DG_ERR_DUP_FINGER:   return _("该指纹已绑定其他用户");
-    case DG_ERR_FINGER_FULL:  return _("指纹库已满");
-    case DG_ERR_FINGER_LIMIT: return _("该用户指纹已达上限");
-    case DG_ERR_USER_LIMIT:   return _("用户数已达上限");
-    case DG_ERR_BAD_NAME:     return _("姓名不合法");
-    case DG_ERR_BAD_PWD:      return _("密码不合法");
-    case DG_ERR_BAD_UID:      return _("用户ID不合法");
-    case DG_ERR_IO:           return _("设备通信异常，请重试");
-    case DG_ERR_TIMEOUT:      return _("操作超时，请重试");
-    case DG_ERR_DB:           return _("存储异常，请重试");
-    case DG_ERR_MISMATCH:     return _("指纹采集质量差，请重按");
-    default:                  return _("操作失败,请重试");
-    }
+    return dg_ui_enroll_err_text(rc);
 }
 
 static void refresh(void);
@@ -213,7 +193,7 @@ static void refresh(void)
         if (s_btn_face)
             lv_obj_add_flag(s_btn_face, LV_OBJ_FLAG_HIDDEN);
         if (s_btn_finger)
-            dg_btn_set_label(s_btn_finger, _("录入"));
+            dg_btn_set_label(s_btn_finger, _("管理"));
         if (s_btn_ic)
             dg_btn_set_label(s_btn_ic, _("录入"));
         if (s_row_del)
@@ -249,19 +229,17 @@ static void refresh(void)
         lv_obj_clear_flag(s_btn_face, LV_OBJ_FLAG_HIDDEN);
 
     /* 指纹行:已录 n/3(独立 fingerprints 表是唯一事实源;users.finger_vec
-     * 废弃列不再读取)。录入中显示进度文案 */
+     * 废弃列不再读取)。录入/删除入口 = 指纹管理页 */
     if (enroll_service_finger_pages(s_uid, s_fp_pages, DG_FINGER_PAGES_MAX,
                                     &s_fp_cnt) != DG_OK)
         s_fp_cnt = 0;
-    if (s_fp_enrolling)
-        val_set(s_val_finger, _("请按压指纹..."));
-    else if (s_fp_cnt > 0) {
+    if (s_fp_cnt > 0) {
         char fv[32];
         snprintf(fv, sizeof(fv), _("已录 %d/3 枚"), (int)s_fp_cnt);
         val_set(s_val_finger, fv);
     } else
         val_set(s_val_finger, _("无"));
-    dg_btn_set_label(s_btn_finger, s_fp_cnt > 0 ? _("修改") : _("录入"));
+    dg_btn_set_label(s_btn_finger, _("管理"));
 
     /* IC 行:卡号展示一律掩码(spec-database §3) */
     if (s_ic_enrolling)
@@ -414,40 +392,8 @@ static void apply_face_pick(void *ud, int idx)
     refresh();
 }
 
-/* ---- 指纹(2026-10-01:每用户 ≤3 枚,录入/逐枚删除走 enroll 事件) ---- */
-
-static void apply_finger_del(void *ud, int idx)
-{
-    int32_t page = (int32_t)(uintptr_t)ud;
-    (void)idx;                            /* 单选项确认弹窗:仅「删除」 */
-    bridge_enroll_request_arg(s_uid, DG_ENROLL_FINGER_DEL, page);
-    refresh();
-}
-
-static void apply_finger_pick(void *ud, int idx)
-{
-    (void)ud;
-    if (s_fp_enrolling) {                 /* 录入中再点 = 取消本次 */
-        cancel_bio_flows();
-        refresh();
-        return;
-    }
-    if (idx == 0) {
-        if (s_fp_cnt >= DG_FINGER_PAGES_MAX) {
-            dg_popup_fail(_("该用户指纹已达上限"), 1500, NULL, NULL);
-            return;
-        }
-        s_fp_enrolling = true;
-        bridge_enroll_request(s_uid, DG_ENROLL_FINGER);
-        refresh();
-        return;
-    }
-    /* idx>0:删除第 idx-1 枚(红色确认,破坏性操作;模式同「删除用户」) */
-    int32_t page = s_fp_pages[idx - 1];
-    const char *const del_opts[] = { _("删除") };
-    dg_popup_choice_ex(_("确认删除该指纹"), del_opts, 1, 1u << 0,
-                       apply_finger_del, NULL, (void *)(uintptr_t)page);
-}
+/* ---- 指纹(2026-10-03 起:录入/逐枚删除迁往独立的指纹管理页;
+ * 本页指纹行只作入口。ADD 未保存用户无指纹可管,入口拦下) ---- */
 
 static void on_finger(lv_event_t *e)
 {
@@ -456,30 +402,8 @@ static void on_finger(lv_event_t *e)
         dg_popup_fail(_("请先保存用户"), 1500, NULL, NULL);
         return;
     }
-    if (enroll_service_finger_pages(s_uid, s_fp_pages, DG_FINGER_PAGES_MAX,
-                                    &s_fp_cnt) != DG_OK)
-        s_fp_cnt = 0;
-
-    if (s_fp_enrolling) {
-        dg_popup_fail(_("正在录入，请按压指纹"), 1200, NULL, NULL);
-        return;
-    }
-
-    /* 选项 = [录入新指纹(未满时)] + 逐枚 [删除 指纹N] */
-    char labels[1 + DG_FINGER_PAGES_MAX][48];
-    const char *opts[1 + DG_FINGER_PAGES_MAX];
-    int n = 0;
-    if (s_fp_cnt < DG_FINGER_PAGES_MAX)
-        opts[n++] = _("录入新指纹");
-    for (uint32_t i = 0; i < s_fp_cnt; i++) {
-        snprintf(labels[n], sizeof(labels[n]), _("删除 第%d枚指纹"), (int)i + 1);
-        opts[n] = labels[n];
-        n++;
-    }
-    if (n == 1)
-        apply_finger_pick(NULL, 0);       /* 未录任何枚:免选择直达录入 */
-    else
-        dg_popup_choice(_("指纹"), opts, n, apply_finger_pick, NULL, NULL);
+    page_finger_set_open(s_uid);
+    navigator_push("finger_set");
 }
 
 /* ---- IC 卡(绑卡 = 下一张刷入的卡;解绑红色确认) ---- */
@@ -656,28 +580,13 @@ static const dg_edit_nav_ops_t s_nav_ops = {
 
 /* ---- 录入结果回执(桥转发,UI 线程;人脸录入的回执由拍摄页处理,这里只管清除/删除) ---- */
 
-/* 指纹录入中间提示(两次按压;文案映射 progress.step) */
-static void show_fp_progress(int32_t step)
-{
-    const char *text = _("请再次按压同一手指");
-    if (step == DG_ENROLL_FP_STEP_PRESS1)
-        text = _("请按压指纹");
-    else if (step == DG_ENROLL_FP_STEP_RETRY2)
-        text = _("两次按压指纹不一致，请用同一手指");
-    else if (step == DG_ENROLL_FP_STEP_QUALITY)
-        text = _("未读到指纹，请调整手指贴合传感器");
-    dg_popup_fail(text, 2500, NULL, NULL);   /* 中性提示走醒目样式,自动消失 */
-}
+/* 指纹回执兜底:录入流已迁指纹管理页(那里是本页被盖时的当前页)。
+ * 仅在用户恰在本页时收到迟到终态(返回竞态)才落到这里,照实提示 */
 
 static void on_evt(const ui_evt_t *evt)
 {
-    if (evt->kind == UI_EVT_ENROLL_PROGRESS) {
-        if (strcmp(evt->progress.user_id, s_uid) != 0 ||
-            evt->progress.kind != DG_ENROLL_FINGER)
-            return;
-        show_fp_progress(evt->progress.step);
-        return;
-    }
+    if (evt->kind == UI_EVT_ENROLL_PROGRESS)
+        return;                           /* 进度提示归指纹管理页 */
     if (evt->kind != UI_EVT_ENROLL_RESULT)
         return;
     if (strcmp(evt->enroll.user_id, s_uid) != 0)
@@ -686,7 +595,6 @@ static void on_evt(const ui_evt_t *evt)
 
     switch (evt->enroll.kind) {
     case DG_ENROLL_FINGER:
-        s_fp_enrolling = false;          /* 终态:成功/失败都收流 */
         if (err == DG_OK)
             dg_popup_success(_("指纹已录入"), 1200, NULL, NULL);
         else if (err == DG_ERR_DUP_FINGER)

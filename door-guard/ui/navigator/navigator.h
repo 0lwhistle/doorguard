@@ -38,7 +38,7 @@ typedef struct {
     void (*on_evt)(const ui_evt_t *evt);       /* 可选:内容事件(LVGL 线程) */
 } navigator_page_t;
 
-#define NAV_MAX_PAGES 12   /* home standby menu users user_edit capture device access_set logs web_set net_set face_set */
+#define NAV_MAX_PAGES 13   /* home standby menu users user_edit capture device access_set logs web_set net_set face_set finger_set */
 #define NAV_MAX_STACK 4
 
 void navigator_init(lv_obj_t *root);

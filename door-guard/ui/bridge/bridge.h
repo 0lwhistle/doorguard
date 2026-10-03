@@ -45,10 +45,12 @@ void bridge_net_cfg_set(bool is_static, const char *ip, const char *mask,
                         const char *gw);
 
 /** 录入请求(拍摄页「拍摄」=DG_ENROLL_FACE;编辑页「删除用户」=
- *  DG_ENROLL_DELETE;seq 由桥生成,回执经 UI_EVT_ENROLL_RESULT 回流) */
-void bridge_enroll_request(const char *uid, int32_t kind);
-/** 带 kind 专用参数的录入请求(指纹删单枚:arg = page_id;其余 kind 填 0) */
-void bridge_enroll_request_arg(const char *uid, int32_t kind, int32_t arg);
+ *  DG_ENROLL_DELETE;seq 由桥生成,回执经 UI_EVT_ENROLL_RESULT 回流)。
+ *  @return 本次请求 seq */
+uint32_t bridge_enroll_request(const char *uid, int32_t kind);
+/** 带 kind 专用参数的录入请求(指纹删单枚:arg = page_id;其余 kind 填 0)。
+ *  @return 本次请求 seq(进度/结果事件原样带回,UI 据此丢弃陈旧回执) */
+uint32_t bridge_enroll_request_arg(const char *uid, int32_t kind, int32_t arg);
 
 /* Web 管理页:状态查询 + 账号/口令修改。
  * 凭据只由 net 模块读写(UI 不碰存储),动作走事件、结果经

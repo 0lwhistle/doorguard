@@ -10,7 +10,7 @@
  * (无副本降级行)/ 与他人重复 DUP_FINGER / 同用户重复自己已有枚 DUP_FINGER /
  * 单用户超 3 枚 FINGER_LIMIT / 模组库满 FINGER_FULL / 两次不一致
  * RETRY2 重采后成功 / 按压①成像差 QUALITY 提示 / 取消回滚(无 Store 不留
- * 孤儿)/ DeletChar 单枚删除。
+ * 孤儿)/ 等按压期间心跳按步刷新(看门狗误杀回归)/ DeletChar 单枚删除。
  */
 #include "dg_test.h"
 #include "cfg.h"
@@ -537,6 +537,24 @@ int main(void)
     /* 迟到按压已被 IDLE 分支消费:补释放沿,否则 provider 停在 wait_release,
      * fp_provider_stop 的 pthread_join 挂死(ctest TIMEOUT) */
     atomic_store(&F.release_req, 1);
+    usleep(300 * 1000);
+
+    printf("[P6b] 等按压期间心跳按步刷新:等待不是挂死(看门狗误杀回归)\n");
+    /* 回归(2026-10-03 板上):录入等按压 >15s → 看门狗判 stale → restart
+     * 空转 → 二轮即 DISABLED 粘死 → 验证永远「指纹模块未就绪」。等按压
+     * 循环必须刷新心跳(等待 = 活着在等输入)。不刷则此处 1.2s 内心跳
+     * 停在录入开始那条指令上,diff≈0 */
+    fake_reset();
+    atomic_store(&s_progress_cnt, 0);
+    publish_req("30003", DG_ENROLL_FINGER, 0);
+    wait_ge(&s_progress_cnt, 1, 3000);    /* 进入录入,PRESS1 已发,正等按压 */
+    int64_t hb0 = fp_provider_heartbeat_ms();
+    usleep(1200 * 1000);
+    int64_t hb1 = fp_provider_heartbeat_ms();
+    DG_CHECK(hb1 - hb0 >= 800);           /* 200ms 粒度刷新,1.2s 至少跨 5 次 */
+    publish_req("30003", DG_ENROLL_FINGER_CANCEL, 0);
+    usleep(300 * 1000);
+    atomic_store(&F.release_req, 1);      /* 同 P6:补释放沿防 join 挂死 */
     usleep(300 * 1000);
 
     printf("[P7] 逐枚删除:DeletChar + 删行 + 末枚收方式位\n");

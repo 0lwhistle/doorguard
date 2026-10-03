@@ -23,6 +23,10 @@ const char *dg_ui_valid_name(const char *text);
 /** 密码校验(4~31 位可见字符,不含空格) */
 const char *dg_ui_valid_pwd(const char *text);
 
+/** 录入/特征操作错误码 → 用户文案(UI 唯一映射点,2026-10-03 自编辑页
+ *  收编共用:指纹管理页与用户编辑页同一套说法)。未知码给通用失败语 */
+const char *dg_ui_enroll_err_text(int rc);
+
 #ifdef __cplusplus
 }
 #endif
