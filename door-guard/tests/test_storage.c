@@ -720,19 +720,23 @@ static void test_finger(void)
     for (int i = 0; i < 512; i++)
         vec[i] = (uint8_t)(i * 3 + 1);
 
-    /* 参数防御 */
+    /* 参数防御(len=0+NULL 现为合法"无副本"降级形态,见 db_finger_add) */
     DG_CHECK(db_finger_add("30001", -1, vec, sizeof(vec)) == DG_ERR_PARAM);
     DG_CHECK(db_finger_add(NULL, 0, vec, sizeof(vec)) == DG_ERR_PARAM);
-    DG_CHECK(db_finger_add("30001", 0, vec, 0) == DG_ERR_PARAM);
+    DG_CHECK(db_finger_add("30001", 0, vec, 0) == DG_OK);
+    /* 无副本行:get_vec 显式 NOT_FOUND */
+    uint8_t vout[DG_FEATURE_MAX];
+    size_t vlo = 0;
+    DG_CHECK(db_finger_get_vec(0, vout, sizeof(vout), &vlo) == DG_ERR_NOT_FOUND);
 
-    DG_CHECK(db_finger_add("30001", 0, vec, sizeof(vec)) == DG_OK);
+    DG_CHECK(db_finger_add("30001", 1, vec, sizeof(vec)) == DG_OK);
     /* page_id UNIQUE */
-    DG_CHECK(db_finger_add("30002", 0, vec, sizeof(vec)) == DG_ERR_STATE);
+    DG_CHECK(db_finger_add("30002", 1, vec, sizeof(vec)) == DG_ERR_STATE);
 
     uint32_t n = 99;
-    DG_CHECK(db_finger_count_user("30001", &n) == DG_OK && n == 1);
+    DG_CHECK(db_finger_count_user("30001", &n) == DG_OK && n == 2);
     DG_CHECK(db_finger_count_user("30002", &n) == DG_OK && n == 0);
-    DG_CHECK(db_finger_count_all(&n) == DG_OK && n == 1);
+    DG_CHECK(db_finger_count_all(&n) == DG_OK && n == 2);
 
     /* 反查:命中页号 → uid;未命中 → NOT_FOUND */
     char uid[DG_UID_LEN];
@@ -740,22 +744,22 @@ static void test_finger(void)
     DG_CHECK(strcmp(uid, "30001") == 0);
     DG_CHECK(db_finger_page_user(9, uid, sizeof(uid)) == DG_ERR_NOT_FOUND);
 
-    /* 最小空闲页:0 被占 → 1;挖洞(删 1)后回收 */
+    /* 最小空闲页:0/1 被占 → 2;挖洞(删 2)后回收 */
     int32_t page = -1;
-    DG_CHECK(db_finger_alloc_page(&page) == DG_OK && page == 1);
-    DG_CHECK(db_finger_add("30002", 1, vec, sizeof(vec)) == DG_OK);
+    DG_CHECK(db_finger_alloc_page(&page) == DG_OK && page == 2);
     DG_CHECK(db_finger_add("30002", 2, vec, sizeof(vec)) == DG_OK);
-    DG_CHECK(db_finger_alloc_page(&page) == DG_OK && page == 3);
-    DG_CHECK(db_finger_del("30002", 1) == DG_OK);
-    DG_CHECK(db_finger_alloc_page(&page) == DG_OK && page == 1);
-    DG_CHECK(db_finger_del("30002", 1) == DG_ERR_NOT_FOUND);   /* 重复删 */
+    DG_CHECK(db_finger_add("30002", 3, vec, sizeof(vec)) == DG_OK);
+    DG_CHECK(db_finger_alloc_page(&page) == DG_OK && page == 4);
+    DG_CHECK(db_finger_del("30002", 2) == DG_OK);
+    DG_CHECK(db_finger_alloc_page(&page) == DG_OK && page == 2);
+    DG_CHECK(db_finger_del("30002", 2) == DG_ERR_NOT_FOUND);   /* 重复删 */
 
     /* 该用户页清单(1:1 逐枚验证数据源)+ 缓冲不足显式报错 */
     int32_t pages[3];
     uint32_t pn = 0;
     DG_CHECK(db_finger_list_user("30002", pages, 3, &pn) == DG_OK && pn == 1);
-    DG_CHECK(pages[0] == 2);
-    DG_CHECK(db_finger_list_user("30001", pages, 3, &pn) == DG_OK && pn == 1);
+    DG_CHECK(pages[0] == 3);
+    DG_CHECK(db_finger_list_user("30001", pages, 3, &pn) == DG_OK && pn == 2);
 
     /* 向量 roundtrip:密文落库 → 解密读出一致(备份/回灌路径) */
     DG_CHECK(db_finger_add("30001", 5, vec, sizeof(vec)) == DG_OK);
@@ -772,9 +776,9 @@ static void test_finger(void)
 
     /* 删用户级联删指纹行 */
     DG_CHECK(db_user_del("30001") == DG_OK);
-    DG_CHECK(db_finger_count_all(&n) == DG_OK && n == 1);   /* 只剩 30002 的 page2 */
+    DG_CHECK(db_finger_count_all(&n) == DG_OK && n == 1);   /* 只剩 30002 的 page3 */
     DG_CHECK(db_finger_page_user(5, uid, sizeof(uid)) == DG_ERR_NOT_FOUND);
-    DG_CHECK(db_finger_page_user(2, uid, sizeof(uid)) == DG_OK);
+    DG_CHECK(db_finger_page_user(3, uid, sizeof(uid)) == DG_OK);
 
     /* 清空(恢复出厂) */
     DG_CHECK(db_finger_del_all() == DG_OK);

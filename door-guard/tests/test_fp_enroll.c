@@ -460,7 +460,7 @@ int main(void)
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_DUP_FINGER);
     DG_CHECK(atomic_load(&F.delet_calls) == 0);   /* 未 Store 无需回滚 */
     cnt = 99;
-    DG_CHECK(db_finger_count_user("30001", &cnt) == DG_OK && cnt == 1);
+    DG_CHECK(db_finger_count_user("30001", &cnt) == DG_OK && cnt == 2);
 
     printf("[P3] 单用户超 3 枚:FINGER_LIMIT,不进采集\n");
     fake_reset();
