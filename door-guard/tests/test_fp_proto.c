@@ -122,15 +122,15 @@ static void t_parse_ack(void)
 
     /* 模板数 14B(真机实测,空库):07 0005 | 00 | 00 00 | 00 0C */
     uint8_t ack_valid0[] = { 0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
-                             0x07, 0x00, 0x05, 0x00, 0x00, 0x00, 0x0C };
+                             0x07, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x0C };
     fp_as608_parser_init(&p);
     DG_CHECK(fp_as608_parse(&p, ack_valid0, sizeof(ack_valid0), &f, NULL) == 1);
     DG_CHECK(fp_as608_ack_confirm(&f) == FP_ACK_OK);
 
-    /* Search 命中 16B(帧式推导,sum=07+00+07+00+05+00+32=0x47):
-     * 07 0007 | 确认码 00 | 页号 0005 | 得分 0032 | 校验和 0047 */
+    /* Search 命中 16B(帧式推导,sum=07+00+07+00+05+00+32=0x45):
+     * 07 0007 | 确认码 00 | 页号 0005 | 得分 0032 | 校验和 0045 */
     uint8_t srch_ack[] = { 0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x07,
-                           0x00, 0x07, 0x00, 0x00, 0x05, 0x00, 0x32, 0x00, 0x47 };
+                           0x00, 0x07, 0x00, 0x00, 0x05, 0x00, 0x32, 0x00, 0x45 };
     fp_as608_parser_init(&p);
     DG_CHECK(fp_as608_parse(&p, srch_ack, sizeof(srch_ack), &f, NULL) == 1);
     DG_CHECK(fp_as608_ack_confirm(&f) == FP_ACK_OK);

@@ -168,7 +168,7 @@ static int wait_frame(fp_frame_t *out, int timeout_ms)
         pthread_mutex_unlock(&s_rx_mtx);
         if (len > 0) {
             int r = fp_as608_parse(&s_parser, s_rx, len, &f, &consumed);
-            if (consumed)
+                        if (consumed)
                 rx_pull((uint16_t)consumed);
             if (r == 1) {
                 *out = f;

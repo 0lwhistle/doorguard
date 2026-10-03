@@ -99,7 +99,7 @@ static void fake_push(const uint8_t *frame, size_t len)
 
 static size_t mk_ack(uint8_t *out, uint16_t confirm)
 {
-    memcpy(out, "ïÿÿÿÿ", 6);
+    memcpy(out, "\xEF\x01\xFF\xFF\xFF\xFF", 6);
     out[6] = FP_A608_TYPE_ACK;
     put_be16(out + 7, 3);                 /* 字面长度 = 确认码1B + 校验和2B */
     out[9] = (uint8_t)confirm;
@@ -110,7 +110,7 @@ static size_t mk_ack(uint8_t *out, uint16_t confirm)
 
 static size_t mk_ack_extra(uint8_t *out, uint16_t confirm, uint16_t a, uint16_t b)
 {
-    memcpy(out, "ïÿÿÿÿ", 6);
+    memcpy(out, "\xEF\x01\xFF\xFF\xFF\xFF", 6);
     out[6] = FP_A608_TYPE_ACK;
     put_be16(out + 7, 7);                 /* 确认码1B + a 2B + b 2B + 校验和2B */
     out[9] = (uint8_t)confirm;
