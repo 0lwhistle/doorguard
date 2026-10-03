@@ -168,8 +168,6 @@ static int wait_frame(fp_frame_t *out, int timeout_ms)
         pthread_mutex_unlock(&s_rx_mtx);
         if (len > 0) {
             int r = fp_as608_parse(&s_parser, s_rx, len, &f, &consumed);
-            fprintf(stderr, "[DBG] parse len=%u r=%d consumed=%zu b0=%02x\n",
-                    len, r, consumed, s_rx[0]);
             if (consumed)
                 rx_pull((uint16_t)consumed);
             if (r == 1) {
@@ -196,14 +194,11 @@ static int cmd_xchg(const uint8_t *frame, size_t len, fp_frame_t *ack,
                     uint16_t *confirm, int timeout_ms)
 {
     s_hb_ms = now_ms();
-    fprintf(stderr, "[DBG] send %zuB\n", len);
     if (s_link->send(frame, len) != DG_OK) {
         s_err_streak++;
         return DG_ERR_IO;
     }
     int rc = wait_frame(ack, timeout_ms);
-    fprintf(stderr, "[DBG] xf rc=%d type=%02x plen=%u\n", rc, ack->type,
-            rc == DG_OK ? ack->payload_len : 0);
     if (rc != DG_OK) {
         if (rc == DG_ERR_IO)
             s_err_streak++;
@@ -211,7 +206,6 @@ static int cmd_xchg(const uint8_t *frame, size_t len, fp_frame_t *ack,
     }
     if (confirm)
         *confirm = fp_as608_ack_confirm(ack);
-    fprintf(stderr, "[DBG] confirm=%u\n", *confirm);
     return DG_OK;
 }
 
@@ -761,7 +755,6 @@ static bool ensure_link(void)
             degrade();
         return false;
     }
-    fprintf(stderr, "[DBG] link open ok\n");
     uint8_t b[FP_A608_FRAME_MAX];
     fp_frame_t ack;
     uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
@@ -773,7 +766,6 @@ static bool ensure_link(void)
             degrade();
         return false;
     }
-    fprintf(stderr, "[DBG] handshake done\n");
     recover();
     return true;
 }
@@ -858,6 +850,11 @@ int fp_provider_start(void)
     if (s_running)
         return DG_OK;
     s_running = true;
+    /* 未注入测试 ops 时在此解析默认板级链路:cmd_xchg/wait_frame 直接持
+     * s_link-> 调用,置 NULL 会在板上首次握手指令时空指针崩(2026-10-03
+     * core 定位;宿主测试因显式注入从未触发) */
+    if (!s_link)
+        s_link = &fp_link_uart;
     fp_as608_parser_init(&s_parser);
     s_sub = event_bus_subscribe(EV_FINGER_SET_MODE, on_set_mode, NULL);
     if (pthread_create(&s_tid, NULL, provider_thread, NULL) == 0) {
