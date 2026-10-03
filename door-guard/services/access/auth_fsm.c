@@ -501,6 +501,14 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
         }
         return;
 
+    case FSM_EV_FINGER_PRESS:
+        /* 待机中按指纹:先即时唤醒亮屏(用户感知"按了有反应"),检索结果
+         * 随后经 FSM_EV_FINGER_MATCH_1N 走普通分支弹成功/失败。其它状态
+         * 忽略——非待机时亮屏/倒计时各有各的事件源,按压沿不作数 */
+        if (fsm->state == ST_STANDBY)
+            wake_up(fsm);
+        return;
+
     case FSM_EV_FINGER_STATE:
         fsm->finger_ready = data->finger_ready;
         return;

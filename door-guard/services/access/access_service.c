@@ -481,6 +481,16 @@ static int on_finger_match(const event_t *e, void *ud)
     return 0;
 }
 
+/* WAK 按压沿 → FSM:仅用于待机即时亮屏(检索结果另有通道) */
+static int on_finger_status(const event_t *e, void *ud)
+{
+    (void)ud;
+    if (((const ev_finger_status_t *)e->data)->status != DG_FINGER_PRESSED)
+        return 0;
+    fsm_feed(FSM_EV_FINGER_PRESS, NULL);
+    return 0;
+}
+
 static int on_finger_verify(const event_t *e, void *ud)
 {
     (void)ud;
@@ -705,6 +715,7 @@ int access_service_start(void)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_FINGER_MATCH_1N, on_finger_match, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_FINGER_VERIFY_11, on_finger_verify, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_IC_CARD, on_ic_card, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_FINGER_STATUS, on_finger_status, NULL);
 
     if (tasker_task_init_li(&s_tick_node, 1000, TASK_CNT_INF, "access_tick",
                             tick_task, NULL) != TASK_OK ||

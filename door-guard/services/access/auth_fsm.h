@@ -66,6 +66,8 @@ typedef enum {
     FSM_EV_IC_CARD,             /**< 刷卡(data: fsm_ic_t;卡→用户解析在服务层) */
     FSM_EV_FINGER_STATE,        /**< 指纹模组就绪态(data: bool) */
     FSM_EV_IC_STATE,            /**< 读卡器就绪态(data: bool) */
+    FSM_EV_FINGER_PRESS,        /**< WAK 按压沿(无载荷;待机中即时亮屏,
+                                     检索结果随后经 FINGER_MATCH_1N 到) */
     FSM_EV_UID_SUBMIT,          /**< 输入弹窗确认(data: uid 字符串) */
     FSM_EV_UID_RESOLVED,        /**< ID 查询回执(data: uid_resolved_t) */
     FSM_EV_METHOD_PICK,         /**< 选择方式(data: method) */

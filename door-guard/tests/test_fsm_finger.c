@@ -189,6 +189,30 @@ static void t_standby(void)
     DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 1);
 }
 
+static void t_press_wake(void)
+{
+    printf("[P13] 待机中按压沿即时亮屏(不等检索结果)
+");
+    auth_fsm_init(&s_fsm, 3000, 1, 15, 5, 60, rec_on_action, NULL);
+    s_rec_cnt = 0;
+    auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
+    auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
+    DG_CHECK(s_fsm.state == ST_STANDBY);
+    auth_fsm_handle(&s_fsm, FSM_EV_FINGER_PRESS, NULL);
+    DG_CHECK(s_fsm.state == ST_NORMAL);          /* 已回普通模式 */
+    const act_rec_t *pg = last_act(FSM_ACT_GOTO_PAGE);
+    DG_CHECK(pg && strcmp(pg->d.page, "home") == 0);
+    DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 0); /* 仅亮屏,不开门 */
+    DG_CHECK(count_act(FSM_ACT_WRITE_LOG) == 0); /* 不落日志(结果事件才算动作) */
+
+    printf("[P14] 非待机状态按压沿忽略
+");
+    fsm_reset();
+    auth_fsm_handle(&s_fsm, FSM_EV_FINGER_PRESS, NULL);
+    DG_CHECK(count_act(FSM_ACT_GOTO_PAGE) == 0);
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+}
+
 static void t_verify_flow(void)
 {
     printf("[P9] v_finger 1:1 成功(method=2)\n");
@@ -232,6 +256,7 @@ int main(void)
     t_normal_branch();
     t_admin_branch();
     t_standby();
+    t_press_wake();
     t_verify_flow();
     DG_TEST_EXIT();
 }
