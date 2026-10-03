@@ -347,7 +347,19 @@ static void connect_once(void *arg)
         DG_LOGW(TAG, "mg_mqtt_connect 失败(%s)", cfg->mqtt_uri);
 }
 
-/* loop 线程:1s 周期 —— 重连 / 保活 PINGREQ / 半开检测 / 邮箱排水 */
+/* loop 线程:立即排空邮箱(发布请求经 netcore_post 触发,遥测延迟从
+ * 定时器周期(1s)降到 poll 粒度(几十 ms);定时器里的排水作兜底) */
+static void drain_mailbox(void *arg)
+{
+    (void)arg;
+    if (!s_conn || !atomic_load(&s_connected))
+        return;
+    mbox_item_t it;
+    while (mbox_pop(&it))
+        pub_now(it.suffix, it.json, it.retain);
+}
+
+/* loop 线程:1s 周期 —— 重连 / 保活 PINGREQ / 半开检测 / 邮箱兜底排水 */
 static void timer_fn(void *arg)
 {
     (void)arg;
@@ -369,9 +381,7 @@ static void timer_fn(void *arg)
         s_conn->is_closing = 1;
         return;
     }
-    mbox_item_t it;
-    while (mbox_pop(&it))
-        pub_now(it.suffix, it.json, it.retain);
+    drain_mailbox(NULL);
 }
 
 static void timer_start(void *arg)
@@ -509,6 +519,7 @@ int mqtt_publish_json(const char *suffix, const char *json, bool retain)
     if (!atomic_load(&s_running) || !atomic_load(&s_enabled))
         return DG_ERR_NOT_INIT;
     mbox_push(suffix, json, retain);
+    netcore_post(drain_mailbox, NULL);      /* 立即排水,不等 1s 定时器 */
     return DG_OK;
 }
 
