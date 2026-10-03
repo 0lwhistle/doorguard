@@ -2,6 +2,27 @@
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 ---
+## 2026-10-03 uart-fix 上板验收:握手打通 + AS608 应答帧口径真机勘误(协议文档 v1 错了,例程是对的)
+
+1. uart-fix(20261001)只刷 boot(下载镜像页去掉 parameter 行避开 IDB 报错,
+   该工具版本对 parameter@0x0 的特殊处理未生效)。dmesg ttyS8 = base_baud
+   1500000,§6.① 过;DMA 缺失回落中断模式属预期,无害。
+2. 板上(dd 武装先于发送,绕开 cat|od 的竞态与 stdio 吞字节)实测:握手 12B
+   成功 ACK、ValidTempleteNum 空库 14B、GetImage 无手指 12B(确认码 0x02)——
+   **应答帧是字面长度:确认码 1B,整帧 = 9+长度字段;51 例程读 12/16 是对的**。
+   v1 文档"例程少读 1 字节"系误读;此前两帧"稳定差 1 字节"之谜即此。
+3. 代码勘误(已推 GitHub,dg-test 44/44 绿):fp_as608 after_len_of 去 ACK +1、
+   ack_confirm 改 1B、search_result/ValidNum/Match 取参偏移 -1;test_fp_proto
+   golden 换板上实测字节;test_fp_enroll 假模组建帧同步。
+4. 工具坑(记录):Git Bash 下 py heredoc 会把转义序列解码成真实字节落盘,已两次
+   中招(printf 断行、假模组 memcpy 注入 UTF-8 杂字节致假模组吐垃圾帧)——
+   含转义序列的补丁一律改走 Write 工具写脚本文件执行,不再内联 heredoc。
+5. 顺带:WSL 工具链 arm_neon.h 爆盘损坏一处已修(.bak-corrupt 备份),其余头未校验。
+6. 待办:WAK 按压相关性/极性(用户触摸复测,静息 0 无自跳已验)→ 定
+   finger.wak_active_level;首次录入后勾 §6.④(Search 耗时/UpChar/END 帧长);
+   dg-deploy 推应用看 [FINGER] 全链;IC .ko 用户侧交付。
+
+---
 ## 2026-10-01 指纹/IC 应用层全链落地(硬件未接先施工,holder/registry 兜底降级)
 
 1. 目标:按已冻结协议把指纹(AS608)与 IC 读卡应用层全部做完——设备树/驱动
