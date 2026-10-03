@@ -31,6 +31,21 @@
   "iccard": {
     "dev_path": "/dev/dg_iccard0"
   },
+  "mqtt": {
+    "enabled": false,
+    "uri": "",
+    "client_id": "",
+    "topic_prefix": "doorguard",
+    "username": "",
+    "password": "",
+    "allow_remote_open": false
+  },
+  "audio": {
+    "enabled": true,
+    "device": "default",
+    "volume": 80,
+    "prompt_dir": "/userdata/doorguard/audio"
+  },
   "network": {
     "ntp_server": "ntp.aliyun.com",
     "web_port": 80,

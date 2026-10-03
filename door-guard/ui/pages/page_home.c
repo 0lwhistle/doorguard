@@ -60,11 +60,14 @@ static void status_timer_cb(lv_timer_t *t)
         lv_label_set_text(s_clock, buf);
     }
     if (s_net) {
-        /* 「有网络」= 主接口已拿到 IPv4(面板在网内,web/mDNS/上位机可达)。
+        /* 「有网络」= 主接口拿到 IPv4 且物理链路在位(IFF_LOWER_UP)。
+         * 链路位是热插拔在内核侧即时翻转的唯一信号:静态配置下拔网线,
+         * 地址不会消失,只看 IP 图标会常绿不跟随(2026-10-04 实时化)。
          * 只读 getifaddrs,无阻塞——外网可达性(ping 会阻塞)不在这条路径上;
          * 只读直调登记:net_info 是唯一「取哪个 IP」规则的所有者 */
         net_info_addr_t addr;
-        const bool online = (net_info_read(&addr) == DG_OK && addr.have_ip);
+        const bool online = (net_info_read(&addr) == DG_OK && addr.have_ip &&
+                             addr.have_link);
         /* 图标颜色已含全部状态语义(绿=在线/红=离线),不再叠红叉图标 */
         lv_obj_set_style_text_color(s_net, online ? DG_COL_OK() : DG_COL_ERR(), 0);
         if (s_net_ip) {

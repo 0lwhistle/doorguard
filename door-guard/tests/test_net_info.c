@@ -101,6 +101,7 @@ static void t_net_info_read(void)
         DG_CHECK(strcmp(a.ip, "0.0.0.0") == 0);
         DG_CHECK(strcmp(a.mask, "0.0.0.0") == 0);
         DG_CHECK(strcmp(a.gw, "0.0.0.0") == 0);
+        DG_CHECK(!a.have_link);                      /* 无主接口即无链路态 */
     } else {
         DG_CHECK(dotted_ok(a.ip));
         DG_CHECK(dotted_ok(a.mask));
@@ -108,6 +109,9 @@ static void t_net_info_read(void)
         DG_CHECK(strcmp(a.ip, "0.0.0.0") != 0);
         DG_CHECK(strncmp(a.ip, "169.254.", 8) != 0);
         DG_CHECK(a.ifname[0] != '\0');
+        /* 链路态字段是布尔快照(宿主网线状态不定,只验可读性:
+         * 下行接口在位时取值必为 0/1——热插拔跟随的字段基础,2026-10-04) */
+        DG_CHECK(a.have_link == true || a.have_link == false);
     }
 
     DG_CHECK(net_info_read(NULL) == DG_ERR_PARAM);

@@ -2,13 +2,17 @@
  * page_finger_set.c — 指纹管理页(2026-10-03 用户反馈重做录入 UI)
  *
  * 编辑页「指纹」行进入。三个槽位(指纹一/二/三)= 该用户已录指纹的
- * 位置序(第 N 枚;模组 PageID 全局分配,槽位只是本用户内的呈现序),
- * 已录槽位给「删除」,下一个空槽给「录入」(模组侧只能追加,不能跳位)。
+ * 位置序(第 N 枚;模组 PageID 全局分配,槽位只是本用户内的呈现序)。
+ * 已录槽位给「删除」;空槽位都给「录入」——模组侧只能追加,从任意空槽
+ * 发起的新指纹一律落在最靠前的空槽(呈现序),录入不必按槽位顺序
+ * (2026-10-04 用户口径:三枚各自独立,不要求先录一才能录二三)。
  *
  * 录入引导窗为本页专用浮层(非 dg_popup):指纹图标 + 大字提示 +
- * 5s 无按压自动退出(超时发 CANCEL,provider 在检查点回滚未落库模板),
- * 过程文案映射 EV_ENROLL_PROGRESS 的 step;终态 EV_ENROLL_RESULT 关窗。
- * 页面销毁(返回/被盖)一律撤消进行中的录入流,防流程悬挂。
+ * 「等按压」阶段 5s 无按压自动退出(超时发 CANCEL,provider 在检查点
+ * 回滚未落库模板),过程文案映射 EV_ENROLL_PROGRESS 的 step;LIFT/PROCESS
+ * 两个「不等输入」阶段停表(处理尾巴慢 ≠ 没按压,计时不停会在真终态前
+ * 误弹「已退出录入」= 成功却先见失败窗,2026-10-04);终态 EV_ENROLL_RESULT
+ * 关窗。页面销毁(返回/被盖)一律撤消进行中的录入流,防流程悬挂。
  *
  * 分层:纯视图 + 页内小状态机;动作经 bridge,数据经 enroll_service 快照。
  */
@@ -123,7 +127,9 @@ static void press_timer_stop(void)
     }
 }
 
-/* 阶段提示(step → 文案);每次进度都重开 5s(新阶段重新计按压) */
+/* 阶段提示(step → 文案)。「等按压」阶段重开 5s 计时(新阶段重新计按压);
+ * LIFT/PROCESS 是「不等输入」阶段(provider 在处理/等释放),停表——
+ * 计时器只在真的该等按压时才计,否则处理尾巴一慢就先弹退出误报 */
 static void overlay_stage(int32_t step)
 {
     const char *title = _("请按指纹");
@@ -143,6 +149,20 @@ static void overlay_stage(int32_t step)
         title = _("请再按一次指纹");
         hint = _("未读到指纹，请调整手指贴合传感器");
         break;
+    case DG_ENROLL_FP_STEP_LIFT:
+        title = _("请抬起手指");
+        hint = _("松开手指后再进行第二次按压");
+        press_timer_stop();
+        lv_label_set_text(s_ov_title, title);
+        lv_label_set_text(s_ov_hint, hint);
+        return;
+    case DG_ENROLL_FP_STEP_PROCESS:
+        title = _("正在录入，请稍候");
+        hint = "";
+        press_timer_stop();
+        lv_label_set_text(s_ov_title, title);
+        lv_label_set_text(s_ov_hint, hint);
+        return;
     default:
         break;
     }
@@ -193,13 +213,12 @@ static void refresh_slots(void)
             lv_label_set_text(s_val[i], _("已录入"));
             dg_btn_set_label(s_btn[i], _("删除"));
             lv_obj_clear_flag(s_btn[i], LV_OBJ_FLAG_HIDDEN);
-        } else if ((uint32_t)i == s_cnt) {
+        } else {
+            /* 空槽都可录:不强制顺序;新指纹落在最靠前空槽(呈现序,模组
+             * 只能追加),录入完成后本页刷新即见真位次(2026-10-04) */
             lv_label_set_text(s_val[i], _("未录入"));
             dg_btn_set_label(s_btn[i], _("录入"));
             lv_obj_clear_flag(s_btn[i], LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_label_set_text(s_val[i], _("未录入"));
-            lv_obj_add_flag(s_btn[i], LV_OBJ_FLAG_HIDDEN);   /* 不能跳位录 */
         }
     }
 }
@@ -230,8 +249,7 @@ static void on_slot_btn(lv_event_t *e)
                            apply_del, NULL, (void *)(intptr_t)slot);
         return;
     }
-    if ((uint32_t)slot == s_cnt)
-        enroll_begin();                   /* 下一个空槽:追加录入 */
+    enroll_begin();                       /* 任意空槽:追加录入(落最前空槽) */
 }
 
 /* ---- 事件(LVGL 线程;bridge 入队 → navigator 派发到当前页) ---- */
@@ -253,16 +271,26 @@ void page_finger_set_evt(const ui_evt_t *evt)
         return;
     if (strcmp(r->user_id, s_uid) != 0)
         return;
-    /* 超时退出后 provider 仍可能吐一条迟到回执(取消在检查点才生效):
-     * 非本 seq 丢弃;本 seq 的终态照实提示,不吞 */
-    if (r->seq != s_seq && s_enrolling)
-        return;
 
     if (r->kind == DG_ENROLL_FINGER_DEL) {
         dg_popup_success(_("已删除"), 800, NULL, NULL);
         refresh_slots();
         return;
     }
+
+    if (!s_enrolling) {
+        /* 无在途录入:只认「同 seq 的迟到成功」——录入确实落了库必须告知
+         * 并刷新槽位;迟到失败(旧 seq 残回执/取消后报错)一律不弹,否则
+         * 就是「明明成功却先见失败窗」的另一半来源(2026-10-04) */
+        if (r->seq == s_seq && r->err == DG_OK) {
+            dg_popup_success(_("指纹已录入"), 1200, NULL, NULL);
+            refresh_slots();
+        }
+        return;
+    }
+    if (r->seq != s_seq)
+        return;
+
     enroll_finish();
     if (r->err == DG_OK)
         dg_popup_success(_("指纹已录入"), 1200, NULL, NULL);

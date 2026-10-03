@@ -54,6 +54,9 @@ static const struct {
     { EV_UI_TOUCH,         "UI_TOUCH" },
     { EV_UI_GOTO_PAGE,     "UI_GOTO_PAGE" },
     { EV_UI_HINT,          "UI_HINT" },
+    { EV_AUDIO_STATE,      "AUDIO_STATE" },
+    { EV_MQTT_STATE,       "MQTT_STATE" },
+    { EV_MQTT_CMD,         "MQTT_CMD" },
     { 0, NULL },
 };
 

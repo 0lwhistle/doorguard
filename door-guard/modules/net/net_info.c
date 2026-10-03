@@ -30,7 +30,7 @@
 #define NET_ZERO_ADDR "0.0.0.0"
 
 static int find_primary(char *ip, size_t ip_cap, char *name, size_t name_cap,
-                        char *mask, size_t mask_cap)
+                        char *mask, size_t mask_cap, bool *link_up)
 {
     struct ifaddrs *ifa = NULL;
     if (getifaddrs(&ifa) != 0)
@@ -55,6 +55,8 @@ static int find_primary(char *ip, size_t ip_cap, char *name, size_t name_cap,
             snprintf(ip, ip_cap, "%s", tmp);
         if (name && name_cap)
             snprintf(name, name_cap, "%s", p->ifa_name);
+        if (link_up)
+            *link_up = !!(p->ifa_flags & IFF_LOWER_UP);
         if (mask && mask_cap) {
             /* 地址与 netmask 是同名接口的两个条目;取不到(异常)给 0.0.0.0 */
             if (p->ifa_netmask && p->ifa_netmask->sa_family == AF_INET)
@@ -75,14 +77,14 @@ int net_info_primary_ipv4(char *out, size_t cap)
 {
     if (!out || cap == 0)
         return DG_ERR_PARAM;
-    return find_primary(out, cap, NULL, 0, NULL, 0);
+    return find_primary(out, cap, NULL, 0, NULL, 0, NULL);
 }
 
 int net_info_primary_ifname(char *out, size_t cap)
 {
     if (!out || cap == 0)
         return DG_ERR_PARAM;
-    return find_primary(NULL, 0, out, cap, NULL, 0);
+    return find_primary(NULL, 0, out, cap, NULL, 0, NULL);
 }
 
 /* 主接口的默认网关(点分);无默认路由 → DG_ERR_NOT_FOUND。
@@ -124,7 +126,8 @@ int net_info_read(net_info_addr_t *out)
     /* 没拿到地址不算错:保持 0.0.0.0 兜底(have_ip=false),展示层直接渲染 */
     if (find_primary(out->ip, sizeof(out->ip),
                      out->ifname, sizeof(out->ifname),
-                     out->mask, sizeof(out->mask)) != DG_OK)
+                     out->mask, sizeof(out->mask),
+                     &out->have_link) != DG_OK)
         return DG_OK;
     out->have_ip = true;
     (void)read_default_gw(out->ifname, out->gw, sizeof(out->gw));

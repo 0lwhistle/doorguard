@@ -3,7 +3,8 @@
  *
  * 指令序列帧级依据:docs/tech/FINGERPRINT_PROTOCOL.md v1(§5 序列表)。
  * 一次按压一次判定:RELEASED 前不再触发新流程(§6 边界);录入是两次按压,
- * 查重插在按压①后,同指校验在按压②后,取消/退出回滚已 Store 模板。
+ * 查重插在按压①(采到即提示抬手、确认释放)之后,同指校验在按压②后,
+ * 按压②采到即发 PROCESS(UI 停「5s 无按压」计时),取消/退出回滚已 Store 模板。
  */
 #include "fp_provider.h"
 #include "cfg.h"
@@ -310,6 +311,26 @@ static int capture_to_buf(uint8_t buf_id, bool *quality_fail)
     return confirm_to_err(c);
 }
 
+/** 验证路径采集:按压未松期间立即重采(最多 3 次)。
+ *  WAK 边沿在指腹刚触到传感器就翻转,首拍常赶在手指完全贴稳之前,
+ *  NO_FINGER 即白丢一次按压、用户必须松手重按——「按了没反应」的
+ *  主观迟钝来源(2026-10-04)。手指仍在 → 隔 150ms 再拍;已松开/链路错
+ *  → 原样上抛(等下次按压/降级)。 */
+static int capture_retry(uint8_t buf_id, bool *quality_fail)
+{
+    for (int attempt = 0; attempt < 3; attempt++) {
+        s_hb_ms = now_mono_ms();           /* 重试循环也是活性,不等外部输入 */
+        int rc = capture_to_buf(buf_id, quality_fail);
+        if (rc != DG_ERR_MISMATCH)
+            return rc;                     /* 成功或链路错:不重试 */
+        int lv = -1;
+        if (s_link->wak_level(&lv) != DG_OK || lv != wak_active_level())
+            return rc;                     /* 已松开:再拍也是 NO_FINGER */
+        usleep(150 * 1000);
+    }
+    return DG_ERR_MISMATCH;                /* 贴着仍拍不出:交上层按质量差处理 */
+}
+
 /** Search 全库查命中:0=未命中,1=命中(page/score 出参),负数=链路错 */
 static int search_all(uint16_t *page, uint16_t *score)
 {
@@ -358,7 +379,7 @@ static void pub_match_1n(uint16_t page, uint16_t score)
 static void seq_1n(void)
 {
     bool qfail;
-    int rc = capture_to_buf(FP_A608_BUF1, &qfail);
+    int rc = capture_retry(FP_A608_BUF1, &qfail);
     if (rc == DG_ERR_IO)
         return;                           /* 链路错:下轮握手恢复 */
     if (qfail)
@@ -400,7 +421,7 @@ static void seq_verify_11(const char *uid)
     }
 
     bool qfail;
-    int rc = capture_to_buf(FP_A608_BUF1, &qfail);
+    int rc = capture_retry(FP_A608_BUF1, &qfail);
     if (rc == DG_ERR_IO || qfail)
         return;                           /* 质量差静默,5s 超时由 FSM 收口 */
 
@@ -515,7 +536,7 @@ static void seq_enroll(void)
     s_stored_page = -1;
     pub_progress(DG_ENROLL_FINGER, uid, s_cur.seq, 10, DG_ENROLL_FP_STEP_PRESS1);
 
-    /* 按压① → 查重(尽早失败省一次按压,§5.3) */
+    /* 按压① → 提示抬手 → 查重(尽早失败省一次按压,§5.3) */
     for (;;) {
         int wp = enroll_wait_press();
         if (wp == 0)
@@ -525,7 +546,7 @@ static void seq_enroll(void)
         pub_status(DG_FINGER_PRESSED);
 
         bool qfail;
-        int rc = capture_to_buf(FP_A608_BUF1, &qfail);
+        int rc = capture_retry(FP_A608_BUF1, &qfail);
         pub_status(DG_FINGER_RELEASED);
         if (rc == DG_ERR_IO)
             goto link_err;
@@ -535,6 +556,12 @@ static void seq_enroll(void)
                          DG_ENROLL_FP_STEP_QUALITY);
             continue;
         }
+
+        /* 先提示放开手指(2026-10-04 用户口径):查重耗时与抬手动作重叠,
+         * 提示在查重前发;确认释放后才提示第二按——否则「手指还按着却
+         * 提示请再按一次」自相矛盾,第二按边沿也要等释放后才可能出现 */
+        pub_progress(DG_ENROLL_FINGER, uid, s_cur.seq, 30, DG_ENROLL_FP_STEP_LIFT);
+        wait_release();
 
         uint16_t page = 0, score = 0;
         rc = search_all(&page, &score);
@@ -565,7 +592,7 @@ static void seq_enroll(void)
         pub_status(DG_FINGER_PRESSED);
 
         bool qfail;
-        int rc = capture_to_buf(FP_A608_BUF2, &qfail);
+        int rc = capture_retry(FP_A608_BUF2, &qfail);
         if (rc == DG_ERR_IO) {
             pub_status(DG_FINGER_RELEASED);
             goto link_err;
@@ -577,6 +604,13 @@ static void seq_enroll(void)
                          DG_ENROLL_FP_STEP_QUALITY);
             continue;
         }
+
+        /* 按压②已采到:后续 Match/RegModel/Store/UpChar 不再需要输入,
+         * PROCESS 让 UI 停「5s 无按压」计时器——处理尾巴可达数秒(UpChar
+         * 降级等待 3s+),计时不停会先弹「已退出录入」再弹真终态 = 录入
+         * 明明成功却先看到失败窗(2026-10-04 板上实测反馈的根因) */
+        pub_progress(DG_ENROLL_FINGER, uid, s_cur.seq, 70,
+                     DG_ENROLL_FP_STEP_PROCESS);
 
         n = fp_as608_match(b, sizeof(b));
         rc = cmd_xchg(b, n, &ack, &c, 2000);

@@ -203,3 +203,11 @@ dg_add_test(test_relay dg_relay)
 
 # 公共时基(C2:单调性/两种时钟语义)
 dg_add_test(test_timeutil dg_timeutil)
+
+# 语音播报(2026-10-04:WAV/正弦纯函数 + sink 后端注入的播放器链路)
+dg_add_test(test_audio dg_audio)
+set_tests_properties(test_audio PROPERTIES TIMEOUT 60)
+
+# MQTT 通道(2026-10-04:测试内最小 broker,握手/命令/上报往返)
+dg_add_test(test_mqtt dg_net dg_config dg_event_bus)
+set_tests_properties(test_mqtt PROPERTIES TIMEOUT 60)

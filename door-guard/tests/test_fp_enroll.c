@@ -6,11 +6,13 @@
  * → EV_FINGER_SET_MODE(ENROLL) → provider 两次按压序列(查重/同指校验/
  * 合成/Store/UpChar)→ EV_ENROLL_RESULT + fingerprints 落库 + 方式位。
  *
- * 覆盖:happy path(落库+方式位+PageID 分配)/ UpChar 无数据包仍录入成功
- * (无副本降级行)/ 与他人重复 DUP_FINGER / 同用户重复自己已有枚 DUP_FINGER /
- * 单用户超 3 枚 FINGER_LIMIT / 模组库满 FINGER_FULL / 两次不一致
- * RETRY2 重采后成功 / 按压①成像差 QUALITY 提示 / 取消回滚(无 Store 不留
- * 孤儿)/ 等按压期间心跳按步刷新(看门狗误杀回归)/ DeletChar 单枚删除。
+ * 覆盖:happy path(两按中间 LIFT 抬手确认+PROCESS 处理步;落库+方式位+
+ * PageID 分配)/ UpChar 无数据包仍录入成功(无副本降级行)/ 与他人重复
+ * DUP_FINGER / 同用户重复自己已有枚 DUP_FINGER / 单用户超 3 枚
+ * FINGER_LIMIT / 模组库满 FINGER_FULL / 两次不一致 RETRY2 重采后成功 /
+ * 按压①成像差(capture_retry 未松连拍拍不出)QUALITY 提示重按走完全程 /
+ * 取消回滚(无 Store 不留孤儿)/ 等按压期间心跳按步刷新(看门狗误杀
+ * 回归)/ DeletChar 单枚删除。
  */
 #include "dg_test.h"
 #include "cfg.h"
@@ -324,9 +326,21 @@ static void wait_ge(volatile atomic_int *c, int want, int timeout_ms)
     }
 }
 
+/* 等最近一次进度变成指定 step(阶段有序推进,计数会因路径不同漂移) */
+static void wait_step(int32_t step)
+{
+    for (int i = 0; i < 2000 && atomic_load(&s_progress_step) != step; i++)
+        usleep(5000);
+}
+
 static void press(void)
 {
     atomic_store(&F.press_req, 1);
+}
+
+static void release(void)
+{
+    atomic_store(&F.release_req, 1);
 }
 
 static void publish_req(const char *uid, int32_t kind, int32_t arg)
@@ -388,15 +402,20 @@ int main(void)
         usleep(10000);
     DG_CHECK(fp_provider_ready());
 
-    printf("[P1] happy path:两次按压 → Store+UpChar → 落库+方式位\n");
+    printf("[P1] happy path:两次按压(中间 LIFT 抬手确认)→ Store+UpChar → 落库+方式位\n");
     fake_reset();
     publish_req("30001", DG_ENROLL_FINGER, 0);
     wait_ge(&s_progress_cnt, 1, 3000);    /* PRESS1 提示(等待前发) */
     DG_CHECK(atomic_load(&s_progress_step) == DG_ENROLL_FP_STEP_PRESS1);
     press();
-    wait_ge(&s_progress_cnt, 2, 5000);    /* PRESS2 提示(查重通过) */
+    wait_step(DG_ENROLL_FP_STEP_LIFT);    /* 采到①:先提示抬手(不先 PRESS2) */
+    DG_CHECK(atomic_load(&s_progress_step) == DG_ENROLL_FP_STEP_LIFT);
+    release();                            /* 抬手 → 查重 → PRESS2 */
+    wait_step(DG_ENROLL_FP_STEP_PRESS2);
     DG_CHECK(atomic_load(&s_progress_step) == DG_ENROLL_FP_STEP_PRESS2);
     press();
+    wait_step(DG_ENROLL_FP_STEP_PROCESS); /* 采到②:处理中,不再等按压 */
+    DG_CHECK(atomic_load(&s_progress_step) == DG_ENROLL_FP_STEP_PROCESS);
     wait_ge(&s_result_finger_cnt, 1, 5000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_OK);
 
@@ -420,10 +439,13 @@ int main(void)
     fake_reset();
     F.upchar_no_data = 1;
     publish_req("30001", DG_ENROLL_FINGER, 0);
-    wait_ge(&s_progress_cnt, 3, 3000);    /* PRESS1 */
+    wait_ge(&s_progress_cnt, 1, 3000);    /* PRESS1 */
     press();
-    wait_ge(&s_progress_cnt, 4, 5000);    /* PRESS2 */
+    wait_step(DG_ENROLL_FP_STEP_LIFT);
+    release();
+    wait_step(DG_ENROLL_FP_STEP_PRESS2);
     press();
+    wait_step(DG_ENROLL_FP_STEP_PROCESS);
     wait_ge(&s_result_finger_cnt, 2, 8000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_OK);   /* 不再报通讯异常 */
     cnt = 99;
@@ -443,8 +465,10 @@ int main(void)
     F.search_hit = 1;
     F.search_page = 500;
     publish_req("30001", DG_ENROLL_FINGER, 0);
-    wait_ge(&s_progress_cnt, 5, 3000);
+    wait_ge(&s_progress_cnt, 1, 3000);
     press();
+    wait_step(DG_ENROLL_FP_STEP_LIFT);    /* 查重前先抬手 */
+    release();
     wait_ge(&s_result_finger_cnt, 3, 5000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_DUP_FINGER);
     DG_CHECK(atomic_load(&F.store_page) != 500);
@@ -454,8 +478,10 @@ int main(void)
     F.search_hit = 1;
     F.search_page = (uint16_t)p1_page;    /* P1 落库的 30001 自己的页 */
     publish_req("30001", DG_ENROLL_FINGER, 0);
-    wait_ge(&s_progress_cnt, 6, 3000);
+    wait_ge(&s_progress_cnt, 1, 3000);
     press();
+    wait_step(DG_ENROLL_FP_STEP_LIFT);
+    release();
     wait_ge(&s_result_finger_cnt, 4, 5000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_DUP_FINGER);
     DG_CHECK(atomic_load(&F.delet_calls) == 0);   /* 未 Store 无需回滚 */
@@ -487,7 +513,9 @@ int main(void)
     publish_req("30001", DG_ENROLL_FINGER, 0);
     wait_ge(&s_progress_cnt, 1, 3000);    /* PRESS1 */
     press();                              /* 按压①(查重未命中) */
-    wait_ge(&s_progress_cnt, 1 + 1, 5000);/* PRESS2 */
+    wait_step(DG_ENROLL_FP_STEP_LIFT);
+    release();
+    wait_step(DG_ENROLL_FP_STEP_PRESS2);
     F.match_ack = FP_ACK_MERGE_FAIL;      /* 按压②同指校验不过 */
     press();
     for (int i = 0; i < 1000 && atomic_load(&s_progress_step)
@@ -499,21 +527,24 @@ int main(void)
     wait_ge(&s_result_finger_cnt, 7, 5000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_OK);
 
-    printf("[P5b] 按压①成像差:GetImage 无指纹 → QUALITY 提示,重按走完全程\n");
+    printf("[P5b] 按压①成像差:重试拍不出 → QUALITY 提示,重按走完全程\n");
     fake_reset();
     atomic_store(&s_progress_cnt, 0);
     make_user("30003", "王五");
     F.getimage_ack = FP_ACK_NO_FINGER;
     publish_req("30003", DG_ENROLL_FINGER, 0);
     wait_ge(&s_progress_cnt, 1, 3000);    /* PRESS1 */
-    press();                              /* 按压①:不成像 */
+    press();                              /* 按压①:不成像(capture_retry
+                                             手指未松会连拍 3 次,全 NO_FINGER) */
     for (int i = 0; i < 1000 && atomic_load(&s_progress_step)
                                         != DG_ENROLL_FP_STEP_QUALITY; i++)
         usleep(5000);
     DG_CHECK(atomic_load(&s_progress_step) == DG_ENROLL_FP_STEP_QUALITY);
     F.getimage_ack = 0;
     press();                              /* 重按:此后全部默认应答 */
-    wait_ge(&s_progress_cnt, 3, 5000);    /* PRESS2 */
+    wait_step(DG_ENROLL_FP_STEP_LIFT);
+    release();
+    wait_step(DG_ENROLL_FP_STEP_PRESS2);
     press();
     wait_ge(&s_result_finger_cnt, 8, 5000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_OK);

@@ -57,6 +57,8 @@ extern "C" {
 #define DG_MODULE_ID_VISION     0x0008
 #define DG_MODULE_ID_HAL        0x0009
 #define DG_MODULE_ID_TEST       0x000A  /* 仅组件测试/demo 使用,业务禁用 */
+#define DG_MODULE_ID_AUDIO      0x000B  /* 语音播报(modules/audio,MAX98357 I2S 功放) */
+#define DG_MODULE_ID_MQTT       0x000C  /* MQTT 通道(services/mqtt,上位机接入) */
 
 /**
  * 事件类型:(module_id << 16) | event_id

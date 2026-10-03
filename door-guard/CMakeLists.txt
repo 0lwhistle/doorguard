@@ -364,6 +364,7 @@ add_library(dg_net STATIC
     services/web/web_session.c
     services/ota/ota_service.c
     services/ntp/ntp_service.c
+    services/mqtt/mqtt_service.c
     services/mdns/mdns_responder.c
     services/mdns/mdns_wire.c
 )
@@ -396,6 +397,26 @@ target_include_directories(dg_sysctl PUBLIC ${CMAKE_SOURCE_DIR}/services/sysctl
 target_link_libraries(dg_sysctl PUBLIC dg_proto dg_event_bus dg_log)
 if(DG_SIM OR DG_BUILD_TESTS)
     target_compile_definitions(dg_sysctl PRIVATE DG_SYSCTL_FAKE=1)
+endif()
+
+# audio:语音播报(MAX98357 I2S 功放;2026-10-04)。板端 ALSA 后端按 sysroot
+# 探测启用(板上 libasound.so.2 与固件同源);宿主只有测试 sink 后端,
+# audio_hw_board()=NULL → 播放器降级空转,不误碰宿主声卡
+add_library(dg_audio STATIC
+    modules/audio/audio_player.c
+    modules/audio/audio_hw.c
+    modules/audio/audio_hw_sink.c
+    modules/audio/tone.c
+    modules/audio/wav.c
+)
+target_include_directories(dg_audio PUBLIC ${CMAKE_SOURCE_DIR}/modules
+                                           ${CMAKE_SOURCE_DIR}/proto)
+target_link_libraries(dg_audio PUBLIC dg_event_bus dg_config dg_proto dg_log
+                                   dg_timeutil m)
+if(CMAKE_SYSROOT AND EXISTS "${CMAKE_SYSROOT}/usr/lib/libasound.so.2")
+    target_sources(dg_audio PRIVATE modules/audio/audio_hw_alsa.c)
+    target_compile_definitions(dg_audio PUBLIC DG_AUDIO_ALSA=1)
+    target_link_libraries(dg_audio PUBLIC asound)
 endif()
 
 if(DG_BUILD_TESTS)
@@ -482,7 +503,7 @@ add_executable(door-guard app/main.c)
 target_link_libraries(door-guard PRIVATE
     -Wl,--start-group
     dg_event_bus dg_tasker dg_holder dg_registry dg_proto dg_storage dg_config
-    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_relay dg_timeutil dg_uart dg_net dg_sysctl dg_display dg_camera
+    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_relay dg_timeutil dg_uart dg_net dg_sysctl dg_display dg_camera dg_audio
     dg_fp dg_card dg_iccard
     -Wl,--end-group)
 

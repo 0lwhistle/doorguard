@@ -31,17 +31,22 @@ int net_info_primary_ifname(char *out, size_t cap);
  *  注意:内部走 ping,首次调用可能阻塞 ~2s,勿在 UI 渲染热路径里裸调 */
 bool net_info_is_online(void);
 
-/** 主接口地址快照(IP + 子网掩码 + 默认网关,一次读齐)
+/** 主接口地址快照(IP + 子网掩码 + 默认网关 + 链路态,一次读齐)
  *
  *  网关取 /proc/net/route 中主接口的默认路由;没有默认路由 → "0.0.0.0"。
  *  无主接口(没插网线/未拿到地址)时不报错:返回 DG_OK 且全部填 "0.0.0.0"、
- *  have_ip=false —— 展示层直接渲染,不必再各自兜底。 */
+ *  have_ip=false —— 展示层直接渲染,不必再各自兜底。
+ *
+ *  have_link = 主接口 IFF_LOWER_UP(物理链路在位)。地址与链路是两件事:
+ *  静态配置下拔网线,内核里的地址不会消失(仅有 IP 会让"在网"误判常绿),
+ *  热插拔只有链路位即时翻转(2026-10-04 主页图标实时化)。 */
 typedef struct {
     char ifname[16];
     char ip[16];
     char mask[16];
     char gw[16];
     bool have_ip;
+    bool have_link;
 } net_info_addr_t;
 
 int net_info_read(net_info_addr_t *out);

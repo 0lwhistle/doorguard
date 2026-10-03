@@ -279,6 +279,20 @@ static void defaults_apply(dg_cfg_t *c)
                                板上按压极性未验收前,自动档比猜 0/1 更可靠 */
     snprintf(c->fp_uart_dev, sizeof(c->fp_uart_dev), "/dev/ttyS8");
     snprintf(c->iccard_dev_path, sizeof(c->iccard_dev_path), "/dev/dg_iccard0");
+    /* MQTT:默认整链路关(见 cfg.h 注;broker 未定,先立配置面与服务骨架) */
+    c->mqtt_enabled = 0;
+    c->mqtt_uri[0] = '\0';
+    c->mqtt_client_id[0] = '\0';
+    snprintf(c->mqtt_topic_prefix, sizeof(c->mqtt_topic_prefix), "doorguard");
+    c->mqtt_username[0] = '\0';
+    c->mqtt_password[0] = '\0';
+    c->mqtt_allow_remote_open = 0;
+    /* 音频:默认开,后端打不开自动降级(硬件接入前 = 静默跳过,不报障) */
+    c->audio_enabled = 1;
+    snprintf(c->audio_device, sizeof(c->audio_device), "default");
+    c->audio_volume = 80;
+    snprintf(c->audio_prompt_dir, sizeof(c->audio_prompt_dir),
+             "/userdata/doorguard/audio");
 }
 
 /* ---- 元表驱动:json → 快照(键缺失走默认,类型错 WARN 回退) ----
@@ -395,6 +409,42 @@ static void json_apply_extra(dg_cfg_t *c, const cJSON *root)
     if ((item = json_path_get(root, "iccard.dev_path")) &&
         cJSON_IsString(item) && item->valuestring)
         copy_cstr(c->iccard_dev_path, sizeof(c->iccard_dev_path), item->valuestring);
+    if ((item = json_path_get(root, "mqtt.enabled")) && cJSON_IsNumber(item))
+        c->mqtt_enabled = item->valueint ? 1 : 0;
+    if ((item = json_path_get(root, "mqtt.uri")) &&
+        cJSON_IsString(item) && item->valuestring)
+        copy_cstr(c->mqtt_uri, sizeof(c->mqtt_uri), item->valuestring);
+    if ((item = json_path_get(root, "mqtt.client_id")) &&
+        cJSON_IsString(item) && item->valuestring)
+        copy_cstr(c->mqtt_client_id, sizeof(c->mqtt_client_id), item->valuestring);
+    if ((item = json_path_get(root, "mqtt.topic_prefix")) &&
+        cJSON_IsString(item) && item->valuestring)
+        copy_cstr(c->mqtt_topic_prefix, sizeof(c->mqtt_topic_prefix),
+                  item->valuestring);
+    if ((item = json_path_get(root, "mqtt.username")) &&
+        cJSON_IsString(item) && item->valuestring)
+        copy_cstr(c->mqtt_username, sizeof(c->mqtt_username), item->valuestring);
+    if ((item = json_path_get(root, "mqtt.password")) &&
+        cJSON_IsString(item) && item->valuestring)
+        copy_cstr(c->mqtt_password, sizeof(c->mqtt_password), item->valuestring);
+    if ((item = json_path_get(root, "mqtt.allow_remote_open")) &&
+        cJSON_IsNumber(item))
+        c->mqtt_allow_remote_open = item->valueint ? 1 : 0;
+    if ((item = json_path_get(root, "audio.enabled")) && cJSON_IsNumber(item))
+        c->audio_enabled = item->valueint ? 1 : 0;
+    if ((item = json_path_get(root, "audio.device")) &&
+        cJSON_IsString(item) && item->valuestring)
+        copy_cstr(c->audio_device, sizeof(c->audio_device), item->valuestring);
+    if ((item = json_path_get(root, "audio.volume")) && cJSON_IsNumber(item))
+        c->audio_volume = item->valueint;
+    if (c->audio_volume < 0)
+        c->audio_volume = 0;
+    if (c->audio_volume > 100)
+        c->audio_volume = 100;
+    if ((item = json_path_get(root, "audio.prompt_dir")) &&
+        cJSON_IsString(item) && item->valuestring)
+        copy_cstr(c->audio_prompt_dir, sizeof(c->audio_prompt_dir),
+                  item->valuestring);
 }
 
 /* 快照重建:默认两层 → cur 层;写入另一份缓冲后切换(读端持旧快照不受影响) */

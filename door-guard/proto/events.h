@@ -112,6 +112,14 @@ typedef struct {
  * 防半秒前的旧卡串进新会话(ICCARD_PROTOCOL §4 FLUSH 时点) */
 #define EV_ICCARD_CTRL       EV_DEF(DG_MODULE_ID_HAL, 0x0007)    /**< 读卡器控制命令 */
 
+/* AUDIO:语音播报(modules/audio;MAX98357 I2S 功放 + 扬声器,硬件未接入前
+ * 后端打不开自动降级为静默,业务不感知) */
+#define EV_AUDIO_STATE       EV_DEF(DG_MODULE_ID_AUDIO, 0x0001) /**< 播放后端就绪/失联(降级提示用,UI 暂不消费) */
+
+/* MQTT:上位机消息通道(services/mqtt;默认关闭,cfg mqtt.enabled 开启) */
+#define EV_MQTT_STATE        EV_DEF(DG_MODULE_ID_MQTT, 0x0001)  /**< broker 连接建立/断开(断开自动退避重连) */
+#define EV_MQTT_CMD          EV_DEF(DG_MODULE_ID_MQTT, 0x0002)  /**< 远程命令(接口预留:内置命令直答,业务命令待后续消费端订阅) */
+
 /* UI:待机与页面(UI 内部页面管理用) */
 #define EV_UI_STANDBY        EV_DEF(DG_MODULE_ID_UI, 0x0010)     /**< [死契约·被取代] 待机切换由 FSM 驱动 standby 页(经 EV_UI_GOTO_PAGE)+ 主页倒计时实现 */
 
@@ -215,6 +223,10 @@ typedef enum {
     DG_ENROLL_FP_STEP_PRESS2 = 2,         /**< 请再次按压同一手指 */
     DG_ENROLL_FP_STEP_RETRY2 = 3,         /**< 两次按压不一致,请用同一手指 */
     DG_ENROLL_FP_STEP_QUALITY = 4,        /**< 模组未读到指纹/成像差,调整手指重按 */
+    DG_ENROLL_FP_STEP_LIFT = 5,           /**< 按压①已采到,请先抬起手指(2026-10-04
+                                              用户口径:先提示放开,再提示第二按) */
+    DG_ENROLL_FP_STEP_PROCESS = 6,        /**< 按压②已采到,合成/落库进行中,不再等
+                                              按压(UI 停 5s 计时器:处理慢≠没按压) */
 } dg_enroll_fp_step_t;
 
 typedef struct {
@@ -304,6 +316,26 @@ typedef struct {
     bool    ok;
     int32_t err;                          /**< 失败时 dg_err_t(如 DG_ERR_BAD_PWD) */
 } ev_web_set_result_t;
+
+/** EV_AUDIO_STATE:播放后端可用性(无音频设备 = 降级静默,不算故障) */
+typedef struct {
+    bool ready;
+} ev_audio_state_t;
+
+/** EV_MQTT_STATE:broker 连接状态(UI 暂不消费,web/上位机可订阅) */
+typedef struct {
+    bool    connected;
+    int32_t err;                          /**< 断开原因(dg_err_t;连接成功 = DG_OK) */
+} ev_mqtt_state_t;
+
+/** EV_MQTT_CMD:远程命令(mqtt → 总线;name = <prefix>/cmd/ 后缀)
+ *  接口预留(2026-10-04):mqtt_service 内置命令(ping/status)直答 rsp,
+ *  业务命令(open 等)由后续消费端订阅本事件实现——本事件先立契约 */
+typedef struct {
+    char     name[24];                    /**< 命令名(主题后缀) */
+    char     payload[128];                /**< 命令载荷原文(空串 = 无) */
+    uint32_t id;                          /**< 应答配对(rsp 主题回执携带) */
+} ev_mqtt_cmd_t;
 
 /** EV_FINGER_STATUS */
 typedef enum {

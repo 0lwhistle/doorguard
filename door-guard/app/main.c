@@ -3,10 +3,10 @@
  *
  * 装配分两张表(分层对应):
  *   holder(components/holder):基础设施与 modules 层
- *     event_bus → tasker → storage → config → camera
+ *     event_bus → tasker → storage → config → relay → audio → camera
  *   registry(components/registry):services 层(依赖可跨表解析到 holder)
  *     capture → vision_service → vision_backend → access → enroll → finger
- *     → iccard → liveness → ntp → sysctl → net_cfg → web → mdns → ui
+ *     → iccard → liveness → ntp → sysctl → net_cfg → web → mdns → mqtt → ui
  *
  * 初始化完成后 main 线程转看门狗(5s 巡检):
  *   - 可选服务异常/心跳超龄 → 重启一次 → 仍异常置 DISABLED + EV_SYS_SERVICE_STATE
@@ -31,6 +31,8 @@
 #include "holder.h"
 #include "liveness_service.h"
 #include "mdns/mdns_responder.h"
+#include "mqtt/mqtt_service.h"
+#include "audio/audio_player.h"
 #include "net/netcore.h"
 #include "net/net_cfg.h"
 #include "ntp/ntp_service.h"
@@ -139,6 +141,13 @@ static int mod_relay(void)
     return relay_module_init(cfg_get()->relay_gpio_line);
 }
 
+/* 语音播报(MAX98357;2026-10-04):后端打不开模块内部降级静默并懒重试,
+ * 硬件接入后零改动恢复——不能因"没喇叭"拦门禁主链路 */
+static int mod_audio(void)
+{
+    return audio_player_start();
+}
+
 /* ---- registry:services 层(包装函数与原 holder 版本一致) ---- */
 
 static int mod_vision_service(void)
@@ -236,6 +245,14 @@ static int mod_mdns(void)
     return mdns_start();
 }
 
+/* MQTT 上位机通道(2026-10-04):默认空转(cfg mqtt.enabled=0);
+ * 开启后跑 netcore loop,心跳=loop 活性。远程开门默认拒(安全默认,
+ * 消费端接入前 EV_MQTT_CMD 只立契约) */
+static int mod_mqtt(void)
+{
+    return mqtt_service_start();
+}
+
 /* 网络配置装配:cfg 记的是静态地址则开机应用一次(DHCP 交给 S41dhcpcd)。
  * 阻塞数百 ms(dhcpcd 交互)发生在装配期,业务尚未起来,无影响 */
 static int mod_net_cfg(void)
@@ -260,6 +277,7 @@ static const char *const DEP_VIS_BE[]    = { "vision_service", "camera" };
 static const char *const DEP_TASKER_ONLY[] = { "tasker" };
 static const char *const DEP_WEB[]       = { "config", "netcore" };
 static const char *const DEP_MDNS[]      = { "config", "netcore" };
+static const char *const DEP_MQTT[]      = { "config", "netcore" };
 
 /* 跨表依赖解析:服务依赖的 modules 在 holder 表(装配层桥接,registry 保持通用) */
 static int dep_ready(const char *name)
@@ -299,6 +317,8 @@ static registry_err_t register_services(void)
         { "web",            mod_web,            false, DEP_WEB,         2,
           web_server_heartbeat_ms },
         { "mdns",           mod_mdns,           false, DEP_MDNS,        2, NULL },
+        { "mqtt",           mod_mqtt,           false, DEP_MQTT,        2,
+          mqtt_service_heartbeat_ms },
         /* ui 依赖 display:display 由 ui_init 内部初始化(无独立模块),
          * 故此处只声明 config(语言/主题取 cfg) */
         { "ui",             mod_ui,             false, DEP_CONFIG,      1, NULL },
@@ -330,6 +350,7 @@ static int register_modules(void)
         { "storage",   mod_storage,   true,  DEP_TASKER,    1 },
         { "config",    mod_config,    true,  DEP_STORAGE,   1 },
         { "relay",     mod_relay,     false, DEP_CONFIG,    1 },
+        { "audio",     mod_audio,     false, DEP_CONFIG,    1 },
         { "camera",    mod_camera,    false, DEP_CONFIG,    1 },
         { "netcore",   mod_netcore,   false, NULL,          0 },
     };

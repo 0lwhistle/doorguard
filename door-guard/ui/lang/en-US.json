@@ -213,6 +213,9 @@
   "管理": "Manage",
   "每人最多可录 3 枚指纹": "Up to 3 fingerprints per user",
   "请再按一次指纹": "Please press again",
+  "请抬起手指": "Lift your finger",
+  "松开手指后再进行第二次按压": "Release, then press the same finger again",
+  "正在录入，请稍候": "Saving, please wait",
   "5秒内无按压将自动退出": "Auto exit if no press within 5s",
   "未检测到指纹，已退出录入": "No finger detected, enrollment exited"
 }

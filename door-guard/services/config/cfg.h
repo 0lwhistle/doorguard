@@ -83,6 +83,23 @@ typedef struct {
                                     §6.④ 开放项,自动档消除该未知数 */
     /* IC 读卡器(json-only;ICCARD_PROTOCOL §8;最终节点名由驱动定,只改配置) */
     char iccard_dev_path[32];  /**< 读卡器节点,默认 /dev/dg_iccard0;"sim"=宿主模拟后端 */
+    /* MQTT 通道(json-only;services/mqtt。默认关:broker 地址属部署参数,
+     * 硬接好之前不留对外连接面) */
+    int  mqtt_enabled;         /**< 0/1,默认 0;开启后连 broker、订阅 cmd、转发验证事件 */
+    char mqtt_uri[96];         /**< broker 地址 mqtt://host:1883;空 = 不连 */
+    char mqtt_client_id[48];   /**< 空 = doorguard-<主接口IP 末段> 自动生成 */
+    char mqtt_topic_prefix[32];/**< 主题前缀,默认 doorguard(cmd/status/event/rsp 挂其下) */
+    char mqtt_username[32];    /**< broker 认证用户名,可空 */
+    char mqtt_password[32];    /**< broker 认证口令,可空 */
+    int  mqtt_allow_remote_open; /**< 远程开门命令开关,0/1,默认 0(安全默认:
+                                        网络侧命令直接开锁须经部署方显式授权) */
+    /* 语音播报(json-only;modules/audio。MAX98357 = I2S 功放,软件侧就是
+     * 一条 ALSA PCM 输出,硬件接入后改 dts 使能声卡即可,应用零改动) */
+    int  audio_enabled;        /**< 0/1,默认 1;后端打不开自动降级静默,不报障 */
+    char audio_device[32];     /**< ALSA PCM 名,默认 default(硬件接入后可钉 hw:0,0) */
+    int  audio_volume;         /**< 软件音量 0~100,默认 80(功放增益由硬件增益脚定) */
+    char audio_prompt_dir[96]; /**< 语音 wav 目录,默认 /userdata/doorguard/audio
+                                    (success.wav/fail.wav 缺席时降级为内置提示音) */
 } dg_cfg_t;
 
 /**
