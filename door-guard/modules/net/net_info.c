@@ -29,6 +29,12 @@
 
 #define NET_ZERO_ADDR "0.0.0.0"
 
+/* glibc 的 net/if.h 只在 __USE_MISC 下暴露 IFF_LOWER_UP(严格 POSIX 编译
+ * 看不到);该位是内核 netlink 标志位的稳定 ABI,自行兜底 */
+#ifndef IFF_LOWER_UP
+#define IFF_LOWER_UP 0x10000
+#endif
+
 static int find_primary(char *ip, size_t ip_cap, char *name, size_t name_cap,
                         char *mask, size_t mask_cap, bool *link_up)
 {
