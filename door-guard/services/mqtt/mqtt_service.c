@@ -400,8 +400,9 @@ static void timer_stop(void *arg)
     }
     if (s_conn) {
         /* 主动告别覆盖 LWT;直发不经 pub_now——stop() 已把 s_connected
-         * 置 false,经它会被"未连接"守卫拦掉。is_closing 由 poll 末尾统一
-         * 延迟关闭(事件回调内禁止 mg_close_conn,见 ntp_service) */
+         * 置 false,经它会被"未连接"守卫拦掉。is_draining 而非 is_closing:
+         * 轮询循环对 is_closing 连接跳过写阶段直接关,待发的告别包会被
+         * 吞掉;draining = 排空 send 后才关(mongoose 的优雅收尾语义) */
         struct mg_mqtt_opts o = { 0 };
         char topic[64];
         topic_full(topic, sizeof(topic), "status");
@@ -409,7 +410,7 @@ static void timer_stop(void *arg)
         o.message = mg_str("{\"state\":\"offline\"}");
         o.retain = true;
         mg_mqtt_pub(s_conn, &o);
-        s_conn->is_closing = 1;
+        s_conn->is_draining = 1;
         s_conn = NULL;
     }
     atomic_store(&s_connected, false);
