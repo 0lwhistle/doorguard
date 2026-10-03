@@ -8,6 +8,7 @@
 #include "audio_hw.h"
 
 #include <pthread.h>
+#include <stdbool.h>
 #include <string.h>
 
 #define SINK_MAX_FRAMES (48 * 1000 * 2)     /* 2 秒 @48k 帧(够覆盖提示音) */

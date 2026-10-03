@@ -48,6 +48,7 @@ static bool s_wak_ready;
 static int  s_edge_miss;                  /* 连续边沿超时计数(轮询兜底节奏) */
 
 static int wait_press_once(int active);   /* 前置:定义在"按压沿与释放"段 */
+static void wait_release(void);           /* 前置:LIFT 确认在录入序列先于定义使用 */
 
 static int wak_active_level(void)
 {
