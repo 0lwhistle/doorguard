@@ -497,6 +497,8 @@ int main(void)
     int prog_before = atomic_load(&s_progress_cnt);
     publish_req("30002", DG_ENROLL_FINGER, 0);
     wait_ge(&s_result_finger_cnt, 5, 3000);
+    printf("    P3 观测:result_cnt=%d err=%d\n",
+           atomic_load(&s_result_finger_cnt), atomic_load(&s_result_finger_err));
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_FINGER_LIMIT);
     DG_CHECK(atomic_load(&s_progress_cnt) == prog_before);  /* 相对断言:无新进度 = 没等按压 */
 
@@ -505,6 +507,8 @@ int main(void)
     F.valid_count = 1000;
     publish_req("30001", DG_ENROLL_FINGER, 0);
     wait_ge(&s_result_finger_cnt, 6, 3000);
+    printf("    P4 观测:result_cnt=%d err=%d\n",
+           atomic_load(&s_result_finger_cnt), atomic_load(&s_result_finger_err));
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_FINGER_FULL);
 
     printf("[P5] 两次不一致:RETRY2 重采后成功\n");
