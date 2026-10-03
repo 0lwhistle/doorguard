@@ -76,7 +76,9 @@ int db_find_by_ic(const char *ic, user_rec_t *out);
  * DB 是"PageID ↔ user_id"映射的唯一事实源;模组 flash 才是模板主存储,
  * finger_vec 加密副本仅用于备份/换模组回灌。向量明文进出,落库自动加密。 */
 
-/** 录入落库(Store 成功 + UpChar 读回后调用);page_id 重复 → DG_ERR_STATE */
+/** 录入落库(Store 成功 + UpChar 读回后调用);page_id 重复 → DG_ERR_STATE。
+ *  plain=NULL/len=0 允许 = 无副本降级行(UpChar 失败不推翻录入:模组 flash
+ *  才是验证主存储;get_vec 对该形态返回 NOT_FOUND) */
 int db_finger_add(const char *user_id, int32_t page_id,
                   const uint8_t *plain, size_t len);
 /** 逐枚删除(编辑页;配对模组 DeletChar,先删模组再删行) */

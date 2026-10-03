@@ -1262,14 +1262,16 @@ int db_finger_add(const char *user_id, int32_t page_id,
 {
     if (!s_db)
         return DG_ERR_NOT_INIT;
-    if (!user_id || !*user_id || page_id < 0 || !plain || len == 0 ||
-        len > DG_FEATURE_MAX)
-        return DG_ERR_PARAM;
+    if (!user_id || !*user_id || page_id < 0 || len > DG_FEATURE_MAX ||
+        (len > 0 && !plain))
+        return DG_ERR_PARAM;    /* plain=NULL/len=0 允许:UpChar 副本缺时的
+                                   降级落库(模组 flash 才是验证主存储) */
 
     pthread_mutex_lock(&s_mtx);
     uint8_t enc[DG_FEATURE_MAX + 16];
     size_t enc_len = 0;
-    if (dg_feature_wrap(plain, len, enc, sizeof(enc), &enc_len) != DG_OK) {
+    if (len > 0 &&
+        dg_feature_wrap(plain, len, enc, sizeof(enc), &enc_len) != DG_OK) {
         pthread_mutex_unlock(&s_mtx);
         return DG_ERR_INTERNAL;
     }
@@ -1283,7 +1285,10 @@ int db_finger_add(const char *user_id, int32_t page_id,
     }
     sqlite3_bind_text(st, 1, user_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(st, 2, page_id);
-    sqlite3_bind_blob(st, 3, enc, (int)enc_len, SQLITE_TRANSIENT);
+    if (len == 0)
+        sqlite3_bind_null(st, 3);           /* 无副本行(blob 保持 NULL) */
+    else
+        sqlite3_bind_blob(st, 3, enc, (int)enc_len, SQLITE_TRANSIENT);
     sqlite3_bind_int64(st, 4, (sqlite3_int64)time(NULL));
     if (sqlite3_step(st) != SQLITE_DONE) {
         /* page_id UNIQUE 冲突 = PageID 分配与实际状态脱节,按状态错报 */
@@ -1355,11 +1360,12 @@ int db_finger_get_vec(int32_t page_id, uint8_t *out, size_t cap, size_t *out_len
     if (sqlite3_step(st) == SQLITE_ROW) {
         const void *blob = sqlite3_column_blob(st, 0);
         int nbytes = sqlite3_column_bytes(st, 0);
-        if (!blob || nbytes <= 16) {
-            rc = DG_ERR_DB;              /* 空行/截断密文:显式暴露 */
-        } else if (dg_feature_unwrap(blob, (size_t)nbytes, out, cap, out_len)
-                   != DG_OK) {
-            rc = DG_ERR_DB;
+        if (!blob) {
+            rc = DG_ERR_NOT_FOUND;       /* 无副本行(UpChar 缺失的降级落库) */
+        } else if (nbytes <= 16 ||
+                   dg_feature_unwrap(blob, (size_t)nbytes, out, cap, out_len)
+                       != DG_OK) {
+            rc = DG_ERR_DB;              /* 截断密文/解密失败:显式暴露 */
         } else {
             rc = DG_OK;
         }

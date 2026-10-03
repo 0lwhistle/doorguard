@@ -242,6 +242,11 @@ static void refresh(void)
     else
         val_set(s_val_face, rec.face_vec_len > 0 ? _("已录入") : _("无"));
     dg_btn_set_label(s_btn_face, _("修改"));
+    /* ADD 存成用户后原地转 EDIT:人脸按钮在 ADD 分支被隐藏,这里必须
+     * 显式还原,否则"保存成功后要退出去再进来才能录人脸"(2026-10-03
+     * 用户实测);指纹/IC 按钮常显不受影响 */
+    if (s_btn_face)
+        lv_obj_clear_flag(s_btn_face, LV_OBJ_FLAG_HIDDEN);
 
     /* 指纹行:已录 n/3(独立 fingerprints 表是唯一事实源;users.finger_vec
      * 废弃列不再读取)。录入中显示进度文案 */
@@ -249,7 +254,7 @@ static void refresh(void)
                                     &s_fp_cnt) != DG_OK)
         s_fp_cnt = 0;
     if (s_fp_enrolling)
-        val_set(s_val_finger, _("请按压指纹…"));
+        val_set(s_val_finger, _("请按压指纹..."));
     else if (s_fp_cnt > 0) {
         char fv[32];
         snprintf(fv, sizeof(fv), _("已录 %d/3 枚"), (int)s_fp_cnt);
@@ -260,7 +265,7 @@ static void refresh(void)
 
     /* IC 行:卡号展示一律掩码(spec-database §3) */
     if (s_ic_enrolling)
-        val_set(s_val_ic, _("请刷卡…"));
+        val_set(s_val_ic, _("请刷卡..."));
     else if (rec.ic_card[0]) {
         char masked[16];
         mask_card(rec.ic_card, masked, sizeof(masked));

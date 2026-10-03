@@ -6,10 +6,11 @@
  * → EV_FINGER_SET_MODE(ENROLL) → provider 两次按压序列(查重/同指校验/
  * 合成/Store/UpChar)→ EV_ENROLL_RESULT + fingerprints 落库 + 方式位。
  *
- * 覆盖:happy path(落库+方式位+PageID 分配)/ 与他人重复 DUP_FINGER /
- * 同用户重复自己已有枚 DUP_FINGER / 单用户超 3 枚 FINGER_LIMIT /
- * 模组库满 FINGER_FULL / 两次不一致 RETRY2 重采后成功 / 按压①成像差
- * QUALITY 提示 / 取消回滚(无 Store 不留孤儿)/ DeletChar 单枚删除。
+ * 覆盖:happy path(落库+方式位+PageID 分配)/ UpChar 无数据包仍录入成功
+ * (无副本降级行)/ 与他人重复 DUP_FINGER / 同用户重复自己已有枚 DUP_FINGER /
+ * 单用户超 3 枚 FINGER_LIMIT / 模组库满 FINGER_FULL / 两次不一致
+ * RETRY2 重采后成功 / 按压①成像差 QUALITY 提示 / 取消回滚(无 Store 不留
+ * 孤儿)/ DeletChar 单枚删除。
  */
 #include "dg_test.h"
 #include "cfg.h"
@@ -41,6 +42,7 @@ typedef struct {
     uint16_t regmodel_ack;
     uint16_t store_ack;
     uint16_t valid_count;       /* ValidTempleteNum 计数 */
+    int      upchar_no_data;    /* 1=UpChar 只回 ACK(模拟真机缺数据包形态) */
     /* 交互观测 */
     atomic_int delet_calls;
     atomic_int delet_page;
@@ -73,6 +75,7 @@ static void fake_reset(void)
     F.regmodel_ack = 0;
     F.store_ack = 0;
     F.valid_count = 5;
+    F.upchar_no_data = 0;
     atomic_store(&F.delet_calls, 0);
     atomic_store(&F.delet_page, 0);
     atomic_store(&F.store_page, 0);
@@ -168,6 +171,8 @@ static void fake_respond(uint8_t cmd, const uint8_t *params)
     case 0x08: {                          /* UpChar:ACK + 512B 数据包 + 结束包 */
         size_t n = mk_ack(b, FP_ACK_OK);
         fake_push(b, n);
+        if (F.upchar_no_data)
+            break;                        /* 真机疑似形态:只应 ACK,无数据/结束包 */
         uint8_t data[FP_A608_PAYLOAD_MAX];
         for (int i = 0; i < 512; i++)
             data[i] = (uint8_t)(i * 7 + 3);
@@ -411,15 +416,36 @@ int main(void)
     DG_CHECK(vlen == 512 && vec[0] == 0x03);    /* UpChar 副本完整落库 */
     DG_CHECK(atomic_load(&F.delet_calls) == 0); /* 无回滚 */
 
+    printf("[P1b] UpChar 无数据包:录入照常完成,落无副本行\n");
+    fake_reset();
+    F.upchar_no_data = 1;
+    publish_req("30001", DG_ENROLL_FINGER, 0);
+    wait_ge(&s_progress_cnt, 3, 3000);    /* PRESS1 */
+    press();
+    wait_ge(&s_progress_cnt, 4, 5000);    /* PRESS2 */
+    press();
+    wait_ge(&s_result_finger_cnt, 2, 8000);
+    DG_CHECK(atomic_load(&s_result_finger_err) == DG_OK);   /* 不再报通讯异常 */
+    cnt = 99;
+    DG_CHECK(db_finger_count_user("30001", &cnt) == DG_OK && cnt == 2);
+    int32_t p1b_pages[DG_FINGER_PAGES_MAX];
+    uint32_t p1b_np = 0;
+    DG_CHECK(db_finger_list_user("30001", p1b_pages, DG_FINGER_PAGES_MAX,
+                                 &p1b_np) == DG_OK && p1b_np == 2);
+    /* 新落的行无副本:get_vec 显式 NOT_FOUND(区别于行不存在) */
+    DG_CHECK(db_finger_get_vec(p1b_pages[1], vec, sizeof(vec), &vlen)
+             == DG_ERR_NOT_FOUND);
+    DG_CHECK(atomic_load(&F.delet_calls) == 0);
+
     printf("[P2] 与他人重复:Search 命中 → DUP_FINGER,无 Store\n");
     fake_reset();
     add_finger_row("39999", 500);         /* 他人已占 PageID 500 */
     F.search_hit = 1;
     F.search_page = 500;
     publish_req("30001", DG_ENROLL_FINGER, 0);
-    wait_ge(&s_progress_cnt, 3, 3000);
+    wait_ge(&s_progress_cnt, 5, 3000);
     press();
-    wait_ge(&s_result_finger_cnt, 2, 5000);
+    wait_ge(&s_result_finger_cnt, 3, 5000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_DUP_FINGER);
     DG_CHECK(atomic_load(&F.store_page) != 500);
 
@@ -428,9 +454,9 @@ int main(void)
     F.search_hit = 1;
     F.search_page = (uint16_t)p1_page;    /* P1 落库的 30001 自己的页 */
     publish_req("30001", DG_ENROLL_FINGER, 0);
-    wait_ge(&s_progress_cnt, 4, 3000);
+    wait_ge(&s_progress_cnt, 6, 3000);
     press();
-    wait_ge(&s_result_finger_cnt, 3, 5000);
+    wait_ge(&s_result_finger_cnt, 4, 5000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_DUP_FINGER);
     DG_CHECK(atomic_load(&F.delet_calls) == 0);   /* 未 Store 无需回滚 */
     cnt = 99;
@@ -444,7 +470,7 @@ int main(void)
     add_finger_row("30002", 602);
     int prog_before = atomic_load(&s_progress_cnt);
     publish_req("30002", DG_ENROLL_FINGER, 0);
-    wait_ge(&s_result_finger_cnt, 4, 3000);
+    wait_ge(&s_result_finger_cnt, 5, 3000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_FINGER_LIMIT);
     DG_CHECK(atomic_load(&s_progress_cnt) == prog_before);  /* 相对断言:无新进度 = 没等按压 */
 
@@ -452,7 +478,7 @@ int main(void)
     fake_reset();
     F.valid_count = 1000;
     publish_req("30001", DG_ENROLL_FINGER, 0);
-    wait_ge(&s_result_finger_cnt, 5, 3000);
+    wait_ge(&s_result_finger_cnt, 6, 3000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_FINGER_FULL);
 
     printf("[P5] 两次不一致:RETRY2 重采后成功\n");
@@ -470,7 +496,7 @@ int main(void)
     DG_CHECK(atomic_load(&s_progress_step) == DG_ENROLL_FP_STEP_RETRY2);
     F.match_ack = FP_ACK_OK;
     press();                              /* 重采② */
-    wait_ge(&s_result_finger_cnt, 6, 5000);
+    wait_ge(&s_result_finger_cnt, 7, 5000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_OK);
 
     printf("[P5b] 按压①成像差:GetImage 无指纹 → QUALITY 提示,重按走完全程\n");
@@ -489,7 +515,7 @@ int main(void)
     press();                              /* 重按:此后全部默认应答 */
     wait_ge(&s_progress_cnt, 3, 5000);    /* PRESS2 */
     press();
-    wait_ge(&s_result_finger_cnt, 7, 5000);
+    wait_ge(&s_result_finger_cnt, 8, 5000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_OK);
     cnt = 99;
     DG_CHECK(db_finger_count_user("30003", &cnt) == DG_OK && cnt == 1);
@@ -498,9 +524,10 @@ int main(void)
     fake_reset();
     atomic_store(&s_progress_cnt, 0);
     int result_before = atomic_load(&s_result_finger_cnt);
-    publish_req("30001", DG_ENROLL_FINGER, 0);
+    /* 用 30003:P5 后 30001 已录满 3 枚,再录会先撞 FINGER_LIMIT 而非进等待 */
+    publish_req("30003", DG_ENROLL_FINGER, 0);
     wait_ge(&s_progress_cnt, 1, 3000);    /* 进入录入(PRESS1 已发) */
-    publish_req("30001", DG_ENROLL_FINGER_CANCEL, 0);
+    publish_req("30003", DG_ENROLL_FINGER_CANCEL, 0);
     usleep(300 * 1000);                   /* 取消生效(provider 200ms 粒度) */
     press();                              /* 迟到的按压不得再进流程 */
     usleep(500 * 1000);

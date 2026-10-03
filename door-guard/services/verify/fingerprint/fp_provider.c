@@ -620,29 +620,36 @@ static void seq_enroll(void)
     }
     s_stored_page = (int32_t)page;
 
-    n = fp_as608_build_cmd(b, sizeof(b), 0x08, (const uint8_t[]){FP_A608_BUF1}, 1);
-    if (cmd_xchg(b, n, &ack, &c, 2000) != DG_OK)
-        goto link_err;
-    if (c != FP_ACK_OK) {
-        enroll_rollback();
-        pub_enroll_result(DG_ENROLL_FINGER, uid, s_cur.seq, confirm_to_err(c));
-        s_mode = DG_FMODE_IDLE;
-        return;
-    }
-    /* 数据包(0x02,512B 特征)+ 结束包(0x08) */
-    fp_frame_t data;
-    if (wait_frame(&data, 3000) != DG_OK || data.type != FP_A608_TYPE_DATA) {
-        enroll_rollback();
-        pub_enroll_result(DG_ENROLL_FINGER, uid, s_cur.seq, DG_ERR_IO);
-        s_mode = DG_FMODE_IDLE;
-        return;
-    }
-    fp_frame_t end;
-    if (wait_frame(&end, 2000) != DG_OK) {
-        /* 数据已到手、结束包缺席:按协议容忍(部分固件省略),不回滚 */
+    /* UpChar 读回 512B 副本:验证主存储在模组 flash(Search/Match 都打它),
+     * DB 向量仅备份/换模组回灌用——本步失败不推翻已成功的 Store,录入照常
+     * 完成(降级:无副本,对账/回灌受损,WARN 留痕)。真机首次录入
+     * (2026-10-03)本步必失败:数据/结束包帧式未定,协议文档 §6 待勾,
+     * 旧实现回滚整次录入 = 用户白按两次还报"设备通讯异常" */
+    const uint8_t *vec = NULL;
+    size_t vec_len = 0;
+    size_t n_up = fp_as608_build_cmd(b, sizeof(b), 0x08,
+                                     (const uint8_t[]){FP_A608_BUF1}, 1);
+    if (cmd_xchg(b, n_up, &ack, &c, 2000) == DG_OK && c == FP_ACK_OK) {
+        fp_frame_t data;
+        if (wait_frame(&data, 3000) == DG_OK && data.type == FP_A608_TYPE_DATA &&
+            data.payload_len > 0) {
+            vec = data.payload;
+            vec_len = data.payload_len;
+            fp_frame_t end;                   /* 结束包缺席容忍(部分固件省略) */
+            (void)wait_frame(&end, 1000);
+        } else {
+            /* 排空残包(类型不符帧/结束包残片),别污染下一条指令的应答 */
+            fp_frame_t t;
+            while (wait_frame(&t, 200) == DG_OK) {
+            }
+            DG_LOGW(TAG, "UpChar 数据包未取得(超时/类型不符),无副本,录入继续");
+        }
+    } else {
+        DG_LOGW(TAG, "UpChar 失败(确认码 %s),无副本,录入继续",
+                fp_as608_confirm_name(c));
     }
 
-    if (db_finger_add(uid, page, data.payload, data.payload_len) != DG_OK) {
+    if (db_finger_add(uid, page, vec, vec_len) != DG_OK) {
         enroll_rollback();
         pub_enroll_result(DG_ENROLL_FINGER, uid, s_cur.seq, DG_ERR_DB);
         s_mode = DG_FMODE_IDLE;
@@ -658,8 +665,8 @@ static void seq_enroll(void)
             DG_LOGW(TAG, "auth_flags 写指纹位失败(%s):方式选择暂不显示", uid);
     }
 
-    DG_LOGI(TAG, "录入完成 %s PageID %ld(%uB 副本)", uid, (long)page,
-            (unsigned)data.payload_len);
+    DG_LOGI(TAG, "录入完成 %s PageID %ld(%s)", uid, (long)page,
+            vec_len ? "有副本" : "无副本");
     pub_enroll_result(DG_ENROLL_FINGER, uid, s_cur.seq, DG_OK);
     s_mode = DG_FMODE_IDLE;
     return;
