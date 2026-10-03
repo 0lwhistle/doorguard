@@ -168,10 +168,9 @@ static int wait_frame(fp_frame_t *out, int timeout_ms)
         pthread_mutex_unlock(&s_rx_mtx);
         if (len > 0) {
             int r = fp_as608_parse(&s_parser, s_rx, len, &f, &consumed);
-            fprintf(stderr, "[DBG] parse len=%u r=%d consumed=%zu b0=%02x
-",
+            fprintf(stderr, "[DBG] parse len=%u r=%d consumed=%zu b0=%02x\n",
                     len, r, consumed, s_rx[0]);
-                        if (consumed)
+            if (consumed)
                 rx_pull((uint16_t)consumed);
             if (r == 1) {
                 *out = f;
@@ -197,15 +196,13 @@ static int cmd_xchg(const uint8_t *frame, size_t len, fp_frame_t *ack,
                     uint16_t *confirm, int timeout_ms)
 {
     s_hb_ms = now_ms();
-    fprintf(stderr, "[DBG] send %zuB
-", len);
+    fprintf(stderr, "[DBG] send %zuB\n", len);
     if (s_link->send(frame, len) != DG_OK) {
         s_err_streak++;
         return DG_ERR_IO;
     }
     int rc = wait_frame(ack, timeout_ms);
-    fprintf(stderr, "[DBG] xf rc=%d type=%02x plen=%u
-", rc, ack->type,
+    fprintf(stderr, "[DBG] xf rc=%d type=%02x plen=%u\n", rc, ack->type,
             rc == DG_OK ? ack->payload_len : 0);
     if (rc != DG_OK) {
         if (rc == DG_ERR_IO)
@@ -214,8 +211,7 @@ static int cmd_xchg(const uint8_t *frame, size_t len, fp_frame_t *ack,
     }
     if (confirm)
         *confirm = fp_as608_ack_confirm(ack);
-    fprintf(stderr, "[DBG] confirm=%u
-", *confirm);
+    fprintf(stderr, "[DBG] confirm=%u\n", *confirm);
     return DG_OK;
 }
 
@@ -765,8 +761,7 @@ static bool ensure_link(void)
             degrade();
         return false;
     }
-    fprintf(stderr, "[DBG] link open ok
-");
+    fprintf(stderr, "[DBG] link open ok\n");
     uint8_t b[FP_A608_FRAME_MAX];
     fp_frame_t ack;
     uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
@@ -778,8 +773,7 @@ static bool ensure_link(void)
             degrade();
         return false;
     }
-    fprintf(stderr, "[DBG] handshake done
-");
+    fprintf(stderr, "[DBG] handshake done\n");
     recover();
     return true;
 }
