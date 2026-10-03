@@ -213,6 +213,9 @@ static void play_file_job(const char *path, int vol_q15)
 
 static void job_exec(const audio_job_t *j)
 {
+    const audio_hw_ops_t *o = hw();
+    if (!o)
+        return;                               /* 无后端(宿主未注入):静默 */
     if (!backend_ensure())
         return;                               /* 降级:静默跳过本作业 */
     const int vol_q15 = cfg_get()->audio_volume * 32767 / 100;

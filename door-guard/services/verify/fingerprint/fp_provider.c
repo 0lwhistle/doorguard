@@ -17,6 +17,7 @@
 #include "timeutil.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -32,7 +33,8 @@ static pthread_t s_tid;
 static bool s_tid_created;
 static bool s_ready;                      /* 链路握手通过 */
 static bool s_fault_latched;
-static volatile int64_t s_hb_ms;          /* 线程循环活性 */
+static _Atomic int64_t s_hb_ms;          /* 线程循环活性(看门狗跨线程读,C11 原子;
+                                             * 与 netcore 心跳同风格,2026-10-04 统一) */
 static int s_err_streak;                  /* 链路错误连击(≥3 降级) */
 static int64_t s_next_try_ms;             /* 重试退避 */
 
@@ -148,7 +150,7 @@ bool fp_provider_ready(void)
 
 int64_t fp_provider_heartbeat_ms(void)
 {
-    return s_hb_ms;
+    return atomic_load(&s_hb_ms);
 }
 
 static void pub_status(int32_t st)
@@ -247,7 +249,7 @@ static int wait_frame(fp_frame_t *out, int timeout_ms)
 static int cmd_xchg(const uint8_t *frame, size_t len, fp_frame_t *ack,
                     uint16_t *confirm, int timeout_ms)
 {
-    s_hb_ms = now_mono_ms();
+    atomic_store(&s_hb_ms, now_mono_ms());
     if (s_link->send(frame, len) != DG_OK) {
         s_err_streak++;
         return DG_ERR_IO;
@@ -320,7 +322,7 @@ static int capture_to_buf(uint8_t buf_id, bool *quality_fail)
 static int capture_retry(uint8_t buf_id, bool *quality_fail)
 {
     for (int attempt = 0; attempt < 3; attempt++) {
-        s_hb_ms = now_mono_ms();           /* 重试循环也是活性,不等外部输入 */
+        atomic_store(&s_hb_ms, now_mono_ms());           /* 重试循环也是活性,不等外部输入 */
         int rc = capture_to_buf(buf_id, quality_fail);
         if (rc != DG_ERR_MISMATCH)
             return rc;                     /* 成功或链路错:不重试 */
@@ -760,7 +762,7 @@ static void seq_del_user_pages(void)
         if (cmd_xchg(b, n, &ack, &c, 2000) != DG_OK || c != FP_ACK_OK)
             DG_LOGW(TAG, "删用户模板 PageID %u 失败(c=%u,孤儿由对账暴露)",
                     s_cur.pages[i], c);
-        s_hb_ms = now_mono_ms();
+        atomic_store(&s_hb_ms, now_mono_ms());
     }
     s_mode = DG_FMODE_IDLE;
 }
@@ -786,7 +788,7 @@ static int wait_press_once(int active)
      * 按压超过看门狗窗口(15s)即判 stale → registry_restart 对本服务
      * 只是空转(fp_provider_start 见 s_running 直接返回),下轮即 DISABLED
      * 粘死 → 验证按钮永远「指纹模块未就绪」(模组明明在线,2026-10-03) */
-    s_hb_ms = now_mono_ms();
+    atomic_store(&s_hb_ms, now_mono_ms());
     int lvl;
     int rc = s_link->wak_wait(200, &lvl);
     if (rc == DG_OK) {
@@ -817,7 +819,7 @@ static void wait_release(void)
     const dg_finger_mode_t mode0 = s_mode;
     int lvl;
     for (;;) {
-        s_hb_ms = now_mono_ms();          /* 等释放同 wait_press_once:按步刷心跳 */
+        atomic_store(&s_hb_ms, now_mono_ms());          /* 等释放同 wait_press_once:按步刷心跳 */
         apply_cmd();
         if (s_mode != mode0)
             return;                       /* 命令切走:让位,不吞 RELEASED 状态 */
@@ -914,11 +916,11 @@ static bool ensure_link(void)
 static void *provider_thread(void *arg)
 {
     (void)arg;
-    s_hb_ms = now_mono_ms();
+    atomic_store(&s_hb_ms, now_mono_ms());
     wak_calibrate();
 
     while (s_running) {
-        s_hb_ms = now_mono_ms();
+        atomic_store(&s_hb_ms, now_mono_ms());
         ensure_link();
         apply_cmd();
         if (!s_ready) {
@@ -945,7 +947,7 @@ static void *provider_thread(void *arg)
             else if (press) {
                 pub_status(DG_FINGER_PRESSED);
                 seq_verify_11(s_cur.user_id);
-                s_hb_ms = now_mono_ms();
+                atomic_store(&s_hb_ms, now_mono_ms());
                 wait_release();
             }
             break;
@@ -957,7 +959,7 @@ static void *provider_thread(void *arg)
             else if (press) {
                 pub_status(DG_FINGER_PRESSED);
                 seq_1n();
-                s_hb_ms = now_mono_ms();
+                atomic_store(&s_hb_ms, now_mono_ms());
                 wait_release();
             }
             break;
