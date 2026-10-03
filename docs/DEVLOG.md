@@ -2,6 +2,44 @@
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 ---
+## 2026-10-04 四任务会话:主页网络图标实时化/指纹三连修+提速/MQTT+MAX98357 落地/审查与文档对齐——46/46 绿零告警
+
+1. **主页 IP/网络图标热插拔实时化**:根因=图标只看"拿到 IP",静态配置下拔网线
+   内核地址不消失 → 常绿。修=net_info 快照加 `have_link`(IFF_LOWER_UP,
+   getifaddrs 自带),主页 online=IP∧链路;严格 POSIX 编译要自兜底 0x10000。
+2. **指纹三连修**:①录入两按之间加 **LIFT 步**(先提示抬起手指、确认释放后再
+   提示第二按)+ PROCESS 步(按压②采到即停 UI 5s 计时——UpChar 降级尾巴 5~8s,
+   计时不停会先弹「已退出录入」再弹真成功=10-03 板上「成功却见失败窗」根因);
+   ②采集重试:WAK 边沿常赶在指腹贴稳前,首拍 NO_FINGER 白丢按压(主观迟钝主因),
+   手指未松隔 150ms 连拍至 3 次;③三槽位独立:空槽都可录(落最前空槽,呈现序)。
+   迟到回执过滤收紧(非录入态只认同 seq 迟到成功)。
+3. **真 bug 顺手修出**:wait_release 等待期间不查命令信箱——残留按压电平把 IDLE
+   分支带进去后,后续模式切换命令全被无视(宿主测试暴露,板上=手指不放时切模式
+   等到抬手才生效);现按步 apply_cmd、模式一变即让位。
+4. **MQTT 服务**(services/mqtt,默认关):mg_mqtt on netcore,LWT/退避重连/半开
+   检测;cmd/+/rsp 命令通道(内置 ping/status/open,open 默认拒且只发 EV_MQTT_CMD
+   交总线——开门必须走 access 留痕);扩展口 mqtt_publish_json/mqtt_cmd_register;
+   验证事件转发 event/auth(引号净化)。坑×3:MG_EV_MQTT_OPEN 的 ev_data 是
+   uint8_t*(头注释说 mg_mqtt_message*,按结构体解=随机拒绝码);停服告别必须
+   is_draining(is_closing 的连接轮询跳过写阶段,包被吞);邮箱 1s 定时排水改
+   netcore_post 即时排水(遥测延迟 ms 级)。
+5. **MAX98357 音频**(modules/audio):player 队列+WAV/正弦+两级降级(素材缺席
+   →内置提示音;后端打不开→静默+5s 懒重试,硬件接入零改动恢复);ALSA 后端按
+   sysroot 探测编入(板上 libasound 同源),宿主 sink 后端可断言;开门/拒绝自动
+   提示已挂总线。素材规格钉死 48k/16bit/单双声道(README 有 ffmpeg 转法)。
+6. **审查**:一线代码零危险字符串 API/malloc 全检 NULL/零 TODO;fp+vision 心跳
+   volatile→C11 原子(与 netcore 同风格);audio job 无后端守卫。registry_restart
+   空转通病维持待办(线程真挂死需可取消线程,半吊子 restart 更糟)。
+7. **文档对齐**:FINGERPRINT_AS608 §5.3 流程图、spec-ui(指纹页槽位/引导窗阶段/
+   主页图标语义)、spec-network 新增 §5 MQTT、architecture.md 层图+目录索引
+   (清掉 as608/mfrc522「待接入」陈旧说法)、door-guard/README 模块索引、
+   config/README json-only 键全表。40px 字体重生成(新键字符)。
+8. 测试 44→46(test_audio/test_mqtt,后者测试内起最小 broker);坑:test_fp_enroll
+   的 wait_ge(绝对计数)跨用例残留 → press 早发被 IDLE 吞,阶段门控统一 wait_step。
+9. 下一步:板上真人验收(拔网线图标/指纹全流程含 LIFT 文案);MQTT broker 部署
+   后开 mqtt.enabled 实测;MAX98357 接线+dts;EV_MQTT_CMD open 消费端(access 通道)。
+
+---
 ## 2026-10-03(深夜二)指纹录入 UI 重做:独立指纹管理页+专用引导窗/「模块未就绪」根因=看门狗误杀心跳——44/44 绿零告警
 
 1. **「指纹模块未接入/未就绪」根因定案(模组明明在线)**:录入等按压时

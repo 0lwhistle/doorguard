@@ -147,3 +147,23 @@ chrony 是持续 slew,SNTP 是一次步进,门禁场景接受步进(时间回拨
   设置入口在上位机(网络配置卡片:DHCP/静态切换 + 三输入框 + 应用)
 - 测试:`tests/test_net_info.c`(宿主):掩码转前缀判定表、请求校验、net_info_read
   兜底语义。apply() 会真改宿主网络,不进单测——推板后板上验收
+
+## 5. MQTT 上位机通道(2026-10-04,默认关闭)
+
+> 细则(主题表/配置键/扩展接口/重连策略)唯一事实源:`services/mqtt/README.md`;
+> 本节只记规格要点,不复表。
+
+- 定位:设备 ↔ 平台消息干道。跑 netcore 统一事件循环(mongoose `mg_mqtt`),
+  与 web/OTA/NTP/mDNS 同一传输层;**默认关**(cfg `mqtt.enabled=0`),
+  broker 地址(`mqtt.uri`)属部署参数
+- 主题方案:`<prefix>/status`(retain 上线/LWT 离线)、`<prefix>/event/auth`
+  (验证动作转发,与 access_logs 同口径)、`<prefix>/cmd/+` → `<prefix>/rsp/<name>`
+  (内置 ping/status/open;open 默认拒,`mqtt.allow_remote_open` 显式授权且
+  只发 EV_MQTT_CMD 交总线——开门必须走 access 流程留痕,消费端待接入)
+- 扩展口:`mqtt_publish_json()`(任意业务上报,邮箱投递宁丢不堵)+
+  `mqtt_cmd_register()`(命令处理器注册)+ EV_MQTT_CMD(事件式消费);
+  线程契约:mg_* 只在 loop 线程,业务侧永不阻塞
+- 健壮性:断线退避重连(5→60s,连上复位);keepalive 30s + 半开检测
+  (3×keepalive 无入包强制重连);停服主动发 offline retain 告别
+- 测试:`tests/test_mqtt.c`(宿主,测试内起最小 broker:握手/命令往返/
+  上报/净化/停服告别全覆盖)

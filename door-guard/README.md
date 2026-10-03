@@ -42,7 +42,9 @@ tests/web/web_test.sh        # web 上位机功能验收
 | `services/web/` | web 上位机(mongoose 统一事件循环 + Vue 前端 `frontend/`,产物内嵌) | services/web/README.md |
 | `services/ota/` | OTA(流式+sha256,方案 docs/tech/OTA_PLAN.md) | — |
 | `services/ntp/` `services/mdns/` | 时间同步 / mDNS 服务通告 | — |
-| `modules/net/` | 网络模块(net_info 网口信息 + **netcore** 统一事件循环:web/OTA/NTP/mDNS 的唯一传输层) | modules/net/README.md |
+| `services/mqtt/` | MQTT 上位机通道(mg_mqtt on netcore,默认关;命令订阅/事件上报/扩展口) | services/mqtt/README.md |
+| `modules/net/` | 网络模块(net_info 网口信息 + **netcore** 统一事件循环:web/OTA/NTP/mDNS/MQTT 的唯一传输层) | modules/net/README.md |
+| `modules/audio/` | 语音播报(MAX98357 I2S 功放:播放器+WAV/正弦+ALSA/sink 双后端,硬件未接自动降级) | modules/audio/README.md |
 | `ui/` | LVGL 十页面+widgets+theme+多语言+生成字体 | ui/README.md |
 | `configs/default.json` | 设备配置出厂模板(现用值落 /userdata 的 cur_config.json 稀疏覆盖;DB 已冻结) | services/config/README.md |
 | `tests/` | ctest 用例(宿主 gcc;test_i18n 键覆盖/裸中文=0/字形覆盖) | — |

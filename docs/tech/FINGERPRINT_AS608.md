@@ -127,15 +127,22 @@ WAK 按下沿(消抖 30ms)→ EV_FINGER_STATUS(PRESSED)
 ```
 前置检查:COUNT(fingerprints WHERE user_id) ≥3 → FINGER_LIMIT;
           模组库满(ValidTempleteNum) → FINGER_FULL —— 都不进采集
-按压① → GenImg+Img2Tz(Buf1) → Search(全库) 查重
+按压① → GenImg+Img2Tz(Buf1)(不成像且手指未松:隔 150ms 连拍至 3 次,
+          2026-10-04——WAK 边沿常赶在指腹贴稳前,首拍 NO_FINGER 白丢按压)
+      → EV_ENROLL_PROGRESS(请抬起手指)→ 确认释放后才进查重
+        (2026-10-04 用户口径:先提示放开,再提示第二按;等待期间也应用模式命令)
+      → Search(全库) 查重
       命中 PageID 反查 user_id:≠本用户 或 ==本用户(与自己已有枚重复) 
           → EV_ENROLL_RESULT(DG_ERR_DUP_FINGER)「指纹重复,录入失败」
-      通过 → EV_ENROLL_PROGRESS(1/2,提示"请再次按压同一手指")
-按压② → GenImg+Img2Tz(Buf2) → **Match(Buf1 vs Buf2) 同指校验**
-      不一致 → 提示「两次按压指纹不一致,请用同一手指」,进度回 1/2 重采
+      通过 → EV_ENROLL_PROGRESS(提示"请再次按压同一手指")
+按压② → GenImg+Img2Tz(Buf2) → EV_ENROLL_PROGRESS(处理中,UI 停 5s 按压计时
+          ——处理尾巴可达数秒,计时不停会先弹"已退出"再弹真终态,2026-10-04)
+      → **Match(Buf1 vs Buf2) 同指校验**
+      不一致 → 提示「两次按压指纹不一致,请用同一手指」,进度回重采
                (主动校验给明确文案;RegModel 对差异过大的特征也会报合成失败,作兜底)
       一致 → RegModel(合成) → Store(分配 PageID)
       → UpChar 读出特征 512B → AES-256-CTR 加密 → INSERT fingerprints(含 finger_vec)
+        (UpChar 取不到数据包 → 落**无副本行**继续,录入不回滚;2026-10-03 板上定案)
       → EV_ENROLL_RESULT(OK) → UI 成功提示(已录 n/3)
 页面退出/取消 → 撤销录入态;已 Store 的模板 DeletChar 回滚 + 删行,不留孤儿模板
 ```

@@ -15,13 +15,15 @@ UI 层        ui/ 页面与弹窗(LVGL;PC 模拟器 + 板上双构建)
              verify    认证编排 + provider:face/fingerprint/ic/password
              access    门控决策、开门、日志落库(验证事件的唯一出口)
              enroll    用户/特征录入管理(调用 storage 与算法查重)
-             config    配置服务;web/ota/mdns/ntp 网络服务族(基于 modules/net)
+             config    配置服务;web/ota/mdns/ntp/mqtt 网络服务族(基于 modules/net)
 ──────────────────────────────────────────────────
 模块层       modules/(注册进 holder)
              camera / display / sqlite / net(net_info + netcore 统一
-             网络事件循环:web/OTA/NTP/mDNS 唯一传输层,单 loop 线程;
+             网络事件循环:web/OTA/NTP/mDNS/MQTT 唯一传输层,单 loop 线程;
              线程契约:MG_EV 回调内才可碰连接,跨线程一律 netcore_post)
-             touch / as608(UART)/ mfrc522(SPI)随硬件接入
+             relay(开门继电器) / audio(语音播报,MAX98357;后端打不开自动降级)
+             as608 指纹已接入(services/verify/fingerprint,走 drv/uart);
+             iccard(drv/iccard,.ko 待硬件侧)随接入
 ──────────────────────────────────────────────────
 驱动层       drv/ 总线级薄封装、可替换;PC 模拟器 = 同接口的 sim 后端
              uart(指纹+读卡)/ gpio / npu(librknnrt);i2c/spi/pwm 随硬件接入
@@ -86,10 +88,10 @@ FreeRTOS 依赖被隔离在 port 层,移植 = 实现对应 pthread port,不动�
 - 代码里 `#ifdef DG_SIM` 只允许出现在 HAL sim 后端与 main 装配处,业务与 UI 层禁止
 - rootfs 集成(B10):door-guard 做成 buildroot 包,开机自启替换 LVGL demo
 
-## 4. 目录索引(door-guard/,2026-09-20 v2 迁移后)
+## 4. 目录索引(door-guard/,v2 迁移后随落地滚动更新)
 
-`app/` 装配启动 · `ui/` 界面 · `services/{capture,vision,liveness,verify,access,enroll,config,web,ota,mdns,ntp,sysctl}` ·
-`modules/{camera,display,sqlite,jpeg,net(net_info+netcore),sysctl,relay(开门继电器,包装 drv/gpio,2026-09-28 A4)}` · `drv/{uart,gpio,npu}` ·
-`components/{tasker,event_bus,holder,logger,timeutil}` · `proto/` 消息与事件契约 ·
+`app/` 装配启动 · `ui/` 界面 · `services/{capture,vision,liveness,verify,access,enroll,config,web,ota,mdns,ntp,mqtt,sysctl}` ·
+`modules/{camera,display,sqlite,jpeg,net(net_info+netcore),sysctl,relay(开门继电器,2026-09-28 A4),audio(语音播报,2026-10-04)}` · `drv/{uart,gpio,iccard,npu}` ·
+`components/{tasker,event_bus,holder,logger,timeutil,registry}` · `proto/` 消息与事件契约 ·
 `configs/default.json` · `tests/` · `tools/` · `third_party/`
 (职责细表见 door-guard/README.md;目标形态与迁移映射见 docs/architecture-v2-proposal.md)

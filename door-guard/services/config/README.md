@@ -51,6 +51,20 @@ cur_config.json(现用配置,稀疏覆盖;板上 /userdata/doorguard/cur_config.
 继电器引脚(json-only 硬件参数):`access.relay_gpio_chip`(默认
 /dev/gpiochip0)、`access.relay_gpio_line`(默认 0)。
 
+指纹模组(json-only;细则见 docs/tech/FINGERPRINT_AS608.md §8):
+`finger.uart_dev`(/dev/ttyS8)、`finger.baud`(57600)、`finger.wak_gpio`(94)、
+`finger.wak_active_level`(-1=自动极性校准)。
+
+IC 读卡器(json-only):`iccard.dev_path`(/dev/dg_iccard0,"sim"=宿主模拟)。
+
+MQTT 通道(json-only;细则见 services/mqtt/README.md):`mqtt.enabled`(false)、
+`mqtt.uri`(空)、`mqtt.client_id`/`mqtt.topic_prefix`(doorguard)、
+`mqtt.username`/`mqtt.password`(空)、`mqtt.allow_remote_open`(false,安全默认)。
+
+语音播报(json-only;细则见 modules/audio/README.md):`audio.enabled`(true)、
+`audio.device`(default)、`audio.volume`(80)、`audio.prompt_dir`
+(/userdata/doorguard/audio)。后端打不开自动降级静默——硬件未接入不算故障。
+
 default.json 不再收录 HAL 硬件参数(相机分辨率/旋转等走环境变量,见
 `modules/camera/README.md`);本模块忽略未知键。
 
