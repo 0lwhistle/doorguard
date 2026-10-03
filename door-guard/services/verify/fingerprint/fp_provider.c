@@ -38,6 +38,22 @@ static int64_t s_next_try_ms;             /* 重试退避 */
 static dg_finger_mode_t s_mode = DG_FMODE_IDLE;
 static ev_finger_mode_t s_cur;            /* 当前模式参数(uid/arg/pages/seq) */
 
+/* ---- WAK"按下"电平 ----
+ * cfg finger.wak_active_level:-1=自动(默认)——启动时采样静息电平,
+ * 按下=反相,消除接线极性这个板上未验收项;0/1=强制(产线已知极性可
+ * 写 default.json 钉死)。自动档经 wak_calibrate 在线程启动时定一次 */
+static int  s_wak_active = 1;             /* 生效"按下"电平(0/1) */
+static bool s_wak_ready;
+static int  s_edge_miss;                  /* 连续边沿超时计数(轮询兜底节奏) */
+
+static int wait_press_once(int active);   /* 前置:定义在"按压沿与释放"段 */
+
+static int wak_active_level(void)
+{
+    return s_wak_ready ? s_wak_active
+                       : (cfg_get()->fp_wak_active >= 0 ? cfg_get()->fp_wak_active : 1);
+}
+
 /* 模式命令信箱(EV_FINGER_SET_MODE → 线程;单槽,新命令顶旧命令) */
 static pthread_mutex_t s_cmd_mtx = PTHREAD_MUTEX_INITIALIZER;
 static ev_finger_mode_t s_cmd;
@@ -52,6 +68,40 @@ static const fp_link_ops_t *s_link;       /* NULL = 板级 ops */
 extern const fp_link_ops_t fp_link_uart;  /* fp_link_uart.c */
 
 static void apply_cmd(void);              /* 前置:取消检查点内调用(定义在后) */
+
+/* 先过一次边沿等待触发 gpio_hal 的 export/edge 装配(直读依赖已导出),
+ * 再采样 1.2s 取众数为静息电平;采样全失败(引脚没接/没导出)沿用保守默认 */
+static void wak_calibrate(void)
+{
+    if (cfg_get()->fp_wak_active >= 0) {
+        s_wak_active = cfg_get()->fp_wak_active;
+        s_wak_ready = true;
+        DG_LOGI(TAG, "WAK 极性:配置强制 active=%d", s_wak_active);
+        return;
+    }
+    int lv;
+    (void)s_link->wak_wait(50, &lv);      /* 装配导出,结果不看 */
+    int cnt[2] = { 0, 0 };
+    int samples = 0;
+    for (int i = 0; i < 12; i++) {
+        if (s_link->wak_level(&lv) == DG_OK && (lv == 0 || lv == 1)) {
+            cnt[lv]++;
+            samples++;
+        }
+        usleep(100 * 1000);
+    }
+    if (samples == 0) {
+        s_wak_active = 1;                 /* 引脚读不到:退保守默认,链路错走降级 */
+        s_wak_ready = true;
+        DG_LOGW(TAG, "WAK 电平采样失败(引脚未接/未导出?),极性按默认 active=1");
+        return;
+    }
+    const int rest = cnt[0] >= cnt[1] ? 0 : 1;
+    s_wak_active = !rest;
+    s_wak_ready = true;
+    DG_LOGI(TAG, "WAK 极性自校准:静息=%d 按下=%d(采样 %d:%d)", rest,
+            s_wak_active, cnt[0], cnt[1]);
+}
 
 /* ---- 事件发布 ---- */
 
@@ -156,10 +206,12 @@ static void rx_pull(uint16_t n)
     pthread_mutex_unlock(&s_rx_mtx);
 }
 
-/** 等一帧(ACK/数据/结束);DG_OK / DG_ERR_TIMEOUT / DG_ERR_IO */
+/** 等一帧(ACK/数据/结束);DG_OK / DG_ERR_TIMEOUT / DG_ERR_IO。
+ *  时限用 MONOTONIC:校时步进(REALTIME 前跳)会把 remain 打成负数,
+ *  等待中的指令应答全体秒超时,录入/验证当场报链路错 */
 static int wait_frame(fp_frame_t *out, int timeout_ms)
 {
-    int64_t deadline = now_ms() + timeout_ms;
+    int64_t deadline = now_mono_ms() + timeout_ms;
     for (;;) {
         fp_frame_t f;
         size_t consumed = 0;
@@ -176,7 +228,7 @@ static int wait_frame(fp_frame_t *out, int timeout_ms)
             }
             continue;                     /* -1 已自动复位续喂;0 需更多字节 */
         }
-        int64_t remain = deadline - now_ms();
+        int64_t remain = deadline - now_mono_ms();
         if (remain <= 0)
             return DG_ERR_TIMEOUT;
         uint8_t tmp[128];
@@ -193,7 +245,7 @@ static int wait_frame(fp_frame_t *out, int timeout_ms)
 static int cmd_xchg(const uint8_t *frame, size_t len, fp_frame_t *ack,
                     uint16_t *confirm, int timeout_ms)
 {
-    s_hb_ms = now_ms();
+    s_hb_ms = now_mono_ms();
     if (s_link->send(frame, len) != DG_OK) {
         s_err_streak++;
         return DG_ERR_IO;
@@ -409,23 +461,14 @@ static bool enroll_canceled(void)
  *  提示在用户按下之后才出现就毫无意义 */
 static int enroll_wait_press(void)
 {
-    int active = cfg_get()->fp_wak_active ? 1 : 0;
-    int lvl;
     for (;;) {
         if (enroll_canceled())
             return 0;
-        int rc = s_link->wak_wait(200, &lvl);
-        if (rc == DG_ERR_TIMEOUT)
-            continue;
-        if (rc != DG_OK)
+        int press = wait_press_once(wak_active_level());
+        if (press < 0)
             return -1;
-        if (lvl == active) {
-            usleep(30 * 1000);            /* 消抖(§6) */
-            int lv2 = -1;
-            if (s_link->wak_level(&lv2) == DG_OK && lv2 != lvl)
-                continue;
+        if (press)
             return 1;
-        }
     }
 }
 
@@ -448,6 +491,8 @@ static void seq_enroll(void)
         s_mode = DG_FMODE_IDLE;
         return;
     }
+    DG_LOGI(TAG, "录入开始 %s(已录 %u/%d,WAK 按下=%d)", uid, cnt,
+            DG_FINGER_PAGES_MAX, wak_active_level());
     uint8_t b[FP_A608_FRAME_MAX];
     fp_frame_t ack;
     uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
@@ -485,9 +530,9 @@ static void seq_enroll(void)
         if (rc == DG_ERR_IO)
             goto link_err;
         if (qfail) {
-            /* 采集失败提示重按,不占进度(§6);仍等按压① */
+            /* 采集失败不占进度,明确提示重按(§6);仍等按压① */
             pub_progress(DG_ENROLL_FINGER, uid, s_cur.seq, 10,
-                         DG_ENROLL_FP_STEP_PRESS1);
+                         DG_ENROLL_FP_STEP_QUALITY);
             continue;
         }
 
@@ -527,9 +572,9 @@ static void seq_enroll(void)
         }
         if (qfail) {
             pub_status(DG_FINGER_RELEASED);
-            /* 重按②,仍提示"再次按压" */
+            /* 采集失败不占进度,明确提示重按;仍等按压② */
             pub_progress(DG_ENROLL_FINGER, uid, s_cur.seq, 50,
-                         DG_ENROLL_FP_STEP_PRESS2);
+                         DG_ENROLL_FP_STEP_QUALITY);
             continue;
         }
 
@@ -671,7 +716,7 @@ static void seq_del_user_pages(void)
         if (cmd_xchg(b, n, &ack, &c, 2000) != DG_OK || c != FP_ACK_OK)
             DG_LOGW(TAG, "删用户模板 PageID %u 失败(c=%u,孤儿由对账暴露)",
                     s_cur.pages[i], c);
-        s_hb_ms = now_ms();
+        s_hb_ms = now_mono_ms();
     }
     s_mode = DG_FMODE_IDLE;
 }
@@ -687,9 +732,35 @@ static bool debounce_press(int lvl)
     return lv2 == lvl;
 }
 
+/* 一次按压检测:边沿为主,连续约 1s 边沿超时后补一次电平直读兜底。
+ * sysfs 边沿依赖内核 edge 事件,极性配置错/边沿丢失/引脚悬空读数恒静息
+ * 时,纯边沿等待 = 永远等不到按压(2026-10-03 板上"无法录入"主嫌疑);
+ * 电平直读不依赖事件,≤1s 即能见到按下。1=按下,0=无,-1=链路错 */
+static int wait_press_once(int active)
+{
+    int lvl;
+    int rc = s_link->wak_wait(200, &lvl);
+    if (rc == DG_OK) {
+        s_edge_miss = 0;
+        if (lvl != active || !debounce_press(lvl))
+            return 0;
+        return 1;
+    }
+    if (rc != DG_ERR_TIMEOUT)
+        return -1;                        /* 链路坏:上层降级兜底 */
+    if (++s_edge_miss >= 5) {
+        s_edge_miss = 0;
+        int lv2;
+        if (s_link->wak_level(&lv2) == DG_OK && lv2 == active &&
+            debounce_press(lv2))
+            return 1;
+    }
+    return 0;
+}
+
 static void wait_release(void)
 {
-    int active = cfg_get()->fp_wak_active ? 1 : 0;
+    int active = wak_active_level();
     int lvl;
     for (;;) {
         int rc = s_link->wak_wait(200, &lvl);
@@ -698,7 +769,17 @@ static void wait_release(void)
                 break;
             continue;
         }
-        if (rc != DG_OK && rc != DG_ERR_TIMEOUT)
+        if (rc == DG_ERR_TIMEOUT) {
+            int lv2;                      /* 边沿缺失兜底:直读电平判释放 */
+            if (++s_edge_miss >= 5) {
+                s_edge_miss = 0;
+                if (s_link->wak_level(&lv2) == DG_OK && lv2 != active &&
+                    debounce_press(lv2))
+                    break;
+            }
+            continue;
+        }
+        if (rc != DG_OK)
             return;                       /* 链路坏:上层降级兜底 */
     }
     pub_status(DG_FINGER_RELEASED);
@@ -744,7 +825,7 @@ static bool ensure_link(void)
 {
     if (s_ready)
         return true;
-    int64_t now = now_ms();
+    int64_t now = now_mono_ms();
     if (now < s_next_try_ms)
         return false;
     s_next_try_ms = now + 2000;           /* 退避 2s(协议 §5.4) */
@@ -775,10 +856,11 @@ static bool ensure_link(void)
 static void *provider_thread(void *arg)
 {
     (void)arg;
-    s_hb_ms = now_ms();
+    s_hb_ms = now_mono_ms();
+    wak_calibrate();
 
     while (s_running) {
-        s_hb_ms = now_ms();
+        s_hb_ms = now_mono_ms();
         ensure_link();
         apply_cmd();
         if (!s_ready) {
@@ -787,7 +869,7 @@ static void *provider_thread(void *arg)
             continue;
         }
 
-        int active = cfg_get()->fp_wak_active ? 1 : 0;
+        int active = wak_active_level();
         switch (s_mode) {
         case DG_FMODE_ENROLL:
             seq_enroll();
@@ -799,42 +881,38 @@ static void *provider_thread(void *arg)
             seq_del_user_pages();
             break;
         case DG_FMODE_VERIFY_11: {
-            int lvl;
-            int rc = s_link->wak_wait(200, &lvl);
-            if (rc == DG_OK && lvl == active && debounce_press(lvl)) {
+            int press = wait_press_once(active);
+            if (press < 0)
+                degrade();
+            else if (press) {
                 pub_status(DG_FINGER_PRESSED);
                 seq_verify_11(s_cur.user_id);
-                s_hb_ms = now_ms();
+                s_hb_ms = now_mono_ms();
                 wait_release();
-            } else if (rc != DG_OK && rc != DG_ERR_TIMEOUT) {
-                degrade();
             }
             break;
         }
         case DG_FMODE_SCAN_1N: {
-            int lvl;
-            int rc = s_link->wak_wait(200, &lvl);
-            if (rc == DG_OK && lvl == active && debounce_press(lvl)) {
+            int press = wait_press_once(active);
+            if (press < 0)
+                degrade();
+            else if (press) {
                 pub_status(DG_FINGER_PRESSED);
                 seq_1n();
-                s_hb_ms = now_ms();
+                s_hb_ms = now_mono_ms();
                 wait_release();
-            } else if (rc != DG_OK && rc != DG_ERR_TIMEOUT) {
-                degrade();
             }
             break;
         }
         default: {                        /* IDLE:只记状态事件,不做模组业务 */
-            int lvl;
-            int rc = s_link->wak_wait(200, &lvl);
-            if (rc == DG_OK && lvl == active && debounce_press(lvl)) {
+            int press = wait_press_once(active);
+            if (press < 0)
+                degrade();
+            else if (press) {
                 pub_status(DG_FINGER_PRESSED);
                 wait_release();
-            } else if (rc != DG_OK && rc != DG_ERR_TIMEOUT) {
-                degrade();
             }
             break;
-        }
         }
     }
     return NULL;

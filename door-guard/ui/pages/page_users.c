@@ -63,9 +63,12 @@ static void refresh_list(void)
         /* 整块拷贝(dst/src 同为 char[DG_UID_LEN]):等价且绕开格式分析误报 */
         memcpy(s_row_uids[i], s_rows[i].user_id, DG_UID_LEN);
         /* 行首头像缩略图(40×40,libjpeg 1/4 缩放解码 + 控件内缓存);
-         * 无头像传 NULL,行为与旧列表一致 */
-        lv_obj_t *row = dg_list_add_row(s_list, dg_avatar_get(s_rows[i].user_id, DG_AVATAR_THUMB),
-                                        rowtxt, on_row_click);
+         * 未录人脸给默认占位图标(与真实头像同规格),不再行首空白 */
+        const lv_image_dsc_t *icon = dg_avatar_get(s_rows[i].user_id,
+                                                   DG_AVATAR_THUMB);
+        if (!icon)
+            icon = dg_avatar_default(DG_AVATAR_THUMB);
+        lv_obj_t *row = dg_list_add_row(s_list, icon, rowtxt, on_row_click);
         lv_obj_set_user_data(row, s_row_uids[i]);
         /* 编辑入口必须「看得见」:行点击=编辑是无形交互,用户找不到怎么改
          * (2026-09-22 反馈「看不到编辑选项」)。行右侧常驻提示,整行可点 */

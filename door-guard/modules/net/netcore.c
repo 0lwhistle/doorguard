@@ -43,9 +43,10 @@ static int s_dropped = 0;
 static atomic_bool s_running = false;
 static atomic_llong s_hb_ms = 0;
 
-/* 项目心跳约定 = CLOCK_REALTIME 纪元毫秒(timeutil 的 now_ms):
- * main 看门狗同基。换 MONOTONIC 会与看门狗相差整个纪元基数,心跳必然
- * 被判"超龄"(板上实测每次启动误报重启)——两时钟语义已显式分名 */
+/* 项目心跳约定(2026-10-03 起统一)= MONOTONIC 毫秒(timeutil 的
+ * now_mono_ms),main 看门狗同基同改。旧约定 CLOCK_REALTIME 在校时步进时
+ * 会把健康服务误判"心跳超龄"连环重启/禁用(板上定案,见 DEVLOG);
+ * 时钟语义分名:业务墙钟 now_ms,健康/心跳/超时一律 now_mono_ms */
 
 /* loop 线程内:排空闭包队列。轮数上界防"闭包再投闭包"饿死 loop;
  * 剩余的下一轮定时器接着排 */
@@ -75,7 +76,7 @@ static void *loop_thread(void *arg)
     (void)arg;
     mg_timer_add(&s_mgr, NETCORE_DRAIN_MS, MG_TIMER_REPEAT, drain_timer_fn, NULL);
     while (atomic_load(&s_running)) {
-        atomic_store(&s_hb_ms, now_ms());
+        atomic_store(&s_hb_ms, now_mono_ms());
         mg_mgr_poll(&s_mgr, NETCORE_POLL_MS);
     }
     return NULL;

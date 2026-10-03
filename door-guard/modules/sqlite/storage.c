@@ -592,17 +592,22 @@ static int feature_dup_locked(bool is_face, const char *exclude_uid,
 
     int dup = 0;
     int rows = 0;
+    int err_rows = 0;                     /* 无法参与比较的行(解密失败/比较器错) */
     while (sqlite3_step(st) == SQLITE_ROW) {
         rows++;
         const void *blob = sqlite3_column_blob(st, 1);
         int nbytes = sqlite3_column_bytes(st, 1);
-        if (!blob || nbytes <= 16)
+        if (!blob || nbytes <= 16) {
+            err_rows++;
             continue;
+        }
         uint8_t existing[DG_FEATURE_MAX];
         size_t existing_len = 0;
         if (dg_feature_unwrap(blob, (size_t)nbytes, existing,
-                              sizeof(existing), &existing_len) != DG_OK)
-            continue;                           /* 单行解密失败跳过,不中断查重 */
+                              sizeof(existing), &existing_len) != DG_OK) {
+            err_rows++;                   /* 单行解密失败跳过,不中断查重 */
+            continue;
+        }
 
         int match;
         if (cmp)
@@ -611,6 +616,10 @@ static int feature_dup_locked(bool is_face, const char *exclude_uid,
             match = (existing_len == len
                      && dg_constant_time_cmp(plain, existing, len) == 0);
         dg_secure_wipe(existing, sizeof(existing));
+        if (match < 0) {
+            err_rows++;                   /* 比较器报错(如特征口径不符):本行无法判 */
+            continue;
+        }
         if (match == 1) {
             dup = 1;
             DG_LOGI(TAG, "特征查重命中(%s,第 %d/%d 行)", col, rows, rows);
@@ -618,9 +627,20 @@ static int feature_dup_locked(bool is_face, const char *exclude_uid,
         }
     }
     sqlite3_finalize(st);
-    if (!dup)
+    if (dup)
+        return 1;
+    /* 全部行都无法比较 = 查重根本没跑成,按错误返回让调用方显式失败
+     * (fail-closed:宁可录入报错,不能让"不同用户同一张脸"静默通过);
+     * 部分行跳过时放行,日志留痕供对账 */
+    if (rows > 0 && err_rows == rows) {
+        DG_LOGE(TAG, "特征查重:%d 行全部无法比较(%s),按错误处理", rows, col);
+        return -1;
+    }
+    if (err_rows)
+        DG_LOGW(TAG, "特征查重:%d 行中 %d 行无法比较被跳过(%s)", rows, err_rows, col);
+    else
         DG_LOGI(TAG, "特征查重:遍历 %d 行无重复", rows);
-    return dup;
+    return 0;
 }
 
 int storage_set_feature_cmp(dg_feature_cmp_fn face_cmp,

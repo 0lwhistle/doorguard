@@ -1479,7 +1479,7 @@ static const web_set_item_t s_set_items[] = {
     { "menu_timeout_s",    "菜单超时",        "s",  false,    5,    15 },
     { "lost_hold_ms",      "脸框消失滞回",    "ms", false,   50,   200 },
     { "min_face_px",       "识别最小人脸",    "px", false,   10,    80 },
-    { "face_dup_threshold", "录入人脸查重阈值", "",  true,  0.05,  0.75 },
+    { "face_dup_threshold", "录入人脸查重阈值", "",  true,  0.01,  0.50 },
     { "liveness_enable",   "活体检测开关",    "",   false,    1,     0 },
     { "face_match_threshold", "1:N 识别阈值",    "",  true,  0.01,     0 },
     { "det_threshold",     "检测出框阈值",    "",   true,  0.01,     0 },

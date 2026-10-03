@@ -8,7 +8,7 @@
     "antispoof_enable": false,
     "antispoof_threshold": 0.5,
     "match_threshold": 0.42,
-    "face_dup_threshold": 0.75,
+    "face_dup_threshold": 0.5,
     "min_face_px": 80,
     "blur_min": 50,
     "det_score_min": 0.7,
@@ -26,7 +26,7 @@
     "uart_dev": "/dev/ttyS8",
     "baud": 57600,
     "wak_gpio": 94,
-    "wak_active_level": 1
+    "wak_active_level": -1
   },
   "iccard": {
     "dev_path": "/dev/dg_iccard0"

@@ -31,7 +31,8 @@ typedef struct {
     int  door_open_ms;         /**< 开门时长,1000~10000,默认 3000 */
     int  pwd_fail_lock_n;      /**< 密码连错锁定次数,1~10,默认 5 */
     int  pwd_fail_lock_s;      /**< 密码锁定时长,10~3600,默认 60 */
-    double face_dup_threshold; /**< 入库人脸查重相似度阈值,0.50~1.00,默认 0.90 */
+    double face_dup_threshold; /**< 入库人脸查重余弦阈值,0.30~1.00,默认 0.50
+                                    (板标定:本管线同人 0.40~0.60/陌生人 ≤0.3) */
     double face_match_threshold; /**< 1:N/1:1 命中阈值,0.30~1.00,默认 0.42(ROCKIVA 相似度) */
     int  liveness_enable;      /**< 动作活体开关,0/1,默认 0(B8 算法落地后开启) */
     int  antispoof_enable;     /**< 反欺骗单帧判定(MiniFASNet)开关,0/1,默认 0;
@@ -76,9 +77,10 @@ typedef struct {
     char fp_uart_dev[32];      /**< 模组串口节点,默认 /dev/ttyS8(uart8,板上 status=okay 且空闲) */
     int  fp_baud;              /**< 模组波特率,默认 57600(协议 v1 冻结值) */
     int  fp_wak_gpio;          /**< WAK 触摸 GPIO 全局编号,默认 94(GPIO2_D6) */
-    int  fp_wak_active;        /**< WAK"按下"电平,默认 1(高有效);极性是
-                                    FINGERPRINT_PROTOCOL §6.④ 同一开放项,真机
-                                    复测不符时改配置即可,不改码 */
+    int  fp_wak_active;        /**< WAK"按下"电平:-1=自动(默认,启动采样静息
+                                    电平反相定按下,fp_provider wak_calibrate);
+                                    0/1=强制。按压极性是 FINGERPRINT_PROTOCOL
+                                    §6.④ 开放项,自动档消除该未知数 */
     /* IC 读卡器(json-only;ICCARD_PROTOCOL §8;最终节点名由驱动定,只改配置) */
     char iccard_dev_path[32];  /**< 读卡器节点,默认 /dev/dg_iccard0;"sim"=宿主模拟后端 */
 } dg_cfg_t;

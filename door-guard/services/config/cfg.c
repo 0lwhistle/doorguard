@@ -46,7 +46,7 @@ static const cfg_meta_t META[] = {
     { "door_open_ms",         "access.door_open_ms",      CK_INT, 1000, 10000 },
     { "pwd_fail_lock_n",      "access.pwd_fail_lock_n",   CK_INT,    1,    10 },
     { "pwd_fail_lock_s",      "access.pwd_fail_lock_s",   CK_INT,   10,  3600 },
-    { "face_dup_threshold",   "face.face_dup_threshold",  CK_DBL, 0.50,  1.00 },
+    { "face_dup_threshold",   "face.face_dup_threshold",  CK_DBL, 0.30,  1.00 },
     { "face_match_threshold", "face.match_threshold",     CK_DBL, 0.30,  1.00 },
     { "min_face_px",         "face.min_face_px",          CK_INT,   40,   400 },
     { "blur_min",            "face.blur_min",             CK_DBL,  0.0, 50000 },
@@ -240,7 +240,12 @@ static void defaults_apply(dg_cfg_t *c)
     c->door_open_ms = 3000;
     c->pwd_fail_lock_n = 5;
     c->pwd_fail_lock_s = 60;
-    c->face_dup_threshold = 0.75;   /* 同人跨拍摄余弦普遍 0.65~0.90,0.9 拦不住 */
+    /* 查重阈值 0.50:板上实测本管线(检测框直裁,无五点对齐)同人跨拍摄
+     * 余弦只有 0.40~0.60(1:N 日志:同人 0.40~0.55,陌生人 0.07~0.27),
+     * 旧值 0.75/0.90 在此分布下拦不住任何同人重复——"不同用户录同一张脸
+     * 也能过"即此。0.50 = match_threshold(0.42) 之上的安全带;阈值仍可
+     * web 调,日志有"查重余弦"逐次落值可再标定(2026-10-03) */
+    c->face_dup_threshold = 0.50;
     c->face_match_threshold = 0.42;      /* 与 default.json face.match_threshold 一致 */
     c->face_min_px = 80;                /* 人脸框较小边 ≥80px 才做识别 */
     c->face_blur_min = 50.0;            /* 清晰度下限(板上标定,见日志"清晰度") */
@@ -270,7 +275,8 @@ static void defaults_apply(dg_cfg_t *c)
     snprintf(c->relay_gpio_chip, sizeof(c->relay_gpio_chip), "/dev/gpiochip0");
     c->fp_baud = 57600;
     c->fp_wak_gpio = 94;
-    c->fp_wak_active = 1;   /* 极性开放项:真机复测不符改 default.json,不改码 */
+    c->fp_wak_active = -1;  /* -1=自动:启动采样静息电平定极性(fp_provider);
+                               板上按压极性未验收前,自动档比猜 0/1 更可靠 */
     snprintf(c->fp_uart_dev, sizeof(c->fp_uart_dev), "/dev/ttyS8");
     snprintf(c->iccard_dev_path, sizeof(c->iccard_dev_path), "/dev/dg_iccard0");
 }

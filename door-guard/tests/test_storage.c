@@ -230,6 +230,47 @@ static void test_update_dup(void)
     storage_deinit();
 }
 
+/* 比较器报错 = 本行无法判重:全部行都错时必须显式失败(fail-closed),
+ * 不能静默放行——"不同用户录同一张脸"从比较器故障漏过是安全事故 */
+static int cmp_err(const uint8_t *a, uint16_t al, const uint8_t *b, uint16_t bl, void *ud)
+{
+    (void)a; (void)al; (void)b; (void)bl; (void)ud;
+    return -1;
+}
+
+static void test_dup_cmp_fail_closed(void)
+{
+    printf("[S9] 查重比较器报错:全部行无法比较 → 落库失败,不静默放行\n");
+    fresh_setup();
+    DG_CHECK(storage_set_feature_cmp(cmp_err, NULL, NULL) == DG_OK);
+
+    user_rec_t a = make_user("60001", "甲", "pwd");
+    memset(a.face_vec, 0xAA, 64);
+    a.face_vec_len = 64;
+    DG_CHECK(db_user_add(&a) == DG_OK);         /* 库内已有一条人脸 */
+
+    user_rec_t b = make_user("60002", "乙", "pwd");
+    memset(b.face_vec, 0xBB, 64);
+    b.face_vec_len = 64;
+    DG_CHECK(db_user_add(&b) == DG_ERR_DB);     /* 全部行比较失败 → 拒绝添加 */
+
+    /* update 同样 fail-closed(草稿 commit 路径) */
+    user_rec_t c = make_user("60003", "丙", "pwd");
+    DG_CHECK(db_user_add(&c) == DG_OK);
+    memset(c.face_vec, 0xCC, 64);
+    c.face_vec_len = 64;
+    DG_CHECK(db_user_update(&c) == DG_ERR_DB);
+
+    /* 部分行正常时仍以正常行为准:恢复可比较后同特征照常报 DUP */
+    DG_CHECK(storage_set_feature_cmp(cmp_bytes, cmp_bytes, NULL) == DG_OK);
+    user_rec_t d = make_user("60004", "丁", "pwd");
+    memset(d.face_vec, 0xAA, 64);
+    d.face_vec_len = 64;
+    DG_CHECK(db_user_add(&d) == DG_ERR_DUP_FACE);
+
+    storage_deinit();
+}
+
 static void test_field_valid(void)
 {
     printf("[S7] 字段合法性:非法 ID/姓名/密码一律拒(与 proto/valid.h 同规则)\n");
@@ -820,6 +861,7 @@ int main(void)
 
     test_password();
     test_update_dup();
+    test_dup_cmp_fail_closed();
     test_field_valid();
     test_user_list_ids();
     test_logs();

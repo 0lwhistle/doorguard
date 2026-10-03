@@ -7,8 +7,9 @@
  * 合成/Store/UpChar)→ EV_ENROLL_RESULT + fingerprints 落库 + 方式位。
  *
  * 覆盖:happy path(落库+方式位+PageID 分配)/ 与他人重复 DUP_FINGER /
- * 单用户超 3 枚 FINGER_LIMIT / 模组库满 FINGER_FULL / 两次不一致
- * RETRY2 重采后成功 / 取消回滚(无 Store 不留孤儿)/ DeletChar 单枚删除。
+ * 同用户重复自己已有枚 DUP_FINGER / 单用户超 3 枚 FINGER_LIMIT /
+ * 模组库满 FINGER_FULL / 两次不一致 RETRY2 重采后成功 / 按压①成像差
+ * QUALITY 提示 / 取消回滚(无 Store 不留孤儿)/ DeletChar 单枚删除。
  */
 #include "dg_test.h"
 #include "cfg.h"
@@ -366,7 +367,7 @@ int main(void)
     snprintf(db, sizeof(db), "%s/db.sqlite", dir);
     snprintf(key, sizeof(key), "%s/dg.key", dir);
     DG_CHECK(storage_init(db, key) == DG_OK);
-    DG_CHECK(cfg_load(NULL, NULL) == DG_OK);    /* 纯默认(wak 高有效) */
+    DG_CHECK(cfg_load(NULL, NULL) == DG_OK);    /* 纯默认(wak_active=-1 自动极性) */
 
     event_bus_subscribe(EV_ENROLL_PROGRESS, on_progress, NULL);
     event_bus_subscribe(EV_ENROLL_RESULT, on_result, NULL);
@@ -376,8 +377,9 @@ int main(void)
 
     make_user("30001", "张三");
 
-    /* 等 provider 握手就绪(假链路 open+VerifyPSW 毫秒级) */
-    for (int i = 0; i < 100 && !fp_provider_ready(); i++)
+    /* 等 provider 就绪:线程启动先做 WAK 极性自校准(自动档 ~1.2s 采样)
+     * 再握手,就绪上限放宽到 5s */
+    for (int i = 0; i < 500 && !fp_provider_ready(); i++)
         usleep(10000);
     DG_CHECK(fp_provider_ready());
 
@@ -399,6 +401,7 @@ int main(void)
     uint32_t np = 0;
     DG_CHECK(db_finger_list_user("30001", pages, DG_FINGER_PAGES_MAX, &np) == DG_OK);
     DG_CHECK(np == 1 && pages[0] == atomic_load(&F.store_page));
+    const int32_t p1_page = (int32_t)atomic_load(&F.store_page);
     user_rec_t rec;
     DG_CHECK(db_user_get("30001", &rec) == DG_OK);
     DG_CHECK(rec.auth_flags & DG_AUTH_FINGER);  /* 首枚指纹开方式位 */
@@ -420,6 +423,19 @@ int main(void)
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_DUP_FINGER);
     DG_CHECK(atomic_load(&F.store_page) != 500);
 
+    printf("[P2b] 同用户重复:Search 命中自己已有页 → DUP_FINGER(同指不重录)\n");
+    fake_reset();
+    F.search_hit = 1;
+    F.search_page = (uint16_t)p1_page;    /* P1 落库的 30001 自己的页 */
+    publish_req("30001", DG_ENROLL_FINGER, 0);
+    wait_ge(&s_progress_cnt, 4, 3000);
+    press();
+    wait_ge(&s_result_finger_cnt, 3, 5000);
+    DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_DUP_FINGER);
+    DG_CHECK(atomic_load(&F.delet_calls) == 0);   /* 未 Store 无需回滚 */
+    cnt = 99;
+    DG_CHECK(db_finger_count_user("30001", &cnt) == DG_OK && cnt == 1);
+
     printf("[P3] 单用户超 3 枚:FINGER_LIMIT,不进采集\n");
     fake_reset();
     make_user("30002", "李四");
@@ -428,7 +444,7 @@ int main(void)
     add_finger_row("30002", 602);
     int prog_before = atomic_load(&s_progress_cnt);
     publish_req("30002", DG_ENROLL_FINGER, 0);
-    wait_ge(&s_result_finger_cnt, 3, 3000);
+    wait_ge(&s_result_finger_cnt, 4, 3000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_FINGER_LIMIT);
     DG_CHECK(atomic_load(&s_progress_cnt) == prog_before);  /* 相对断言:无新进度 = 没等按压 */
 
@@ -436,7 +452,7 @@ int main(void)
     fake_reset();
     F.valid_count = 1000;
     publish_req("30001", DG_ENROLL_FINGER, 0);
-    wait_ge(&s_result_finger_cnt, 4, 3000);
+    wait_ge(&s_result_finger_cnt, 5, 3000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_FINGER_FULL);
 
     printf("[P5] 两次不一致:RETRY2 重采后成功\n");
@@ -454,8 +470,29 @@ int main(void)
     DG_CHECK(atomic_load(&s_progress_step) == DG_ENROLL_FP_STEP_RETRY2);
     F.match_ack = FP_ACK_OK;
     press();                              /* 重采② */
-    wait_ge(&s_result_finger_cnt, 5, 5000);
+    wait_ge(&s_result_finger_cnt, 6, 5000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_OK);
+
+    printf("[P5b] 按压①成像差:GetImage 无指纹 → QUALITY 提示,重按走完全程\n");
+    fake_reset();
+    atomic_store(&s_progress_cnt, 0);
+    make_user("30003", "王五");
+    F.getimage_ack = FP_ACK_NO_FINGER;
+    publish_req("30003", DG_ENROLL_FINGER, 0);
+    wait_ge(&s_progress_cnt, 1, 3000);    /* PRESS1 */
+    press();                              /* 按压①:不成像 */
+    for (int i = 0; i < 1000 && atomic_load(&s_progress_step)
+                                        != DG_ENROLL_FP_STEP_QUALITY; i++)
+        usleep(5000);
+    DG_CHECK(atomic_load(&s_progress_step) == DG_ENROLL_FP_STEP_QUALITY);
+    F.getimage_ack = 0;
+    press();                              /* 重按:此后全部默认应答 */
+    wait_ge(&s_progress_cnt, 3, 5000);    /* PRESS2 */
+    press();
+    wait_ge(&s_result_finger_cnt, 7, 5000);
+    DG_CHECK(atomic_load(&s_result_finger_err) == DG_OK);
+    cnt = 99;
+    DG_CHECK(db_finger_count_user("30003", &cnt) == DG_OK && cnt == 1);
 
     printf("[P6] 取消:未 Store 即退出,无回滚无结果\n");
     fake_reset();

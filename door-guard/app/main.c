@@ -82,7 +82,10 @@ static void *loop_watchdog_thread(void *arg)
         nanosleep(&ts, NULL);
         if (!s_loop_started)
             continue;
-        const int64_t now = now_ms();
+        /* MONOTONIC:节拍与比较必须同时域——REALTIME 会被 NTP/RTC 校时
+         * 步进,跳变后差值爆表即误判主循环卡死自杀(2026-10-03 板上
+         * 时钟域连环误伤定案,健康/心跳检查一律单调时域) */
+        const int64_t now = now_mono_ms();
         if (now - s_loop_beat_ms > WD_LOOP_STALE_MS) {
             DG_LOGE("[MAIN]", "主循环 %lldms 无心跳(渲染/取流卡死),退出交 S60 重拉",
                     (long long)(now - s_loop_beat_ms));
@@ -394,7 +397,10 @@ static void watchdog_once(void)
 {
     watchdog_storage_once();
 
-    int64_t now = now_ms();
+    /* 服务心跳(vision worker 等)报 MONOTONIC,这里必须同域比较;
+     * 旧实现 now_ms()(REALTIME)遇上校时步进,把所有健康服务误判
+     * "心跳超龄"连环重启/禁用(2026-10-03 板上定案) */
+    int64_t now = now_mono_ms();
     uint32_t n = registry_count();
     for (uint32_t i = 0; i < n; i++) {
         const char *name = registry_name_at(i);
@@ -488,13 +494,13 @@ int main(int argc, char *argv[])
         pthread_detach(wd_tid);
     else
         DG_LOGW("[MAIN]", "主循环监控线程创建失败(卡死只能人工复位)");
-    int64_t next_scan = now_ms() + WD_INTERVAL_MS;
-    s_loop_beat_ms = now_ms();
+    int64_t next_scan = now_mono_ms() + WD_INTERVAL_MS;
+    s_loop_beat_ms = now_mono_ms();
     s_loop_started = true;
     for (;;) {
         camera_poll();
         ui_poll();
-        s_loop_beat_ms = now_ms();
+        s_loop_beat_ms = now_mono_ms();
         int64_t now = s_loop_beat_ms;
         if (now >= next_scan) {
             watchdog_once();

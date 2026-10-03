@@ -205,5 +205,11 @@
   "请刷卡…": "Tap card…",
   "重新录入": "Re-enroll",
   "指纹模块未就绪": "Fingerprint module not ready",
-  "读卡器未就绪": "Card reader not ready"
+  "读卡器未就绪": "Card reader not ready",
+  "未读到指纹，请调整手指贴合传感器": "Finger not read. Place your finger firmly on the sensor.",
+  "该指纹已录入过，请更换手指": "This finger is already enrolled. Use another finger.",
+  "设备通信异常，请重试": "Device communication error. Try again.",
+  "操作超时，请重试": "Operation timed out. Try again.",
+  "存储异常，请重试": "Storage error. Try again.",
+  "指纹采集质量差，请重按": "Poor fingerprint capture. Press again."
 }

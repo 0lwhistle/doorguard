@@ -214,6 +214,7 @@ typedef enum {
     DG_ENROLL_FP_STEP_PRESS1 = 1,         /**< 请按压指纹 */
     DG_ENROLL_FP_STEP_PRESS2 = 2,         /**< 请再次按压同一手指 */
     DG_ENROLL_FP_STEP_RETRY2 = 3,         /**< 两次按压不一致,请用同一手指 */
+    DG_ENROLL_FP_STEP_QUALITY = 4,        /**< 模组未读到指纹/成像差,调整手指重按 */
 } dg_enroll_fp_step_t;
 
 typedef struct {

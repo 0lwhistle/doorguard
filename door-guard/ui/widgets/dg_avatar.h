@@ -42,6 +42,14 @@ const lv_image_dsc_t *dg_avatar_get(const char *uid, dg_avatar_size_t size);
 const lv_image_dsc_t *dg_avatar_decode(const uint8_t *jpeg, size_t len,
                                        dg_avatar_size_t size);
 
+/**
+ * 默认头像(未录人脸用户的占位图标):与真实头像同规格的代码绘制人形,
+ * 静态懒建、恒可用,无需 invalidate。用法
+ * `dg_avatar_get(uid,size) ?: dg_avatar_default(size)`,
+ * 消除列表"有脸有图、无脸空白"的参差。
+ */
+const lv_image_dsc_t *dg_avatar_default(dg_avatar_size_t size);
+
 /** 头像数据变化后失效缓存(录入成功 / 清除人脸 / 删除用户;NULL = 全部) */
 void dg_avatar_invalidate(const char *uid);
 

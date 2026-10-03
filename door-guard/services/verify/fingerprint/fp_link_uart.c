@@ -68,7 +68,7 @@ static int link_send(const uint8_t *data, size_t len)
 static int link_recv(uint8_t *buf, size_t cap, int timeout_ms, size_t *out_len)
 {
     *out_len = 0;
-    int64_t deadline = now_ms() + timeout_ms;
+    int64_t deadline = now_mono_ms() + timeout_ms;   /* MONOTONIC:校时步进不打断等待 */
     for (;;) {
         pthread_mutex_lock(&s_ring_mtx);
         size_t n = s_ring_len < cap ? s_ring_len : cap;
@@ -82,7 +82,7 @@ static int link_recv(uint8_t *buf, size_t cap, int timeout_ms, size_t *out_len)
             *out_len = n;
             return 0;
         }
-        if (now_ms() >= deadline)
+        if (now_mono_ms() >= deadline)
             return DG_ERR_TIMEOUT;
         struct timespec ts = { 0, 5 * 1000 * 1000 };
         nanosleep(&ts, NULL);

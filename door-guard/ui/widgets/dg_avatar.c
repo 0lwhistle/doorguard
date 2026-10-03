@@ -174,3 +174,63 @@ void dg_avatar_invalidate(const char *uid)
         }
     }
 }
+
+/* ---- 默认头像(未录人脸用户的占位图标) ----
+ * 旧约定"无头像 get 返回 NULL = 行首空白",用户管理列表出现有的行有图
+ * 有的行光秃;本函数给一张与真实头像同规格的人形占位图。代码绘制,
+ * 零资源文件;静态单缓冲按尺寸懒建,首次绘制后恒命中 */
+
+static uint8_t s_def_px[2][FULL_MAX * FULL_MAX * AV_BPP];   /* [0]=thumb [1]=full */
+static lv_image_dsc_t s_def_dsc[2];
+
+static void draw_person(uint8_t *px, int size)
+{
+    /* 浅灰蓝底 + 中灰人形(头圆 + 肩椭圆),2×2 超采样去 40px 档的锯齿;
+     * 像素序 = LVGL RGB888(B,G,R),同 rgb_to_lv888 */
+    static const uint8_t bg[3] = { 0xF6, 0xF1, 0xEE };   /* #EEF1F6 */
+    static const uint8_t fg[3] = { 0xB8, 0xA6, 0x98 };   /* #98A6B8 */
+    const float cx = size * 0.50f;
+    const float head_r  = size * 0.19f, head_cy = size * 0.36f;
+    const float sh_rx   = size * 0.33f, sh_ry   = size * 0.42f;
+    const float sh_cy   = size * 1.04f;
+    for (int y = 0; y < size; y++) {
+        for (int x = 0; x < size; x++) {
+            int cov = 0;
+            for (int sy = 0; sy < 2; sy++) {
+                for (int sx = 0; sx < 2; sx++) {
+                    const float sxp = x + 0.25f + 0.5f * sx;
+                    const float syp = y + 0.25f + 0.5f * sy;
+                    const float dh = (sxp - cx) / head_r * ((sxp - cx) / head_r)
+                                   + (syp - head_cy) / head_r * ((syp - head_cy) / head_r);
+                    const float ds = (sxp - cx) / sh_rx * ((sxp - cx) / sh_rx)
+                                   + (syp - sh_cy) / sh_ry * ((syp - sh_cy) / sh_ry);
+                    if (dh <= 1.0f || ds <= 1.0f)
+                        cov++;
+                }
+            }
+            uint8_t *o = px + ((size_t)y * size + x) * AV_BPP;
+            for (int c = 0; c < 3; c++)
+                o[c] = (uint8_t)((bg[c] * (4 - cov) + fg[c] * cov) / 4);
+        }
+    }
+}
+
+const lv_image_dsc_t *dg_avatar_default(dg_avatar_size_t size)
+{
+    const int idx = (size == DG_AVATAR_FULL) ? 1 : 0;
+    const int n = (size == DG_AVATAR_FULL) ? FULL_MAX : THUMB_MAX;
+    lv_image_dsc_t *d = &s_def_dsc[idx];
+    if (d->header.magic != LV_IMAGE_HEADER_MAGIC) {
+        uint8_t *buf = s_def_px[idx];
+        draw_person(buf, n);
+        memset(d, 0, sizeof(*d));
+        d->header.magic = LV_IMAGE_HEADER_MAGIC;   /* v9 内存位图识别 */
+        d->header.w = (uint32_t)n;
+        d->header.h = (uint32_t)n;
+        d->header.stride = (uint32_t)n * AV_BPP;
+        d->data_size = (uint32_t)((size_t)n * n * AV_BPP);
+        d->header.cf = LV_COLOR_FORMAT_RGB888;     /* 与 3B 缓冲一致(见文件头 ⚠️) */
+        d->data = buf;
+    }
+    return d;
+}

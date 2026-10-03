@@ -114,8 +114,12 @@ static enum task_t poll_task(void *ctx)
     if (!s_running)
         return TASK_OK;
 
+    /* 帧时间戳 camera_last_frame_ms 是 MONOTONIC 域(camera_board mono_ms
+     * 打点)——这里必须用同一时域。旧实现喂 now_ms()(REALTIME):板上
+     * RTC 是 2021 年,两域差 ~1.6e12ms,开机十几秒必误判"断流"→ 白幕 +
+     * 看门狗同款混算连环误伤(2026-10-03 板上日志定案,见 DEVLOG) */
     cap_health_out_t o = health_eval(&s_h, camera_stream_on(),
-                                     camera_last_frame_ms(), now_ms());
+                                     camera_last_frame_ms(), now_mono_ms());
     if (!o.publish)
         return TASK_OK;
 

@@ -99,6 +99,10 @@ static const char *err_text(int rc)
     case DG_ERR_BAD_NAME:     return _("姓名不合法");
     case DG_ERR_BAD_PWD:      return _("密码不合法");
     case DG_ERR_BAD_UID:      return _("用户ID不合法");
+    case DG_ERR_IO:           return _("设备通信异常，请重试");
+    case DG_ERR_TIMEOUT:      return _("操作超时，请重试");
+    case DG_ERR_DB:           return _("存储异常，请重试");
+    case DG_ERR_MISMATCH:     return _("指纹采集质量差，请重按");
     default:                  return _("操作失败,请重试");
     }
 }
@@ -655,6 +659,8 @@ static void show_fp_progress(int32_t step)
         text = _("请按压指纹");
     else if (step == DG_ENROLL_FP_STEP_RETRY2)
         text = _("两次按压指纹不一致，请用同一手指");
+    else if (step == DG_ENROLL_FP_STEP_QUALITY)
+        text = _("未读到指纹，请调整手指贴合传感器");
     dg_popup_fail(text, 2500, NULL, NULL);   /* 中性提示走醒目样式,自动消失 */
 }
 
@@ -678,11 +684,11 @@ static void on_evt(const ui_evt_t *evt)
         s_fp_enrolling = false;          /* 终态:成功/失败都收流 */
         if (err == DG_OK)
             dg_popup_success(_("指纹已录入"), 1200, NULL, NULL);
-        else if (err != DG_ERR_DUP_FINGER)
+        else if (err == DG_ERR_DUP_FINGER)
+            /* 同指重复不分"自己/他人":按手指说,文案两边都成立(§9) */
+            dg_popup_fail(_("该指纹已录入过，请更换手指"), 2000, NULL, NULL);
+        else
             dg_popup_fail(err_text(err), 2000, NULL, NULL);
-        /* DUP_FINGER 文案更具体:直接红字提示重复 */
-        if (err == DG_ERR_DUP_FINGER)
-            dg_popup_fail(_("该指纹已绑定其他用户"), 2000, NULL, NULL);
         break;
     case DG_ENROLL_FINGER_DEL:
         if (err == DG_OK)

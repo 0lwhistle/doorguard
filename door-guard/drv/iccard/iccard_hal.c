@@ -37,8 +37,12 @@ int iccard_hal_open(const char *dev_path)
 
     int fd = open(dev_path, O_RDWR | O_CLOEXEC);
     if (fd < 0) {
-        DG_LOGW(TAG, "open %s: %s(读卡器未就绪?走降级重试)", dev_path,
-                strerror(errno));
+        /* 驱动未上线时本函数每 2s 被退避重试打一次:限频到 ~30s 一条,
+         * 否则降级期日志全被本行淹没(2026-10-03 板上 10min 300+ 条) */
+        static int n_log;
+        if (n_log++ % 15 == 0)
+            DG_LOGW(TAG, "open %s: %s(读卡器未就绪?走降级重试;此日志 30s 限频)",
+                    dev_path, strerror(errno));
         return (errno == EBUSY) ? DG_ERR_BUSY : DG_ERR_IO;
     }
     return fd;
