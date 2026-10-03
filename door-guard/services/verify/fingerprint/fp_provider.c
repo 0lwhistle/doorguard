@@ -914,6 +914,7 @@ static void *provider_thread(void *arg)
             }
             break;
         }
+        }                                 /* switch */
     }
     return NULL;
 }
