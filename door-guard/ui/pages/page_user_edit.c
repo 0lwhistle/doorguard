@@ -243,8 +243,8 @@ static void refresh(void)
         val_set(s_val_face, rec.face_vec_len > 0 ? _("已录入") : _("无"));
     dg_btn_set_label(s_btn_face, _("修改"));
     /* ADD 存成用户后原地转 EDIT:人脸按钮在 ADD 分支被隐藏,这里必须
-     * 显式还原,否则"保存成功后要退出去再进来才能录人脸"(2026-10-03
-     * 用户实测);指纹/IC 按钮常显不受影响 */
+     * 显式还原,否则保存成功后要退出再进才能录人脸(2026-10-03 用户实测);
+     * 指纹/IC 按钮常显不受影响 */
     if (s_btn_face)
         lv_obj_clear_flag(s_btn_face, LV_OBJ_FLAG_HIDDEN);
 
