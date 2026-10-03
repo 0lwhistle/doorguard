@@ -399,8 +399,9 @@ static void timer_stop(void *arg)
         s_timer = NULL;
     }
     if (s_conn) {
-        /* 主动告别覆盖 LWT;is_closing 由 poll 末尾统一延迟关闭(事件回调
-         * 内禁止 mg_close_conn 的同一理由,见 ntp_service) */
+        /* 主动告别覆盖 LWT;直发不经 pub_now——stop() 已把 s_connected
+         * 置 false,经它会被"未连接"守卫拦掉。is_closing 由 poll 末尾统一
+         * 延迟关闭(事件回调内禁止 mg_close_conn,见 ntp_service) */
         struct mg_mqtt_opts o = { 0 };
         char topic[64];
         topic_full(topic, sizeof(topic), "status");
