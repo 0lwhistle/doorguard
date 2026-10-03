@@ -100,8 +100,7 @@ static void t_build_derived(void)
 
 static void t_parse_ack(void)
 {
-    printf("[P3] 应答解析(2026-10-03 板上实测 golden:字面长度/确认码 1B)
-");
+    printf("[P3] 应答解析(2026-10-03 板上实测 golden:字面长度/确认码 1B)\n");
     fp_parser_t p;
     fp_frame_t f;
 
