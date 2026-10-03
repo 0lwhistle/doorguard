@@ -367,8 +367,8 @@ static void seq_verify_11(const char *uid)
             return;
         if (c == FP_ACK_OK) {
             m.matched = true;
-            m.score_permille = (ack.payload_len >= 4)
-                                   ? (((uint16_t)ack.payload[2] << 8) | ack.payload[3])
+            m.score_permille = (ack.payload_len >= 3)
+                                   ? (((uint16_t)ack.payload[1] << 8) | ack.payload[2])
                                    : 0;
             if (m.score_permille > 1000)
                 m.score_permille = 1000;
@@ -458,7 +458,8 @@ static void seq_enroll(void)
         return;
     }
     {
-        uint16_t valid = ((uint16_t)ack.payload[2] << 8) | ack.payload[3];
+        /* payload = 确认码(1B) + 模板数(2B) */
+        uint16_t valid = ((uint16_t)ack.payload[1] << 8) | ack.payload[2];
         if (valid >= FP_PAGE_COUNT) {
             pub_enroll_result(DG_ENROLL_FINGER, uid, s_cur.seq, DG_ERR_FINGER_FULL);
             s_mode = DG_FMODE_IDLE;

@@ -151,17 +151,18 @@ enum {
     PS_PAYLOAD,      /* 载荷(含 2B 校验和;按类型折算,见 after_len_of) */
 };
 
-/* 标识码后的实际字节数(含校验和)。AS608 应答包的长度字段口径与指令包
- * 不同:指令包 = 指令+参数+校验和;应答包 = 确认码+参数+校验和再减 1
- * (确认码 2B 只按 1B 计)——官方例程 FPM10A_Receive_Data(12/16) 少读
- * 一字节正是此坑。结束包 = 校验和 + 1(长度 0x0003、校验和 2B)。 */
+/* 标识码后的实际字节数(含校验和)。
+ * 2026-10-03 真机勘误:板上实测(GetImage 无手指应答 12B、ValidTempleteNum
+ * 14B)证明 ACK 帧是"字面长度"——长度字段 = 确认码(1B)+参数+校验和(2B),
+ * 整帧 = 9+长度字段;厂家 51 例程按 12/16 字节整帧接收是对的,v1 文档把它
+ * 误读成"例程少读 1 字节(确认码 2B)",照此实现会让解析器多等一个永远不会
+ * 来的字节。END(0x08) 无载荷,长度 = 标识码+校验和(0x000B golden 自洽),
+ * after = len-1;DATA/指令维持字面长度。 */
 static int after_len_of(uint8_t type, uint16_t len_field)
 {
-    switch (type) {
-    case FP_A608_TYPE_ACK:  return (int)len_field + 1;
-    case FP_A608_TYPE_END:  return (int)len_field - 1;
-    default:                return (int)len_field;   /* 0x01 指令 / 0x02 数据 */
-    }
+    if (type == FP_A608_TYPE_END)
+        return (int)len_field - 1;
+    return (int)len_field;
 }
 
 void fp_as608_parser_init(fp_parser_t *p)
@@ -263,9 +264,10 @@ int fp_as608_parse(fp_parser_t *p, const uint8_t *buf, size_t len,
 
 uint16_t fp_as608_ack_confirm(const fp_frame_t *f)
 {
-    if (!f || f->type != FP_A608_TYPE_ACK || f->payload_len < 2)
+    /* 确认码线上 1B(payload[1] 起是参数,见 after_len_of 勘误注) */
+    if (!f || f->type != FP_A608_TYPE_ACK || f->payload_len < 1)
         return 0xFFFF;                   /* 非应答帧,调用方误用 */
-    return get_be16(f->payload);
+    return f->payload[0];
 }
 
 void fp_as608_search_result(const fp_frame_t *f, uint16_t *page_id, uint16_t *score)
@@ -274,10 +276,11 @@ void fp_as608_search_result(const fp_frame_t *f, uint16_t *page_id, uint16_t *sc
         *page_id = 0;
     if (score)
         *score = 0;
-    if (!f || f->type != FP_A608_TYPE_ACK || f->payload_len < 6)
+    /* payload = 确认码(1B) + 页号(2B) + 得分(2B) */
+    if (!f || f->type != FP_A608_TYPE_ACK || f->payload_len < 5)
         return;
     if (page_id)
-        *page_id = get_be16(f->payload + 2);
+        *page_id = get_be16(f->payload + 1);
     if (score)
-        *score = get_be16(f->payload + 4);
+        *score = get_be16(f->payload + 3);
 }

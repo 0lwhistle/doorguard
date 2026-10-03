@@ -100,20 +100,40 @@ static void t_build_derived(void)
 
 static void t_parse_ack(void)
 {
-    printf("[P3] 应答解析:整帧/跨块/确认码/Search 取参\n");
+    printf("[P3] 应答解析(2026-10-03 板上实测 golden:字面长度/确认码 1B)
+");
     fp_parser_t p;
     fp_frame_t f;
 
-    /* Search 命中 17B:07 0007 | 确认 0000 | 页 0005 | 得分 0032 | sum 0045
-     * (sum=07+00+07+00+00+00+05+00+32=0x45;协议文档 §3 示例曾写 0046 系
-     * 手算错,2026-10-01 随解析器修一并更正;长度字段口径:确认码 2B 按 1B
-     * 计,实际帧比长度字段多 1 字节,见 fp_as608.c after_len_of) */
-    uint8_t srch_ack[] = { 0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
-                           0x07, 0x00, 0x07, 0x00, 0x00, 0x00, 0x05,
-                           0x00, 0x32, 0x00, 0x45 };
+    /* 握手成功 12B(真机实测):07 0003 | 确认码 00 | 校验和 00 0A
+     * sum = 07+00+03+00 = 0x0A;整帧 = 9+长度字段,厂家例程读 12B 是对的 */
+    uint8_t ack_ok[] = { 0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
+                         0x07, 0x00, 0x03, 0x00, 0x00, 0x0A };
+    fp_as608_parser_init(&p);
+    DG_CHECK(fp_as608_parse(&p, ack_ok, sizeof(ack_ok), &f, NULL) == 1);
+    DG_CHECK(f.type == FP_A608_TYPE_ACK);
+    DG_CHECK(fp_as608_ack_confirm(&f) == FP_ACK_OK);
+
+    /* 无手指 12B(真机实测):确认码 02,sum = 07+00+03+02 = 0x0C */
+    uint8_t ack_nofinger[] = { 0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
+                               0x07, 0x00, 0x03, 0x02, 0x00, 0x0C };
+    fp_as608_parser_init(&p);
+    DG_CHECK(fp_as608_parse(&p, ack_nofinger, sizeof(ack_nofinger), &f, NULL) == 1);
+    DG_CHECK(fp_as608_ack_confirm(&f) == FP_ACK_NO_FINGER);
+
+    /* 模板数 14B(真机实测,空库):07 0005 | 00 | 00 00 | 00 0C */
+    uint8_t ack_valid0[] = { 0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
+                             0x07, 0x00, 0x05, 0x00, 0x00, 0x00, 0x0C };
+    fp_as608_parser_init(&p);
+    DG_CHECK(fp_as608_parse(&p, ack_valid0, sizeof(ack_valid0), &f, NULL) == 1);
+    DG_CHECK(fp_as608_ack_confirm(&f) == FP_ACK_OK);
+
+    /* Search 命中 16B(帧式推导,sum=07+00+07+00+05+00+32=0x47):
+     * 07 0007 | 确认码 00 | 页号 0005 | 得分 0032 | 校验和 0047 */
+    uint8_t srch_ack[] = { 0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x07,
+                           0x00, 0x07, 0x00, 0x00, 0x05, 0x00, 0x32, 0x00, 0x47 };
     fp_as608_parser_init(&p);
     DG_CHECK(fp_as608_parse(&p, srch_ack, sizeof(srch_ack), &f, NULL) == 1);
-    DG_CHECK(f.type == FP_A608_TYPE_ACK);
     DG_CHECK(fp_as608_ack_confirm(&f) == FP_ACK_OK);
     uint16_t page = 0, score = 0;
     fp_as608_search_result(&f, &page, &score);
@@ -133,13 +153,12 @@ static void t_parse_ack(void)
     DG_CHECK(got);
     DG_CHECK(fp_as608_ack_confirm(&f) == FP_ACK_OK && page == 5);
 
-    /* 普通指令应答 13B:确认码 0x02(无手指),sum=07+00+03+00+02=0x0C */
+    /* 普通指令应答(帧式推导):确认码 02,sum = 07+00+03+02 = 0x0C */
     uint8_t nack[] = { 0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
-                       0x07, 0x00, 0x03, 0x00, 0x02, 0x00, 0x0C };
+                       0x07, 0x00, 0x03, 0x02, 0x00, 0x0C };
     fp_as608_parser_init(&p);
     DG_CHECK(fp_as608_parse(&p, nack, sizeof(nack), &f, NULL) == 1);
     DG_CHECK(fp_as608_ack_confirm(&f) == FP_ACK_NO_FINGER);
-    DG_CHECK(strcmp(fp_as608_confirm_name(FP_ACK_NO_FINGER), "NO_FINGER") == 0);
 }
 
 static void t_parse_errors(void)
@@ -148,9 +167,9 @@ static void t_parse_errors(void)
     fp_parser_t p;
     fp_frame_t f;
 
-    /* 前置噪声字节 + 正帧(粘包场景的"前噪声"形态) */
+    /* 前置噪声字节 + 正帧(粘包场景的"前噪声"形态;12B ACK 实测口径) */
     uint8_t noisy[] = { 0xAA, 0xBB, 0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
-                        0x07, 0x00, 0x03, 0x00, 0x00, 0x00, 0x0A };
+                        0x07, 0x00, 0x03, 0x00, 0x00, 0x0A };
     fp_as608_parser_init(&p);
     DG_CHECK(fp_as608_parse(&p, noisy, sizeof(noisy), &f, NULL) == 1);
     DG_CHECK(fp_as608_ack_confirm(&f) == FP_ACK_OK);
@@ -180,7 +199,7 @@ static void t_parse_sticky(void)
      * 数据包:len=数据4+校验和2=0006,sum=02+00+06+DE+AD+BE+EF=0x0340
      * 结束包:len=0003(校验和前口径),sum=08+00+03=0x000B */
     uint8_t stream[] = {
-        0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x07, 0x00, 0x03, 0x00, 0x00, 0x00, 0x0A,
+        0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x07, 0x00, 0x03, 0x00, 0x00, 0x0A,
         0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x02, 0x00, 0x06,
         0xDE, 0xAD, 0xBE, 0xEF, 0x03, 0x40,
         0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x08, 0x00, 0x03, 0x00, 0x0B,

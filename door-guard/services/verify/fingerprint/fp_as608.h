@@ -77,8 +77,8 @@ size_t fp_as608_verify_psw(uint8_t *out, size_t cap, uint32_t password);
 typedef struct {
     uint8_t  type;                       /**< 标识码(0x07 应答 / 0x02 数据 / 0x08 结束) */
     uint8_t  payload[FP_A608_PAYLOAD_MAX]; /**< 标识码后的载荷,不含校验和:
-                                              应答 = [确认码2B, (结果参数)];数据 = 特征 */
-    uint16_t payload_len;                /**< payload 有效字节数(= 帧长字段 - 2) */
+                                              应答 = [确认码1B, (结果参数)];数据 = 特征 */
+    uint16_t payload_len;                /**< payload 有效字节数(不含校验和) */
 } fp_frame_t;
 
 typedef struct {
@@ -103,7 +103,7 @@ int fp_as608_parse(fp_parser_t *p, const uint8_t *buf, size_t len,
 
 /* ---- 应答取参(调用方保证 frame 来自 ACK;越界访问由调用方容量保证) ---- */
 
-/** 指令应答的确认码(应答 payload 前 2 字节,大端) */
+/** 指令应答的确认码(线上 1 字节;2026-10-03 真机勘误,见 FINGERPRINT_PROTOCOL §3) */
 uint16_t fp_as608_ack_confirm(const fp_frame_t *f);
 /** Search 应答:命中页号与得分(仅确认码 0x00 时有效) */
 void fp_as608_search_result(const fp_frame_t *f, uint16_t *page_id, uint16_t *score);

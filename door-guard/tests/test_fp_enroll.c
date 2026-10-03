@@ -86,7 +86,7 @@ static void put_be16(uint8_t *p, uint16_t v)
     p[1] = (uint8_t)(v & 0xFF);
 }
 
-/* 组应答帧:ACK 长度字段口径 = 载荷+1(协议 §3 核心坑);DATA = 载荷+2 */
+/* 组应答帧:2026-10-03 真机勘误后口径 = 字面长度(ACK 确认码 1B,整帧 9+len) */
 static void fake_push(const uint8_t *frame, size_t len)
 {
     pthread_mutex_lock(&F.mtx);
@@ -99,28 +99,28 @@ static void fake_push(const uint8_t *frame, size_t len)
 
 static size_t mk_ack(uint8_t *out, uint16_t confirm)
 {
-    memcpy(out, "\xEF\x01\xFF\xFF\xFF\xFF", 6);
+    memcpy(out, "ïÿÿÿÿ", 6);
     out[6] = FP_A608_TYPE_ACK;
-    put_be16(out + 7, 3);                 /* 确认码 2B 按长度口径只计 1 */
-    put_be16(out + 9, confirm);
-    uint16_t sum = (uint16_t)(out[6] + out[7] + out[8] + out[9] + out[10]);
-    put_be16(out + 11, sum);
-    return 13;
+    put_be16(out + 7, 3);                 /* 字面长度 = 确认码1B + 校验和2B */
+    out[9] = (uint8_t)confirm;
+    uint16_t sum = (uint16_t)(out[6] + out[7] + out[8] + out[9]);
+    put_be16(out + 10, sum);
+    return 12;
 }
 
 static size_t mk_ack_extra(uint8_t *out, uint16_t confirm, uint16_t a, uint16_t b)
 {
-    memcpy(out, "\xEF\x01\xFF\xFF\xFF\xFF", 6);
+    memcpy(out, "ïÿÿÿÿ", 6);
     out[6] = FP_A608_TYPE_ACK;
-    put_be16(out + 7, 7);
-    put_be16(out + 9, confirm);
-    put_be16(out + 11, a);
-    put_be16(out + 13, b);
+    put_be16(out + 7, 7);                 /* 确认码1B + a 2B + b 2B + 校验和2B */
+    out[9] = (uint8_t)confirm;
+    put_be16(out + 10, a);
+    put_be16(out + 12, b);
     uint16_t sum = 0;
-    for (int i = 6; i < 15; i++)
+    for (int i = 6; i < 14; i++)
         sum = (uint16_t)(sum + out[i]);
-    put_be16(out + 15, sum);
-    return 17;
+    put_be16(out + 14, sum);
+    return 16;
 }
 
 static void fake_respond(uint8_t cmd, const uint8_t *params)
