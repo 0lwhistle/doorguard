@@ -1566,7 +1566,7 @@ static const web_set_item_t s_set_items[] = {
     { "lost_hold_ms",      "脸框消失滞回",    "ms", false,   50,   200 },
     { "min_face_px",       "识别最小人脸",    "px", false,   10,    80 },
     { "face_dup_threshold", "录入人脸查重阈值", "",  true,  0.01,  0.50 },
-    { "liveness_enable",   "活体检测开关",    "",   false,    1,     0 },
+    /* liveness_enable 不在此列:活体恒启用(开关已删),POST 该键 = 未知键 */
     { "face_match_threshold", "1:N 识别阈值",    "",  true,  0.01,     0 },
     { "det_threshold",     "检测出框阈值",    "",   true,  0.01,     0 },
     { "det_score_min",     "检测分下限",      "",   true,  0.01,     0 },
@@ -1583,7 +1583,6 @@ static bool cfg_value_of(const dg_cfg_t *c, const char *key, double *out)
     else if (!strcmp(key, "lost_hold_ms"))       *out = c->face_lost_hold_ms;
     else if (!strcmp(key, "min_face_px"))        *out = c->face_min_px;
     else if (!strcmp(key, "face_dup_threshold")) *out = c->face_dup_threshold;
-    else if (!strcmp(key, "liveness_enable"))    *out = c->liveness_enable;
     else if (!strcmp(key, "face_match_threshold"))    *out = c->face_match_threshold;
     else if (!strcmp(key, "det_threshold"))      *out = c->face_det_threshold;
     else if (!strcmp(key, "det_score_min"))      *out = c->face_det_score_min;

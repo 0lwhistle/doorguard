@@ -188,7 +188,7 @@ static bool publish_gate(void)
                          "更新 device_config.face_model_tag)");
         return false;
     }
-    if (!cfg_get()->liveness_enable || liveness_service_pass())
+    if (liveness_service_pass())         /* 活体恒启用(开关已删) */
         return true;
     DG_LOGW(TAG, "活体未通过,命中不下发");
     return false;

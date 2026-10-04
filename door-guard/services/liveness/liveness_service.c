@@ -1,12 +1,12 @@
 /*
  * liveness_service.c — 动作活体实现(B7:留口;B8:动作状态机)
  *
- * B7 只做三件事:记账最近一次人脸关键点/质量、按 cfg 决定是否告警、
+ * B7 只做三件事:记账最近一次人脸关键点/质量、恒告警一次、
  * 门禁恒放行(算法未实现,block 会把门禁变成"永远不开门")。算法本身
  * 属 B8(见 liveness_service.h 文件头与 docs/tech/B7_FACE_HANDOFF.md §0.1)。
+ * 活体恒启用(liveness_enable 开关 2026-10-04 删除)。
  */
 #include "liveness_service.h"
-#include "cfg.h"
 #include "dg_log.h"
 #include "timeutil.h"
 
@@ -27,8 +27,7 @@ static bool s_warned;                    /* "已启用但未实现"只告警一�
 
 int liveness_service_start(void)
 {
-    DG_LOGI(TAG, "活体服务就绪(cfg liveness_enable=%d;算法 B8 实现)",
-            cfg_get()->liveness_enable);
+    DG_LOGI(TAG, "活体服务就绪(恒启用;算法 B8 实现)");
     return DG_OK;
 }
 
@@ -50,13 +49,12 @@ int liveness_service_on_face(const dg_face_pt_t *pts, uint32_t n, int32_t qualit
 
 bool liveness_service_pass(void)
 {
-    if (!cfg_get()->liveness_enable) {
-        /* 未启用:放行(与 DG_LIVE_SKIP 同义) */
-        return true;
-    }
+    /* 活体恒启用(开关已删,cfg.h 删除注):B8 实装前先放行(算法未实现,
+     * block 会把门禁变成「永远不开门」),实装后此处返回动作序列判定结果,
+     * 届时即为强制检查——不存在「关掉活体」的配置路径 */
     if (!s_warned) {
         s_warned = true;
-        DG_LOGW(TAG, "liveness_enable=1 但算法未实现(B8):本次放行,不阻断验证");
+        DG_LOGW(TAG, "动作活体算法未实装(B8):本次放行;反欺骗(MiniFASNet)已生效");
     }
     return true;                         /* B8:返回动作序列判定结果 */
 }

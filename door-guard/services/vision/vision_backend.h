@@ -48,7 +48,7 @@ typedef struct {
     /** 特征口径标识(模型指纹;NULL/空 = 不做口径校验,如 PC mock)。
      *  换模型必须换 tag:库里存的是旧模型特征时,新模型比对出来的分数没有意义 */
     const char *model_tag;
-    /** 是否提供人脸关键点(B8 活体需要;false 时 liveness_enable=1 会被告警) */
+    /** 是否提供人脸关键点(B8 活体需要;false 时注册时告警一次) */
     bool has_landmarks;
     /** 是否支持静态图录入(web 上传 JPEG,2026-10-04)。true 的后端必须
      *  订阅 EV_VISION_STILL_REQ 并实现收尾契约:按 seq 取静态图槽

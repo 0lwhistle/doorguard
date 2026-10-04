@@ -4,8 +4,6 @@
     "backend": "",
     "model_dir": "/usr/lib",
     "model_tag": "",
-    "liveness_enable": false,
-    "antispoof_enable": false,
     "antispoof_threshold": 0.5,
     "match_threshold": 0.42,
     "face_dup_threshold": 0.5,

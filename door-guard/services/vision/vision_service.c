@@ -399,9 +399,10 @@ int vision_backend_start(bool enable_mock)
     if (ops->compare)
         storage_set_feature_cmp(ops->compare, NULL, NULL);
     check_model_tag(ops);
-    if (cfg_get()->liveness_enable && !ops->has_landmarks)
-        DG_LOGW(TAG, "liveness_enable=1 但后端 '%s' 不提供关键点:活体无法生效",
-                ops->name);
+    /* 活体恒启用(开关已删):无关键点的后端(如 sim)动作活体无法生效,
+     * 一次性告警防「以为有活体」的静默失效;反欺骗层在 rknn 后端内部 */
+    if (!ops->has_landmarks)
+        DG_LOGW(TAG, "后端 '%s' 不提供关键点:动作活体无法生效", ops->name);
 
     int rc = ops->start(enable_mock);
     s_active_ok = (rc == DG_OK);

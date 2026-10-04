@@ -224,7 +224,7 @@ static bool publish_gate(void)
                          " face_model_tag)");
         return false;
     }
-    if (!cfg_get()->liveness_enable || liveness_service_pass())
+    if (liveness_service_pass())         /* 活体恒启用(开关已删) */
         return true;
     DG_LOGW(TAG, "活体未通过,命中不下发");
     return false;
@@ -571,11 +571,12 @@ static bool recognize(const uint8_t *nv12, int w, int h,
 
 /* ---- 反欺骗(MiniFASNet×2):分数生产,判定供命中发布时取用 -------------- */
 
-/* 反欺骗是否对本次命中发起挑战:使能 + 模型可用 + 平滑分低于阈值。
+/* 反欺骗是否对本次命中发起挑战:模型可用 + 平滑分低于阈值。
+ * 恒启用(antispoof_enable 开关 2026-10-04 删除);模型未就绪自动放行。
  * 只在 1:N 检索(DETECT_1N)生效——录入/1:1 子步不挑战 */
 static bool antispoof_challenge(void)
 {
-    if (!cfg_get()->antispoof_enable || !s_spoof_ready || s_spoof_real < 0.0f)
+    if (!s_spoof_ready || s_spoof_real < 0.0f)
         return false;
     return antispoof_is_spoof(s_spoof_real, (float)cfg_get()->antispoof_threshold);
 }
@@ -626,9 +627,8 @@ static void antispoof_run(const uint8_t *nv12, int w, int h,
     const int64_t t = now_mono_ms();
     if (t - last_log >= 2000) {
         last_log = t;
-        DG_LOGI(TAG, "反欺骗 real=%.3f(阈值 %.2f %s)", s_spoof_real,
-                cfg_get()->antispoof_threshold,
-                cfg_get()->antispoof_enable ? "启用" : "未启用");
+        DG_LOGI(TAG, "反欺骗 real=%.3f(阈值 %.2f 恒启用)", s_spoof_real,
+                cfg_get()->antispoof_threshold);
     }
 }
 
@@ -1341,8 +1341,7 @@ static int rknn_start(bool enable_mock)
     s_rec_dim = (int)rout.elems;
 
     /* ---- 反欺骗模型(可选,加载失败降级不阻断) ----
-     * 启动即加载而非使能时才加载:antispoof_enable 走 META 可运行时改
-     * (web/设备页),使能即生效,不用重启 */
+     * 恒启用(antispoof_enable 开关已删):启动即加载,失败仅 ERROR 不阻断 */
     {
         char spath[512];
         snprintf(spath, sizeof(spath), "%s/%s", dir,

@@ -14,7 +14,7 @@ import { toast } from '../stores/toast'
 
 const GROUPS = [
   { title: '门禁', keys: ['door_open_ms', 'pwd_fail_lock_n', 'pwd_fail_lock_s'] },
-  { title: '人脸识别', keys: ['match_threshold', 'min_face_px', 'blur_min', 'det_score_min', 'det_threshold', 'lost_hold_ms', 'liveness_enable'] },
+  { title: '人脸识别', keys: ['match_threshold', 'min_face_px', 'blur_min', 'det_score_min', 'det_threshold', 'lost_hold_ms'] },
   { title: '超时', keys: ['standby_timeout_s', 'menu_timeout_s'] },
 ]
 

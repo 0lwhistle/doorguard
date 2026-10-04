@@ -53,8 +53,6 @@ static const cfg_meta_t META[] = {
     { "det_score_min",       "face.det_score_min",        CK_DBL, 0.30,  1.00 },
     { "det_threshold",       "face.det_threshold",        CK_DBL, 0.30,  0.95 },
     { "lost_hold_ms",        "face.lost_hold_ms",         CK_INT,    0,  2000 },
-    { "liveness_enable",      "face.liveness_enable",     CK_INT,    0,     1 },
-    { "antispoof_enable",     "face.antispoof_enable",    CK_INT,    0,     1 },
     { "antispoof_threshold",  "face.antispoof_threshold", CK_DBL,  0.0,  1.00 },
     { "standby_timeout_s",    "ui.standby_timeout_s",     CK_INT,   15,    60 },
     { "menu_timeout_s",       "ui.menu_timeout_s",        CK_INT,    5,   120 },
@@ -254,8 +252,7 @@ static void defaults_apply(dg_cfg_t *c)
     c->face_det_threshold = 0.60;       /* 检测器出框阈值(空场景幻检 0.5x) */
     c->face_lost_hold_ms = 200;         /* LOST 滞回:防单帧漏检闪框(2026-09-26 起
                                            从代码魔数 600 提为配置,默认收紧到 200) */
-    c->liveness_enable = 0;              /* 活体算法 B8 落地前默认关 */
-    c->antispoof_enable = 0;             /* 反欺骗模型上板+假体标定后开启 */
+    /* liveness/antispoof 两开关已删:活体恒启用(cfg.h 删除注) */
     c->antispoof_threshold = 0.50;       /* 真脸分数下限(降级方案下可调严) */
     /* 后端名/口径留空 = 用"第一个注册的后端"+该后端自带口径:同一份模板在
      * PC(sim)与板上(rockiva)都成立,不用两套配置 */
@@ -308,8 +305,6 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         if (!strcmp(m->key, "door_open_ms"))              cur = c->door_open_ms;
         else if (!strcmp(m->key, "pwd_fail_lock_n"))      cur = c->pwd_fail_lock_n;
         else if (!strcmp(m->key, "pwd_fail_lock_s"))      cur = c->pwd_fail_lock_s;
-        else if (!strcmp(m->key, "liveness_enable"))      cur = c->liveness_enable;
-        else if (!strcmp(m->key, "antispoof_enable"))     cur = c->antispoof_enable;
         else if (!strcmp(m->key, "standby_timeout_s"))    cur = c->standby_timeout_s;
         else if (!strcmp(m->key, "menu_timeout_s"))       cur = c->menu_timeout_s;
         else if (!strcmp(m->key, "brightness"))           cur = c->brightness;
@@ -320,8 +315,6 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         if (!strcmp(m->key, "door_open_ms"))              c->door_open_ms = v;
         else if (!strcmp(m->key, "pwd_fail_lock_n"))      c->pwd_fail_lock_n = v;
         else if (!strcmp(m->key, "pwd_fail_lock_s"))      c->pwd_fail_lock_s = v;
-        else if (!strcmp(m->key, "liveness_enable"))      c->liveness_enable = v;
-        else if (!strcmp(m->key, "antispoof_enable"))     c->antispoof_enable = v;
         else if (!strcmp(m->key, "standby_timeout_s"))    c->standby_timeout_s = v;
         else if (!strcmp(m->key, "menu_timeout_s"))       c->menu_timeout_s = v;
         else if (!strcmp(m->key, "brightness"))           c->brightness = v;
@@ -687,10 +680,9 @@ int cfg_load(const char *default_path, const char *cur_path)
 
     const dg_cfg_t *c = cfg_get();
     DG_LOGI(TAG, "配置就绪: door=%dms standby=%ds face_dup=%.2f face_match=%.2f "
-                 "liveness=%d web=%d lang=%s",
+                 "web=%d lang=%s(活体恒启用)",
             c->door_open_ms, c->standby_timeout_s, c->face_dup_threshold,
-            c->face_match_threshold, c->liveness_enable,
-            c->web_port, c->language);
+            c->face_match_threshold, c->web_port, c->language);
     return load_rc;
 }
 
