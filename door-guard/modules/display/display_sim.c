@@ -143,3 +143,4 @@ void display_video_plane_hide(void)
 void display_clear_fbs(void)
 {
 }
+

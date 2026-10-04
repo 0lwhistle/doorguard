@@ -40,6 +40,10 @@ void bridge_cancel(void);                     /* 弹窗取消 → 放弃当前�
 void bridge_ntp_sync(void);
 void bridge_reboot(int32_t delay_ms);
 
+/** 屏幕背光亮度(0~100):EV_UI_BRIGHTNESS → bridge 即写 display 原语。
+ *  只管生效;持久化由调用方先/后 cfg_set("brightness") */
+void bridge_brightness(int32_t pct);
+
 /** 网络配置应用(静态/DHCP + IP/掩码/网关;结果经 UI_EVT_NET_CFG 回流) */
 void bridge_net_cfg_set(bool is_static, const char *ip, const char *mask,
                         const char *gw);

@@ -19,6 +19,7 @@
  * #ifdef DG_SIM 仅出现在本装配与 sim 后端(纪律允许范围)。
  */
 #include "modules/camera/camera.h"
+#include "modules/display/display.h"
 #include "access_service.h"
 #include "card_provider.h"
 #include "capture_service.h"
@@ -464,6 +465,15 @@ int main(int argc, char *argv[])
      * 必须先于一切 localtime 调用(UI 时钟/web 时间/日志/UI 时间戳) */
     setenv("TZ", "CST-8", 1);
 
+#ifndef DG_SIM
+    /* 开机闪残留画面治理·前半:内核点亮屏幕远早于本进程,而 fb 内存里
+     * 还留着上次关机前的最后一帧,背光内核默认亮(屏 dtsi)——首帧上屏前
+     * 屏幕显示的一直是那帧旧画面。进程一起来先灭背光,把窗口内容从
+     * 「旧画面」换成「黑」;首帧上屏后由主循环恢复用户亮度。sysfs 直写
+     * 不依赖任何模块初始化,放最前;失败(无背光节点)仅 WARN 一次 */
+    (void)display_backlight_set(0);
+#endif
+
     /* 装配参数:相机节点(sim=图片目录)/ 语言表 / 配置双文件 */
 #ifdef DG_SIM
     s_def_path = "configs/default.json";
@@ -518,9 +528,22 @@ int main(int argc, char *argv[])
     int64_t next_scan = now_mono_ms() + WD_INTERVAL_MS;
     s_loop_beat_ms = now_mono_ms();
     s_loop_started = true;
+#ifndef DG_SIM
+    bool first_frame_lit = false;
+#endif
     for (;;) {
         camera_poll();
         ui_poll();
+#ifndef DG_SIM
+        /* 开机闪残留画面治理·后半:首轮 lv_timer_handler 已把 home 渲染
+         * 并提交翻转,此刻拉亮用户亮度才不会露出 dumb buffer 未渲染内容;
+         * ui 起不来则保持黑屏——黑屏(上位机可诊断)好过旧画面+死机 */
+        if (!first_frame_lit && registry_state("ui") == REG_STATE_READY) {
+            first_frame_lit = true;
+            (void)display_backlight_set(cfg_get()->brightness);
+            DG_LOGI("[MAIN]", "UI 首帧就绪,背光恢复 %d%%", cfg_get()->brightness);
+        }
+#endif
         s_loop_beat_ms = now_mono_ms();
         int64_t now = s_loop_beat_ms;
         if (now >= next_scan) {

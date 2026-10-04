@@ -1,0 +1,10 @@
+".\hex\delay.obj",
+".\hex\FPM10A.obj",
+".\hex\key.obj",
+".\hex\lcd_12864.obj",
+".\hex\main.obj",
+".\hex\uart.obj",
+".\hex\buzz.obj",
+".\hex\led.obj" 
+TO ".\hex\my_work" 
+PRINT(".\my_work.m51") RAMSIZE(256) 

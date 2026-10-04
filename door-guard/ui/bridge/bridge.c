@@ -9,6 +9,7 @@
  */
 #include "bridge.h"
 #include "event_bus.h"
+#include "modules/display/display.h"
 #include "dg_log.h"
 
 #include <stdio.h>
@@ -244,6 +245,16 @@ static int on_service_state(const event_t *e, void *ud)
     return 0;
 }
 
+/* 亮度:唯一不进 ui_events 队列的入站订阅——执行对象是背光 sysfs(非
+ * LVGL,总线线程安全,纪律只禁 LVGL),且要求即时生效;入队会平白多一拍。
+ * 持久化与生效解耦:发布方(滑条页/web)自行 cfg_set,这里只管写硬件 */
+static int on_brightness(const event_t *e, void *ud)
+{
+    (void)ud;
+    (void)display_backlight_set(((const ev_brightness_t *)e->data)->pct);
+    return 0;
+}
+
 void bridge_init(void)
 {
     event_bus_subscribe(EV_VISION_FACE_BOX, on_face_box, NULL);
@@ -251,6 +262,7 @@ void bridge_init(void)
     event_bus_subscribe(EV_AUTH_RESULT, on_auth_result, NULL);
     event_bus_subscribe(EV_UI_HINT, on_hint, NULL);
     event_bus_subscribe(EV_UI_GOTO_PAGE, on_goto_page, NULL);
+    event_bus_subscribe(EV_UI_BRIGHTNESS, on_brightness, NULL);
     event_bus_subscribe(EV_UI_ASK_UID, on_ask_uid, NULL);
     event_bus_subscribe(EV_UI_INPUT_PWD, on_input_pwd, NULL);
     event_bus_subscribe(EV_UI_PICK_METHOD, on_pick_method, NULL);
@@ -266,7 +278,7 @@ void bridge_init(void)
     event_bus_subscribe(EV_NET_CFG_RESULT, on_net_cfg_result, NULL);
     event_bus_subscribe(EV_CAPTURE_STATE, on_capture_state, NULL);
     event_bus_subscribe(EV_SYS_SERVICE_STATE, on_service_state, NULL);
-    DG_LOGI("[BRIDGE]", "事件桥就绪(20 订阅)");
+    DG_LOGI("[BRIDGE]", "事件桥就绪(21 订阅)");
 }
 
 void bridge_btn(const ev_ui_btn_t *btn)
@@ -339,6 +351,12 @@ void bridge_reboot(int32_t delay_ms)
 {
     const ev_sys_reboot_t ev = { .delay_ms = delay_ms };
     EVENT_BUS_PUBLISH(EV_SYS_REBOOT, &ev);
+}
+
+void bridge_brightness(int32_t pct)
+{
+    const ev_brightness_t ev = { .pct = pct };
+    EVENT_BUS_PUBLISH(EV_UI_BRIGHTNESS, &ev);
 }
 
 void bridge_net_cfg_set(bool is_static, const char *ip, const char *mask,

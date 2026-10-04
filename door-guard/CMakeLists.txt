@@ -203,6 +203,7 @@ add_library(dg_ui STATIC
     ui/pages/page_net_set.c
     ui/pages/page_face_set.c
     ui/pages/page_finger_set.c
+    ui/pages/page_display_set.c
     ui/presenters/presenter_home.c
     ui/presenters/presenter_standby.c
     ui/presenters/presenter_menu.c
@@ -216,6 +217,7 @@ add_library(dg_ui STATIC
     ui/presenters/presenter_net_set.c
     ui/presenters/presenter_face_set.c
     ui/presenters/presenter_finger_set.c
+    ui/presenters/presenter_display_set.c
     ui/ui_events.c
     ui/font/dg_font_cn_16.c
     ui/font/dg_font_cn_26.c
@@ -431,11 +433,13 @@ if(DG_SIM)
     find_package(SDL2 REQUIRED)
     if(DG_USE_LVGL9)
         add_library(dg_display STATIC modules/display/display_sim_v9.c
-                                      modules/display/touch_activity.c)
+                                      modules/display/touch_activity.c
+                                      modules/display/backlight_sysfs.c)
         target_compile_definitions(dg_display PRIVATE DG_USE_LVGL9=1)
     else()
         add_library(dg_display STATIC modules/display/display_sim.c
-                                      modules/display/touch_activity.c)
+                                      modules/display/touch_activity.c
+                                      modules/display/backlight_sysfs.c)
     endif()
     target_link_libraries(dg_display PUBLIC lvgl SDL2::SDL2)
     add_library(dg_camera STATIC modules/camera/camera_sim.c)
@@ -447,12 +451,14 @@ else()
         # 这里只留薄封装 + 自研触摸;lv_drivers 不再参与
         add_library(dg_display STATIC modules/display/display_drm_v9.c
                                       modules/display/touch_evdev.c
-                                      modules/display/touch_activity.c)
+                                      modules/display/touch_activity.c
+                                      modules/display/backlight_sysfs.c)
         target_compile_definitions(dg_display PRIVATE DG_USE_LVGL9=1)
     else()
         add_library(dg_display STATIC modules/display/display_drm.c
                                       modules/display/touch_evdev.c
                                       modules/display/touch_activity.c
+                                      modules/display/backlight_sysfs.c
                                       third_party/lv_drivers/drm.c)
         # 顺序敏感:libdrm 在前——lv_drivers/drm.c 内部 #include <drm.h> 必须解析到
         # libdrm 的 drm.h 而不是本目录同名头(避免 xf86drm 类型未定义)

@@ -58,6 +58,7 @@ static const cfg_meta_t META[] = {
     { "antispoof_threshold",  "face.antispoof_threshold", CK_DBL,  0.0,  1.00 },
     { "standby_timeout_s",    "ui.standby_timeout_s",     CK_INT,   15,    60 },
     { "menu_timeout_s",       "ui.menu_timeout_s",        CK_INT,    5,   120 },
+    { "brightness",           "ui.brightness",            CK_INT,   10,   100 },
     { "language",             "ui.language",              CK_STR,    0,    15 },
     { "ntp_server",           "network.ntp_server",       CK_STR,    0,    63 },
     { "web_port",             "network.web_port",         CK_INT, 1024, 65535 },
@@ -263,6 +264,7 @@ static void defaults_apply(dg_cfg_t *c)
     c->face_model_tag[0] = '\0';
     c->standby_timeout_s = 30;
     c->menu_timeout_s = 15;
+    c->brightness = 100;                 /* 出厂全亮;用户在屏幕显示页调整 */
     snprintf(c->language, sizeof(c->language), "zh-CN");
     c->web_port = 80;    /* 2026-09-27 起默认 80:URL 免带端口;非 root 回退 8080 */
     snprintf(c->ntp_server, sizeof(c->ntp_server), "ntp.aliyun.com");
@@ -310,6 +312,7 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "antispoof_enable"))     cur = c->antispoof_enable;
         else if (!strcmp(m->key, "standby_timeout_s"))    cur = c->standby_timeout_s;
         else if (!strcmp(m->key, "menu_timeout_s"))       cur = c->menu_timeout_s;
+        else if (!strcmp(m->key, "brightness"))           cur = c->brightness;
         else if (!strcmp(m->key, "lost_hold_ms"))         cur = c->face_lost_hold_ms;
         else if (!strcmp(m->key, "web_port"))             cur = c->web_port;
         else return;
@@ -321,6 +324,7 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "antispoof_enable"))     c->antispoof_enable = v;
         else if (!strcmp(m->key, "standby_timeout_s"))    c->standby_timeout_s = v;
         else if (!strcmp(m->key, "menu_timeout_s"))       c->menu_timeout_s = v;
+        else if (!strcmp(m->key, "brightness"))           c->brightness = v;
         else if (!strcmp(m->key, "lost_hold_ms"))         c->face_lost_hold_ms = v;
         else if (!strcmp(m->key, "web_port"))             c->web_port = v;
     } else if (m->kind == CK_DBL) {

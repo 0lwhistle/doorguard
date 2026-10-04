@@ -42,6 +42,7 @@ static const struct {
     { EV_UI_HINT_CLEAR,    "UI_HINT_CLEAR" },
     { EV_SYS_SERVICE_STATE, "SYS_SERVICE_STATE" },
     { EV_UI_FACEBOX,       "UI_FACEBOX" },
+    { EV_UI_BRIGHTNESS,    "UI_BRIGHTNESS" },
     { EV_VISION_QUALITY,   "VISION_QUALITY" },
     { EV_SYS_REBOOT,       "SYS_REBOOT" },
     { EV_NET_WEB_STATE_REQ, "NET_WEB_STATE_REQ" },

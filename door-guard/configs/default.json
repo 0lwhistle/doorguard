@@ -58,6 +58,7 @@
   "ui": {
     "language": "zh-CN",
     "standby_timeout_s": 30,
-    "menu_timeout_s": 15
+    "menu_timeout_s": 15,
+    "brightness": 100
   }
 }

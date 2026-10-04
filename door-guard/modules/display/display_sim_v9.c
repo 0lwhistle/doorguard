@@ -12,6 +12,10 @@
  */
 #include "display.h"
 #include "types.h"   /* DG_SCREEN_W/H(2026-09-28 起 proto 契约,不再借 ui/theme.h) */
+/* gcc-11 + SDL2 头兼容:SDL_cpuinfo.h 无条件拉 immintrin,会踩中
+ * avx5124vnniwintrin.h 的 _16si 未定义 bug(2026-10-04 实锤)。SDL 官方
+ * 逃生门关掉即可——本项目只用窗口/事件,不碰 CPU intrinsic */
+#define SDL_DISABLE_IMMINTRIN_H 1
 #include "SDL2/SDL.h"
 #include "dg_log.h"
 #include "lvgl.h"

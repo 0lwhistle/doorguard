@@ -24,3 +24,6 @@ door-guard/models/*.data
 door-guard/third_party/Silent-Face-Anti-Spoofing-master.zip
 __pycache__/
 *.pyc
+
+# 走查取证临时输出(DG_WALK_DUMP_DIR 截屏 bmp,见 display 后端)
+tmp_walk/

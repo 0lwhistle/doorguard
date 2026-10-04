@@ -31,6 +31,13 @@ void display_set_touch_listener(void (*fn)(void));
 /** 后端内部用:按下沿通知(touch_evdev/display_sim 的 read_cb 调用) */
 void display_touch_activity(void);
 
+/** 背光亮度(0~100,百分比;0=全灭)。PWM 背光走标准 sysfs
+ *  (/sys/class/backlight,屏 dtsi 已点亮),写 brightness = max×pct/100。
+ *  路径惰性探测(首调一次);无 backlight 节点 = 恒失败并 WARN 一次,
+ *  不影响其他功能。LVGL 线程与 event_bus 分发线程都会调用,内部持锁。
+ *  sim 后端为空实现(宿主无背光可写)。@return DG_OK / DG_ERR_IO */
+int display_backlight_set(int pct);
+
 /* ---- 视频 overlay plane(video-plane 直通预览,2026-09-22) ----
  * 板上把 NV12 dma-buf 直接送 VOP2 硬件扫描输出(zpos 压到 UI plane 之下),
  * 预览零 CPU;sim 恒 false。show 失败自动置不可用,页面据此走软渲染回退 */

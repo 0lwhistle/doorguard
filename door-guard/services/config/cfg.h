@@ -61,6 +61,9 @@ typedef struct {
     /* UI(spec-ui) */
     int  standby_timeout_s;    /**< 待机超时,15~60(spec 上限),默认 30 */
     int  menu_timeout_s;       /**< 菜单页无操作自动回主页,5~120s,默认 15 */
+    int  brightness;           /**< 屏幕背光亮度 %,10~100,默认 100(下限 10 防呆:
+                                     0 会全黑摸不回;待机时另按 min(本值,30%) 降亮,
+                                     10s 无唤醒全黑——page_standby 编排,2026-10-04) */
     char language[16];         /**< zh-CN / en-US,默认 zh-CN */
     /* 网络(spec-network) */
     int  web_port;             /**< web 上位机端口(含 OTA 上传端点),默认 80;PC 模拟器等非 root 绑定失败自动回退 8080 */

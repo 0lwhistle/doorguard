@@ -1,0 +1,110 @@
+C51 COMPILER V9.00   MAIN                                                                  12/05/2016 13:30:54 PAGE 1   
+
+
+C51 COMPILER V9.00, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN .\hex\main.obj
+COMPILER INVOKED BY: D:\Keil4 for 51\C51\BIN\C51.EXE main.c BROWSE DEBUG OBJECTEXTEND OBJECT(.\hex\main.obj)
+
+line level    source
+
+   1          #include<reg52.h>
+   2          #include<intrins.h>
+   3          #include"led.h"
+   4          #include"buzz.h"
+   5          #include"key.h"
+   6          #include"uart.h"
+   7          #include"delay.h"
+   8          #include"FPM10A.h"
+   9          #include"lcd_12864.h"
+  10          
+  11          
+  12          void main()
+  13          {       
+  14   1              Init_ST7920();   //初始化
+  15   1        CGRAM();     //写入自定义字符 
+  16   1        Uart_Init();
+  17   1              Key_Init();
+  18   1              Led_Init();
+  19   1              Buzz_Init();
+  20   1              Device_Check();
+  21   1              DisplayUpdata();
+  22   1              Delay_Ms(500); //延时500MS，等待指纹模块复位
+  23   1              Buzz_Times(1);
+  24   1      
+  25   1              while(1)
+  26   1              {
+  27   2                      if(local_date!=base_date) //光标位置变化，则更新显示 
+  28   2                      {
+  29   3                  DisplayUpdata();
+  30   3                              base_date=local_date;
+  31   3                      }
+  32   2      
+  33   2                      if(KEY_OK == 0)
+  34   2                              {        
+  35   3                               while(KEY_OK == 0);//等待松开按键                                                              
+  36   3                               switch(local_date)
+  37   3                                      {
+  38   4                                              case 0:  //添加指纹
+  39   4                                              Led_Green_On();
+  40   4                                              FPM10A_Add_Fingerprint();
+  41   4                                              Led_Green_Off();
+  42   4                                              local_date = 0;
+  43   4                                              DisplayUpdata();        
+  44   4                                              break; 
+  45   4                                                                                                      
+  46   4                                              case 1://搜索指纹
+  47   4                                              Led_Yellow_On();                                                
+  48   4                                              FPM10A_Find_Fingerprint();
+  49   4                                              Led_Yellow_Off();                                                       
+  50   4                                              local_date = 1;
+  51   4                                              DisplayUpdata();                                                                                                                                        
+  52   4                                              break;                                                                  
+  53   4                                              
+  54   4                                              case 2: //清空指纹
+  55   4                                              FPM10A_Delete_All_Fingerprint();
+C51 COMPILER V9.00   MAIN                                                                  12/05/2016 13:30:54 PAGE 2   
+
+  56   4                                              local_date = 2;                                                                 
+  57   4                                              DisplayUpdata();
+  58   4                                      break;
+  59   4                                      }
+  60   3                              }
+  61   2                        //下
+  62   2                              if(KEY_DOWN == 0)
+  63   2                              {
+  64   3                               while(KEY_DOWN == 0); //等待松开按键                           
+  65   3                       if(local_date<=2)
+  66   3                                      {
+  67   4                                              local_date++;
+  68   4                                              if(local_date==3)
+  69   4                                                      local_date=0;                                           
+  70   4                                      }                               
+  71   3                              }                       
+  72   2                        //上
+  73   2                              if(KEY_UP == 0)
+  74   2                              { 
+  75   3                                while(KEY_UP == 0); //等待松开按键
+  76   3                          if(local_date>=0)
+  77   3                                      {
+  78   4                                              local_date--;
+  79   4                                              if(local_date==-1)
+  80   4                                                      local_date=2;   
+  81   4                                      }                                       
+  82   3                              }                       
+  83   2                              Delay_Ms(100); //延时判断100MS检测一次          
+  84   2              }
+  85   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    162    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
