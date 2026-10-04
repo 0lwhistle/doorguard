@@ -397,6 +397,63 @@ void rknn_align_warp_ex(const uint8_t *src, int sw, int sh, const float m[6],
     }
 }
 
+/* RGB888 letterbox(静态图录入,2026-10-04):等比缩放 + 居中补边,与
+ * npu_pre 的 RGA 版同语义(补边值调用方给,检测模型约定 114)。双线性采样,
+ * 纯 CPU——静态图路径(解码后最长边 ≤1536)一次几毫秒,性能非关键,
+ * 换来宿主可测与"JPEG→RGB→检测输入"无需 RGA 的直通路 */
+void rknn_rgb_letterbox(const uint8_t *src, int sw, int sh,
+                        float scale, int pad_x, int pad_y, int fit_w, int fit_h,
+                        uint8_t pad_value, uint8_t *dst, int dw, int dh)
+{
+    if (!src || !dst || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0 || scale <= 0.0f)
+        return;
+
+    for (int v = 0; v < dh; v++) {
+        uint8_t *row = dst + (size_t)v * dw * 3;
+        const int fy0 = v - pad_y;
+        if (fy0 < 0 || fy0 >= fit_h) {
+            memset(row, pad_value, (size_t)dw * 3);   /* 上下补边整行 */
+            continue;
+        }
+        const int fx_max = pad_x + fit_w;
+        if (pad_x > 0)
+            memset(row, pad_value, (size_t)pad_x * 3);
+        if (fx_max < dw)
+            memset(row + (size_t)fx_max * 3, pad_value,
+                   (size_t)(dw - fx_max) * 3);
+
+        /* 缩放区:目标 y → 源 y(等比),逐列双线性 */
+        const float syl = (float)fy0 / scale;
+        int y0 = (int)syl;
+        if (y0 < 0) y0 = 0;
+        if (y0 > sh - 1) y0 = sh - 1;
+        const int y1 = (y0 + 1 < sh) ? y0 + 1 : y0;
+        const float fy = syl - (float)y0;
+
+        for (int u = pad_x; u < fx_max; u++) {
+            const float sxl = (float)(u - pad_x) / scale;
+            int x0 = (int)sxl;
+            if (x0 < 0) x0 = 0;
+            if (x0 > sw - 1) x0 = sw - 1;
+            const int x1 = (x0 + 1 < sw) ? x0 + 1 : x0;
+            const float fx = sxl - (float)x0;
+
+            uint8_t *o = row + (size_t)u * 3;
+            for (int c = 0; c < 3; c++) {
+                const float v00 = src[((size_t)y0 * sw + x0) * 3 + c];
+                const float v01 = src[((size_t)y0 * sw + x1) * 3 + c];
+                const float v10 = src[((size_t)y1 * sw + x0) * 3 + c];
+                const float v11 = src[((size_t)y1 * sw + x1) * 3 + c];
+                const float top = v00 + (v01 - v00) * fx;
+                const float bot = v10 + (v11 - v10) * fx;
+                const float val = top + (bot - top) * fy;
+                o[c] = (uint8_t)(val < 0.0f ? 0.0f
+                                            : (val > 255.0f ? 255.0f : val + 0.5f));
+            }
+        }
+    }
+}
+
 /* ---- 特征 --------------------------------------------------------------- */
 
 void rknn_l2_normalize(float *v, int n)

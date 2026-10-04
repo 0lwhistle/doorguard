@@ -2,6 +2,61 @@
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 ---
+## 2026-10-04(二)验证方式上设备 + web 人脸录入:方式位不变式落地——46/46 绿、web 67/67、api 42/42、交叉零告警
+
+1. **设备端编辑页「验证方式」行(用户需求①)**:dg_popup_multi 新多选弹窗
+   (勾选项+灰显不可点);四项=人脸/指纹/密码/IC,**可勾选=凭据已录**
+   (指纹查表、人脸算上未保存草稿、IC 看卡号),未录入项附注「（未录入）」。
+   flags 攒草稿保存才落库(user_save_ex 完整目标值);清除人脸连带草稿关
+   人脸位;EDIT 保存重序=特征草稿先落(带置位)→字段+方式位,否则不变式
+   校验会拒。
+2. **「方式位 ⇒ 已录凭据」不变式(需求①的机制底座,spec-database §1)**:
+   storage add/update 对新增无凭据位拒 DG_ERR_AUTH_NO_CRED(-38);解绑卡
+   (空 ic_card)/清人脸存储层同步回收对应位;建号新用户固定只有 PWD 位
+   (web add 历史默认 FACE|PWD 收窄);开机一次性规范化迁移清历史脏位
+   (先数脏行再 UPDATE——changes() 对未变行也计数,直接跑每次开机都误报)。
+   人脸补齐写位/清位(与指纹/IC 对齐):face_commit 置位、clear_face 清位。
+   **顺手修存量 bug**:commit_draft 不回填 ic_card,已绑卡用户保存人脸草稿
+   会把卡悄悄解绑(db_user_update 对 ic_card 是"始终覆盖"语义)。
+3. **web 人脸录入/清除/重录(用户需求②)**:POST /api/users/face_set
+   (JPEG body + ?uid=,512KB 硬顶+SOI 前置)→ enroll face_upload 受理制
+   (单飞闸+能力/存在性前置)→ 静态图槽+EV_VISION_STILL_REQ → 后端提取
+   → 成功直落库(查重/置位/头像,与拍摄流公共尾)→ 结果 WS `enroll` 消息
+   (seq 配对,kind/ok/err/msg)。**前端降分辨率**:canvas 重编码最长边
+   1024(q85,实测 50~200KB),顺带抹 EXIF;服务端解压炸弹防线=先探尺寸
+   (新 dg_jpeg_dimensions)选缩放倍率再按缩放后尺寸分配缓冲(解码最长边
+   1536)。错误码 FACE_NONE(-39)/FACE_MULTI(-40)/FACE_QUALITY(-41),
+   文案与设备端拍摄页 MULTI/出框拒绝同口径。
+4. **vision 静态图路径**:后端契约新增 has_still_enroll + 提取义务(成功
+   submit_feature+put_avatar / 失败 STILL_FAIL,恰好其一);rknn 实现=
+   RGB letterbox(新 rknn_rgb_letterbox 纯 CPU 双线性,宿主可测)→检测→
+   选脸(多脸拒)→关键点 ROI→112 对齐→质量闸(与 recognize 同三因子)→
+   ArcFace→160²头像按人脸方框裁剪;worker 信箱扩成"帧∨静态图"双通道,
+   静态图优先(web 在等)。sim 后端走同一 mock 提交尾,宿主端到端可测。
+5. **前端**:用户编辑表单方式位按 has_face/has_finger/has_ic 禁用+标注;
+   人脸上传区(选图→降采样→预览→受理);WS events store 增 enroll 类型
+   (全局提示+onEnrollResult 订阅,按 seq 配对刷新列表);client.js 支持
+   rawBody;web add 默认改只勾密码。用户列表 has_finger 改查 fingerprints
+   表(users.finger_vec 是废弃列,新录指纹不写它),补 has_ic。
+6. 测试与验收:宿主 46/46(test_enroll_flow 增 web 上传端到端段;test_storage
+   增 [S11] 不变式/迁移;test_jpeg 增 dimensions);交叉零告警;web_test 67/67、
+   api_test 42/42(增建号带人脸位拒/未录开位拒/face_set 受理→has_face→
+   清脸回收链路);字体 4 档重生成(新键「全部关闭/确定/该验证方式未录入，
+   无法开启/（未录入）」);enroll 补 README;spec-database/ui/network/auth 对齐。
+7. 坑×4:①WSL root 起 sim 时 web 绑 80(非 root 才回退 8080),测试全按
+   8080 断言→web_test.sh 沙箱显式钉 cur_config network.web_port=8080;
+   ②WSL 默认 node 是 v12(ESM 可选链语法炸),dg-frontend 要在登录 shell
+   跑(bash -lc,nvm 的 v24);③gcc-11+SDL2 头:SDL_cpuinfo 无条件拉
+   immintrin 踩 avx5124vnniwintrin.h 的 _16si bug→display_sim_v9 定
+   SDL_DISABLE_IMMINTRIN_H(SDL 官方逃生门,只用窗口/事件无影响);
+   ④DG_AUTH_ALL/裸中文双误报:测试建号带全位被新不变式拒(test_feat_cache
+   段错误=e2 快照 NULL 解引用,降为 FACE|PWD);ui 注释里的 ASCII 引号会
+   触发 i18n 裸中文扫描(旧坑复发,改全角引号)。
+8. 下一步:板上真人验收(编辑页方式弹窗/保存重序;web 上传真人照片走
+   rknn 提取端到端+查重);若板上验收过推 B 槽;人脸位自动置位后"验证方式
+   关闭再重录=重新可用"的语义向用户说明一次。
+
+---
 ## 2026-10-04 四任务会话:主页网络图标实时化/指纹三连修+提速/MQTT+MAX98357 落地/审查与文档对齐——46/46 绿零告警
 
 1. **主页 IP/网络图标热插拔实时化**:根因=图标只看"拿到 IP",静态配置下拔网线

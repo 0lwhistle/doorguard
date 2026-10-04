@@ -19,6 +19,7 @@ export const PATHS = {
   usersPwd: '/api/users/pwd',
   usersDelete: '/api/users/delete',
   usersFaceClear: '/api/users/face_clear',
+  usersFaceSet: '/api/users/face_set',
   accessSet: '/api/access_set',
   systemReboot: '/api/system/reboot',
   ws: '/api/ws',

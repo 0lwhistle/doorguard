@@ -160,6 +160,12 @@ static void add_user(const char *uid, const char *name, int32_t role,
     snprintf(u.user_name, sizeof(u.user_name), "%s", name);
     u.role = role;
     u.auth_flags = flags;
+    /* 方式位不变式(2026-10-04):带位必须带凭据。测试只关心"方式已开启"
+     * 的验证流行为,人脸位配一串哑特征满足前置 */
+    if (flags & DG_AUTH_FACE) {
+        memcpy(u.face_vec, "dummy-face", 10);
+        u.face_vec_len = 10;
+    }
     DG_CHECK(db_user_set_password(&u, pwd) == DG_OK);
     DG_CHECK(db_user_add(&u) == DG_OK);
 }

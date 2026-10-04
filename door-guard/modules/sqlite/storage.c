@@ -50,6 +50,7 @@ static bool s_cache_broken;               /* 发布/重载双双失败:快照恒
 static pthread_rwlock_t s_cache_lk = PTHREAD_RWLOCK_INITIALIZER;
 
 static int cache_load_locked(void);       /* 前置声明(实现在 DB 读区) */
+static int finger_count_locked(const char *user_id, uint32_t *n);   /* 实现在指纹区 */
 
 static void cache_ent_fill(dg_feat_ent_t *e, const char *uid, int32_t role,
                            uint32_t auth_flags, const uint8_t *face, uint16_t face_len)
@@ -343,6 +344,42 @@ int storage_init(const char *db_path, const char *key_path)
 
     DG_LOGI(TAG, "storage ready: %s", db_path);
 
+    /* 迁移(幂等,2026-10-04):验证方式不变式上线前的历史脏位规范化——
+     * 建号默认 FACE|PWD 的时代,未录人脸的用户也带人脸位(1:N 检索靠
+     * 特征库为空兜底,但 1:1/方式选择会出现"选了人脸必超时")。此处按
+     * "位 ⇒ 凭据"清一遍:PWD 位恒保留(密码必填),无指纹行清指纹位,
+     * 无卡号清 IC 位。先数脏行(有才动,日志才有意义),先于特征缓存装载
+     * (缓存读位) */
+    {
+        const char *mask_sql =
+            " (CASE WHEN face_vec IS NOT NULL THEN 1 ELSE 0 END)"
+            "|(CASE WHEN EXISTS(SELECT 1 FROM fingerprints f"
+            "                  WHERE f.user_id = users.user_id) THEN 2 ELSE 0 END)"
+            "| 4"
+            "|(CASE WHEN ic_card IS NOT NULL AND ic_card<>'' THEN 8 ELSE 0 END)";
+        char sql[512];
+        int dirty = 0;
+        sqlite3_stmt *st = NULL;
+        snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM users"
+                                   " WHERE auth_flags <> (auth_flags & (%s));",
+                 mask_sql);
+        if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) == SQLITE_OK &&
+            sqlite3_step(st) == SQLITE_ROW)
+            dirty = sqlite3_column_int(st, 0);
+        else
+            DG_LOGW(TAG, "方式位规范化计数失败:%s", sqlite3_errmsg(s_db));
+        sqlite3_finalize(st);
+        if (dirty > 0) {
+            snprintf(sql, sizeof(sql),
+                     "UPDATE users SET auth_flags = auth_flags & (%s);", mask_sql);
+            if (sqlite3_exec(s_db, sql, NULL, NULL, NULL) == SQLITE_OK)
+                DG_LOGI(TAG, "迁移:验证方式位规范化,修正 %d 个用户(无凭据的位已关)",
+                        dirty);
+            else
+                DG_LOGW(TAG, "方式位规范化执行失败:%s", sqlite3_errmsg(s_db));
+        }
+    }
+
     /* 特征缓存启动装载:装载失败属致命(1:N 恒空),让 storage_init 显式失败,
      * 由装配层"必需模块失败拒绝启动"接管 */
     int crc = cache_load_locked();
@@ -569,6 +606,30 @@ static bool ic_exists_locked(const char *ic, const char *exclude_uid)
  * 特征 1:N 查重(spec-database §2:相似度语义,必须逐行解密比较):
  * 返回 1 重复 / 0 不重复 / <0 错误。exclude_uid 用于 update 时排除自身。
  */
+/* 验证方式不变式(spec-database §1,2026-10-04):方式位 ⇒ 对应凭据已录入。
+ * require = 本次要落库的位;have = 落库前已有的位(ADD 传 0);face_len/ic 为
+ * 落库后的有效值(调用方先做覆盖回填);指纹凭据在独立表,查行数。PWD 位
+ * 无前置(密码必填,恒可用)。只拦"本次新增的无凭据位"——历史脏位(迁移前
+ * 旧数据)不阻塞无关编辑,由开机规范化迁移统一清理 */
+static int auth_flags_validate_locked(const char *uid, uint32_t require,
+                                      uint32_t have, uint16_t face_len,
+                                      const char *ic)
+{
+    const uint32_t added = require & ~have;
+    if ((added & DG_AUTH_FACE) && face_len == 0)
+        return DG_ERR_AUTH_NO_CRED;
+    if (added & DG_AUTH_FINGER) {
+        uint32_t n = 0;
+        if (finger_count_locked(uid, &n) != DG_OK)
+            return DG_ERR_DB;
+        if (n == 0)
+            return DG_ERR_AUTH_NO_CRED;
+    }
+    if ((added & DG_AUTH_IC) && (!ic || !ic[0]))
+        return DG_ERR_AUTH_NO_CRED;
+    return DG_OK;
+}
+
 static int feature_dup_locked(bool is_face, const char *exclude_uid,
                               const uint8_t *plain, uint16_t len)
 {
@@ -704,6 +765,19 @@ int db_user_add(const user_rec_t *in)
     if (in->ic_card[0] && ic_exists_locked(in->ic_card, NULL)) {
         pthread_mutex_unlock(&s_mtx);
         return DG_ERR_DUP_IC;
+    }
+
+    /* 验证方式不变式:新建用户除密码外不可能有已录凭据,带 FACE/FINGER/IC
+     * 位的建号请求一律拒绝(web add 的历史默认 FACE|PWD 就此收窄为 PWD;
+     * 方式位由对应录入路径在凭据落库时写位) */
+    {
+        const int arc = auth_flags_validate_locked(in->user_id, in->auth_flags,
+                                                   0, in->face_vec_len,
+                                                   in->ic_card);
+        if (arc != DG_OK) {
+            pthread_mutex_unlock(&s_mtx);
+            return arc;
+        }
     }
 
     int dup;
@@ -845,6 +919,28 @@ int db_user_update(const user_rec_t *in)
         return grc;
     }
 
+    /* 方式位落库值:解绑卡(空 ic_card)自动关 IC 位——"清除凭据=关闭方式"
+     * 的存储层兜底(enroll 解绑路径自行清位,这里是双保险);其余保持调用方
+     * 给的值,由下方不变式校验拦截"新增无凭据位" */
+    uint32_t new_flags = in->auth_flags;
+    if (!in->ic_card[0])
+        new_flags &= ~(uint32_t)DG_AUTH_IC;
+
+    /* 验证方式不变式(spec-database §1):有效 face/ic 取"本次落库后的值"
+     * (len=0=保留 / ic 始终覆盖),指纹查表 */
+    {
+        const uint16_t eff_face = in->face_vec_len > 0 ? in->face_vec_len
+                                                       : existing.face_vec_len;
+        const char *eff_ic = in->ic_card;
+        const int arc = auth_flags_validate_locked(in->user_id, new_flags,
+                                                   existing.auth_flags,
+                                                   eff_face, eff_ic);
+        if (arc != DG_OK) {
+            pthread_mutex_unlock(&s_mtx);
+            return arc;
+        }
+    }
+
     const char *new_name = in->user_name[0] ? in->user_name : existing.user_name;
     const char *new_ic = in->ic_card;
     if (new_ic[0] && strcmp(new_ic, existing.ic_card) != 0
@@ -924,7 +1020,7 @@ int db_user_update(const user_rec_t *in)
         sqlite3_bind_blob(st, 6, salt, DG_PWD_SALT_LEN, SQLITE_TRANSIENT);
         bind_text_or_null(st, 7, new_ic);
         sqlite3_bind_int(st, 8, in->role);
-        sqlite3_bind_int64(st, 9, (sqlite3_int64)in->auth_flags);
+        sqlite3_bind_int64(st, 9, (sqlite3_int64)new_flags);
         sqlite3_bind_int64(st, 10, (int64_t)time(NULL));
         if (sqlite3_step(st) != SQLITE_DONE) {
             DG_LOGE(TAG, "user update: %s", sqlite3_errmsg(s_db));
@@ -934,7 +1030,7 @@ int db_user_update(const user_rec_t *in)
     sqlite3_finalize(st);
     if (rc == DG_OK
         && cache_update_locked(in->user_id, face_plain, face_len,
-                               in->role, in->auth_flags) != DG_OK) {
+                               in->role, new_flags) != DG_OK) {
         DG_LOGE(TAG, "特征缓存增量更新失败(update),触发全量重载");
         cache_recover_locked();
     }
@@ -1076,9 +1172,11 @@ int db_user_clear_face(const char *user_id)
     sqlite3_stmt *st;
     int rc = DG_OK;
     /* 头像随人脸生命周期:清除人脸 = 头像一并消失(编辑页"清除"后列表/预览
-     * 都要回到占位"无";2026-09-21 拍摄录入验收 §6-6) */
+     * 都要回到占位"无";2026-09-21 拍摄录入验收 §6-6)。方式位同步关闭:
+     * "清除凭据 = 关闭方式"不变式的清除侧(指纹删光/解绑卡同款,spec §1) */
     if (sqlite3_prepare_v2(s_db,
-                           "UPDATE users SET face_vec=NULL, avatar=NULL WHERE user_id=?1",
+                           "UPDATE users SET face_vec=NULL, avatar=NULL,"
+                           " auth_flags=auth_flags & ~1 WHERE user_id=?1",
                            -1, &st, NULL) != SQLITE_OK) {
         pthread_mutex_unlock(&s_mtx);
         return DG_ERR_DB;
@@ -1300,6 +1398,24 @@ int db_finger_add(const char *user_id, int32_t page_id,
     return rc;
 }
 
+/** 单用户指纹行数(锁内版):验证方式不变式与公开计数共用一条 SQL */
+static int finger_count_locked(const char *user_id, uint32_t *n)
+{
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(s_db,
+            "SELECT COUNT(*) FROM fingerprints WHERE user_id=?1",
+            -1, &st, NULL) != SQLITE_OK)
+        return DG_ERR_DB;
+    sqlite3_bind_text(st, 1, user_id, -1, SQLITE_TRANSIENT);
+    int rc = DG_OK;
+    if (sqlite3_step(st) == SQLITE_ROW)
+        *n = (uint32_t)sqlite3_column_int(st, 0);
+    else
+        rc = DG_ERR_DB;
+    sqlite3_finalize(st);
+    return rc;
+}
+
 int db_finger_del(const char *user_id, int32_t page_id)
 {
     if (!s_db)
@@ -1385,20 +1501,7 @@ int db_finger_count_user(const char *user_id, uint32_t *n)
         return DG_ERR_PARAM;
 
     pthread_mutex_lock(&s_mtx);
-    sqlite3_stmt *st;
-    int rc = DG_OK;
-    if (sqlite3_prepare_v2(s_db,
-            "SELECT COUNT(*) FROM fingerprints WHERE user_id=?1",
-            -1, &st, NULL) != SQLITE_OK) {
-        pthread_mutex_unlock(&s_mtx);
-        return DG_ERR_DB;
-    }
-    sqlite3_bind_text(st, 1, user_id, -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(st) == SQLITE_ROW)
-        *n = (uint32_t)sqlite3_column_int(st, 0);
-    else
-        rc = DG_ERR_DB;
-    sqlite3_finalize(st);
+    const int rc = finger_count_locked(user_id, n);
     pthread_mutex_unlock(&s_mtx);
     return rc;
 }

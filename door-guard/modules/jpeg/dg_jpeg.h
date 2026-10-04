@@ -40,6 +40,11 @@ int dg_jpeg_encode_rgb(const uint8_t *rgb888, int w, int h, int quality,
 int dg_jpeg_decode_rgb(const uint8_t *jpeg, size_t len, int scale_denom,
                        uint8_t *out_rgb888, size_t cap, int *w, int *h);
 
+/** 只探尺寸不解码(JPEG → 原始宽高),损坏输入显式报错。web 上传的
+ *  "解压炸弹"防线前置:先按原图边长选缩放倍率,再按缩放后尺寸分配缓冲,
+ *  绝不为未知来源的图分配全幅 RGB */
+int dg_jpeg_dimensions(const uint8_t *jpeg, size_t len, int *w, int *h);
+
 #ifdef __cplusplus
 }
 #endif

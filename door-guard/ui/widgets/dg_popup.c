@@ -388,6 +388,117 @@ void dg_popup_input(const dg_popup_input_cfg_t *cfg)
     DG_LOGI("[POPUP]", "input: %s", cfg->title);
 }
 
+/* ---- 多选弹窗(验证方式开关等;2026-10-04) ---- */
+
+#define MULTI_MAX 8
+
+typedef struct {
+    void (*on_confirm)(void *, uint32_t);
+    void (*on_cancel)(void *);
+    void *ud;
+    lv_obj_t *sym[MULTI_MAX];            /* 勾选标记(LV_SYMBOL_OK,隐藏=未选) */
+    bool    checked[MULTI_MAX];
+    bool    enabled[MULTI_MAX];
+    int     cnt;
+} multi_ctx_t;
+
+static multi_ctx_t s_multi;
+
+static void multi_toggle(lv_event_t *e)
+{
+    const int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    if (idx < 0 || idx >= s_multi.cnt || !s_multi.enabled[idx])
+        return;
+    s_multi.checked[idx] = !s_multi.checked[idx];
+    if (s_multi.sym[idx])
+        lv_obj_clear_flag(s_multi.sym[idx], LV_OBJ_FLAG_HIDDEN);
+    if (!s_multi.checked[idx] && s_multi.sym[idx])
+        lv_obj_add_flag(s_multi.sym[idx], LV_OBJ_FLAG_HIDDEN);
+}
+
+static void multi_confirm_click(lv_event_t *e)
+{
+    (void)e;
+    uint32_t mask = 0;
+    for (int i = 0; i < s_multi.cnt; i++)
+        if (s_multi.checked[i])
+            mask |= 1u << i;
+    void (*cb)(void *, uint32_t) = s_multi.on_confirm;
+    void *ud = s_multi.ud;
+    dg_popup_close();                    /* 先关再回调:回调可立即开新弹窗 */
+    if (cb)
+        cb(ud, mask);
+}
+
+static void multi_cancel_click(lv_event_t *e)
+{
+    void (*cb)(void *) = lv_event_get_user_data(e);
+    void *ud = s_multi.ud;
+    dg_popup_close();
+    if (cb)
+        cb(ud);
+}
+
+void dg_popup_multi(const dg_popup_multi_cfg_t *cfg)
+{
+    if (!cfg || !cfg->title || !cfg->items || !cfg->enabled || !cfg->checked ||
+        cfg->cnt <= 0 || cfg->cnt > MULTI_MAX)
+        return;
+
+    lv_obj_t *card = base_create(DG_COLOR_PRIM());
+    msg_create(card, cfg->title);
+    s_multi.on_confirm = cfg->on_confirm;
+    s_multi.on_cancel = cfg->on_cancel;
+    s_multi.ud = cfg->ud;
+    s_multi.cnt = cfg->cnt;
+
+    for (int i = 0; i < cfg->cnt; i++) {
+        s_multi.checked[i] = cfg->checked[i];
+        s_multi.enabled[i] = cfg->enabled[i];
+        s_multi.sym[i] = NULL;
+
+        /* 行容器:勾选标记 + 文本;可点项整行响应,未启用项灰显不可点。
+         * 容器自身不可滚(卡片才是滚动主体?卡片也不滚——项数 ≤8,竖屏
+         * 高度足够;行高按 DG_FONT_CN 撑开) */
+        lv_obj_t *row = dg_btn_create_light(card, NULL, cfg->items[i]);
+        lv_obj_set_size(row, LV_PCT(100), 76);
+        if (cfg->enabled[i]) {
+            lv_obj_set_user_data(row, (void *)(intptr_t)i);
+            lv_obj_add_event_cb(row, multi_toggle, LV_EVENT_CLICKED, NULL);
+        } else {
+            lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_text_opa(row, DG_OPA_TEXT_DIM, 0);
+        }
+
+        /* 勾选标记:行内容文本左侧的独立 label(dg_btn 文本在内容行容器里,
+         * 直接改其文本会破坏轻量按钮语义,这里另立一个浮层 label) */
+        lv_obj_t *sym = lv_label_create(row);
+        lv_label_set_text(sym, LV_SYMBOL_OK);
+        lv_obj_set_style_text_color(sym, DG_COL_OK(), 0);
+        lv_obj_align(sym, LV_ALIGN_LEFT_MID, 20, 0);
+        if (!cfg->checked[i])
+            lv_obj_add_flag(sym, LV_OBJ_FLAG_HIDDEN);
+        s_multi.sym[i] = sym;
+    }
+
+    lv_obj_t *ops = lv_obj_create(card);
+    lv_obj_remove_style_all(ops);
+    lv_obj_set_size(ops, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(ops, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(ops, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(ops, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *ok = dg_btn_create(ops, LV_SYMBOL_OK, _("确定"));
+    lv_obj_set_size(ok, 200, 80);
+    lv_obj_add_event_cb(ok, multi_confirm_click, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cancel = dg_btn_create_light(ops, NULL, _("取消"));
+    lv_obj_set_size(cancel, 200, 80);
+    lv_obj_add_event_cb(cancel, multi_cancel_click, LV_EVENT_CLICKED,
+                        cfg->on_cancel);
+    DG_LOGI("[POPUP]", "multi: %s (%d 项)", cfg->title, cfg->cnt);
+}
+
 /* ---- 选择弹窗 ---- */
 
 typedef struct {

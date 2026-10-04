@@ -52,6 +52,21 @@ void dg_popup_choice_ex(const char *title, const char *const *options, int cnt,
                         uint32_t red_mask, void (*on_pick)(void *ud, int idx),
                         void (*on_cancel)(void *ud), void *ud);
 
+/** 多选弹窗配置(验证方式等"多开多关"场景,2026-10-04) */
+typedef struct {
+    const char *title;              /**< 已 _() 的标题 */
+    const char *const *items;       /**< 选项文本(已 _();未启用项调用方自行附注) */
+    const bool *enabled;            /**< 逐项可否勾选(false = 灰显不可点) */
+    const bool *checked;            /**< 初始勾选态 */
+    int cnt;                        /**< 项数(≤8) */
+    void (*on_confirm)(void *ud, uint32_t mask);  /**< mask bit n = 第 n 项勾选 */
+    void (*on_cancel)(void *ud);
+    void *ud;
+} dg_popup_multi_cfg_t;
+
+/** 多选弹窗(纵排勾选项 + 确定/取消;未启用项灰显不可点) */
+void dg_popup_multi(const dg_popup_multi_cfg_t *cfg);
+
 /** 关闭当前弹窗(若在) */
 void dg_popup_close(void);
 

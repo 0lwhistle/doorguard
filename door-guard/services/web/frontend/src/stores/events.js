@@ -53,7 +53,22 @@ function onEvent(msg) {
   if (msg.type === 'uptime') {
     /* 设备周期推送运行时长:概览页实时,无需刷新页面 */
     applyUptime(msg)
+    return
   }
+  if (msg.type === 'enroll') {
+    /* 录入回执(人脸录入/清除;指纹/IC 暂无前端消费者):全局提示 + 通知
+     * 订阅者(用户管理页按 seq 配对自己的上传请求后刷新列表) */
+    if (msg.ok) toast.ok(msg.msg || '操作成功')
+    else toast.err(msg.msg || '操作失败')
+    enrollListeners.forEach((cb) => cb(msg))
+  }
+}
+
+/* 录入回执订阅(轻量回调表;返回退订函数) */
+const enrollListeners = new Set()
+export function onEnrollResult(cb) {
+  enrollListeners.add(cb)
+  return () => enrollListeners.delete(cb)
 }
 
 export function start() {

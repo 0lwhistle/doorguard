@@ -29,10 +29,15 @@ A="X-Auth-Token: $TOK"
 R=$(curl -s -m 3 -H "$A" "$B/api/users")
 ck "列表结构完整" '"users":[' "$R"
 
-# 添加合法用户
+# 添加合法用户(方式位只带密码:不变式下新用户没有已录凭据)
 R=$(curl -s -m 3 -X POST $B/api/users/add -H "$A" -H "Content-Type: application/json" \
-  -d '{"uid":"webtest1","name":"网页用户","pwd":"test1234","role":0,"auth_flags":5}')
+  -d '{"uid":"webtest1","name":"网页用户","pwd":"test1234","role":0,"auth_flags":4}')
 ck "添加合法用户" "已添加" "$R"
+
+# 建号带人脸位(无凭据)→ 不变式拒收
+R=$(curl -s -m 3 -X POST $B/api/users/add -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest9","name":"x","pwd":"test1234","auth_flags":5}')
+ck "建号带人脸位被拒" "该验证方式未录入" "$R"
 
 # 重复 uid
 R=$(curl -s -m 3 -X POST $B/api/users/add -H "$A" -H "Content-Type: application/json" \
@@ -75,6 +80,43 @@ ck "权限已生效" '"role":1' "$R"
 R=$(curl -s -m 3 -X POST $B/api/users/update -H "$A" -H "Content-Type: application/json" \
   -d '{"uid":"webtest1","auth_flags":0}')
 ck "auth_flags=0 被拒" "1~15" "$R"
+
+# 方式位不变式:未录入人脸不允许开启人脸位
+R=$(curl -s -m 3 -X POST $B/api/users/update -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest1","auth_flags":5}')
+ck "未录人脸开人脸位被拒" "该验证方式未录入" "$R"
+
+# ---- 人脸录入/重录(受理制;2026-10-04)----
+FACE_JPG=/tmp/dg_api_face_$$.jpg
+printf '\xff\xd8\xff\xe0\x00\x10JFIF\x00' > "$FACE_JPG"   # SOI 形态(sim 后端不解析内容)
+head -c 2048 /dev/zero >> "$FACE_JPG"
+
+R=$(curl -s -m 3 -X POST "$B/api/users/face_set?uid=webtest1" -H "$A" --data-binary '')
+ck "人脸录入空体被拒" "图片大小" "$R"
+R=$(curl -s -m 3 -X POST "$B/api/users/face_set?uid=webtest1" -H "$A" --data-binary 'notjpeg')
+ck "非 JPEG 被拒" "仅支持 JPEG" "$R"
+R=$(curl -s -m 3 -X POST "$B/api/users/face_set?uid=nouser99" -H "$A" --data-binary @"$FACE_JPG")
+ck "不存在用户回 404 文案" "用户不存在" "$R"
+R=$(curl -s -m 3 -X POST "$B/api/users/face_set?uid=webtest1" -H "$A" -H "Content-Type: image/jpeg" \
+  --data-binary @"$FACE_JPG")
+ck "人脸录入受理" '"seq"' "$R"
+sleep 1                                                    # 异步提取落库
+R=$(curl -s -m 3 -H "$A" "$B/api/users?page=1&page_size=50")
+ck "录入后列表 has_face" '"has_face":true' "$R"
+
+# 录入完成后人脸位可开(重录语义同路径)
+R=$(curl -s -m 3 -X POST $B/api/users/update -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest1","auth_flags":5}')
+ck "已录人脸开人脸位通过" "已保存" "$R"
+
+# 清人脸(受理制):方式位自动回收
+R=$(curl -s -m 3 -X POST $B/api/users/face_clear -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest1"}')
+ck "清人脸受理" "已受理" "$R"
+sleep 1
+R=$(curl -s -m 3 -H "$A" "$B/api/users?page=1&page_size=50")
+ck "清脸后 has_face=false" '"has_face":false' "$R"
+rm -f "$FACE_JPG"
 
 # 改密
 R=$(curl -s -m 3 -X POST $B/api/users/pwd -H "$A" -H "Content-Type: application/json" \

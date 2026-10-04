@@ -87,7 +87,12 @@ static void make_user(const char *uid, const char *name)
     snprintf(rec.user_id, sizeof(rec.user_id), "%s", uid);
     snprintf(rec.user_name, sizeof(rec.user_name), "%s", name);
     rec.role = DG_ROLE_NORMAL;
+    /* 方式位不变式(2026-10-04):人脸位配哑特征,保住"IC 操作不得误清
+     * 其他人脸位"的断言语义;按 uid 派生避免多用户互相查重命中 */
     rec.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
+    for (size_t k = 0; k < 16; k++)
+        rec.face_vec[k] = (uint8_t)(uid[k % strnlen(uid, DG_UID_LEN)] * 7 + k);
+    rec.face_vec_len = 16;
     DG_CHECK(db_user_set_password(&rec, "abcd1234") == DG_OK);
     DG_CHECK(db_user_add(&rec) == DG_OK);
 }

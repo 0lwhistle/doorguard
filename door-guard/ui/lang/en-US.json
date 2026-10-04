@@ -139,6 +139,10 @@
   "请靠近一些": "Move closer",
   "请保持拍摄单一人脸": "Keep only one face in view",
   "菜单超时": "Menu Timeout",
+  "屏幕显示": "Display",
+  "屏幕亮度": "Brightness",
+  "拖动即时生效,松手保存": "Applies while dragging, saved on release",
+  "待机时自动降至 30%,10 秒无操作全黑": "Dims to 30% on standby, black after 10s idle",
   "保存失败": "Save failed",
   "校时成功": "Time synced",
   "校时失败": "Time sync failed",
@@ -217,5 +221,9 @@
   "松开手指后再进行第二次按压": "Release, then press the same finger again",
   "正在录入，请稍候": "Saving, please wait",
   "5秒内无按压将自动退出": "Auto exit if no press within 5s",
-  "未检测到指纹，已退出录入": "No finger detected, enrollment exited"
+  "未检测到指纹，已退出录入": "No finger detected, enrollment exited",
+  "全部关闭": "All off",
+  "确定": "OK",
+  "该验证方式未录入，无法开启": "Method has no enrolled credential",
+  "（未录入）": " (not enrolled)"
 }

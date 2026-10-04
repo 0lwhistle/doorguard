@@ -53,8 +53,9 @@ export function listUsers({ page = 1, pageSize = 20 } = {}) {
   return request(PATHS.users, { params: { page, page_size: pageSize } })
 }
 
-/** 添加用户(密码必填;人脸等特征录入口在设备端) */
-export function addUser({ uid, name, pwd, role = 0, authFlags = 0b101 }) {
+/** 添加用户(密码必填)。默认只勾密码:「方式位 ⇒ 已录凭据」不变式下,
+ *  新用户除密码外没有可用方式;人脸位在上传录入时自动开启 */
+export function addUser({ uid, name, pwd, role = 0, authFlags = 0b100 }) {
   return request(PATHS.usersAdd, {
     method: 'POST',
     body: { uid, name, pwd, role, auth_flags: authFlags },
@@ -83,4 +84,44 @@ export function deleteUser({ uid }) {
 /** 清除已录人脸(保留用户;受理制) */
 export function clearUserFace({ uid }) {
   return request(PATHS.usersFaceClear, { method: 'POST', body: { uid } })
+}
+
+/** 上传人脸照片录入/重录(受理制)。blob = 降采样后的 JPEG;
+ *  服务端硬顶 512KB,提取结果经 WS enroll 消息(seq 配对)回推。
+ *  前端应先用 downscaleJpeg() 把图降到最长边 ≤1024 再传 */
+export function setUserFace({ uid, blob }) {
+  return request(PATHS.usersFaceSet, {
+    method: 'POST',
+    params: { uid },
+    rawBody: blob,
+    rawType: 'image/jpeg',
+  })
+}
+
+/**
+ * 图片文件 → 降采样 JPEG Blob(canvas 重编码;顺带抹掉 EXIF/方向)。
+ * @param {File} file 用户选择的图片
+ * @param {{maxDim?:number, quality?:number}} opts
+ * @returns {Promise<{blob:Blob, width:number, height:number}>}
+ */
+export async function downscaleJpeg(file, { maxDim = 1024, quality = 0.85 } = {}) {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height))
+  const w = Math.max(1, Math.round(bitmap.width * scale))
+  const h = Math.max(1, Math.round(bitmap.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(bitmap, 0, 0, w, h)
+  bitmap.close?.()
+  const blob = await new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('图片编码失败'))),
+      'image/jpeg',
+      quality,
+    ),
+  )
+  return { blob, width: w, height: h }
 }

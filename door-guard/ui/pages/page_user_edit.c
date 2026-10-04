@@ -13,6 +13,11 @@
  *   ADD :列表页“添加”输入 ID 后进入,密码/姓名先攒在页内,
  *         [保存] 才建用户(硬规则:新用户必须设密码,否则禁止添加);
  *         人脸/指纹/IC 在保存前不可录入(用户还不存在,特征无处挂)。
+ *
+ * 2026-10-04 「验证方式」行(多选草稿):flags 攒草稿保存才落库,可用项 =
+ * 已录凭据(「位 ⇒ 已录凭据」不变式的 UI 前置,storage 同规则兜底);
+ * 人脸/指纹/IC 录入路径各自写位,本行是显式开/关的入口。EDIT 保存顺序 =
+ * 特征草稿先落(带置位)→ 字段+方式位,否则不变式校验会拒。
  */
 #include "dg_log.h"
 #include "enroll_service.h"
@@ -45,16 +50,32 @@ static char  s_pending_pwd[DG_PWD_MAX_LEN];
 static char  s_draft_name[DG_NAME_LEN];
 static int32_t s_draft_role;
 static char  s_draft_pwd[DG_PWD_MAX_LEN];   /* 空 = 不修改密码 */
-static bool  s_dirty;                        /* 姓名/权限/密码有无改动 */
+static uint32_t s_flags_draft;               /* 验证方式位草稿(完整目标值) */
+static bool  s_dirty;                        /* 姓名/权限/密码/方式位有无改动 */
 static bool  s_face_clear_pending;           /* 保存时清除人脸(草稿语义) */
 
 static lv_obj_t *s_title;
 static lv_obj_t *s_val_name, *s_val_role, *s_val_pwd, *s_val_face,
-               *s_val_finger, *s_val_ic;
+               *s_val_finger, *s_val_ic, *s_val_auth;
 static lv_obj_t *s_img_face;                    /* 人脸行头像预览 */
 static lv_obj_t *s_btn_pwd, *s_btn_face;
-static lv_obj_t *s_btn_finger, *s_btn_ic;
+static lv_obj_t *s_btn_finger, *s_btn_ic, *s_btn_auth;
 static lv_obj_t *s_row_del;                     /* 「删除用户」行(EDIT 才显示) */
+
+/* 验证方式位有效值:草稿 ∪ 录入中的人脸(保存时 commit 会置位)∖
+ * 待清除的人脸(保存时 clear 会清位)。设备端「录入写位/清除清位」与
+ * 指纹/IC 路径同语义(spec-database §1),显示与保存共用同一口径 */
+static uint32_t eff_flags(void)
+{
+    uint32_t f = s_flags_draft;
+    if (s_add_mode)
+        return f;                    /* ADD:特征尚不可录,草稿即全部事实 */
+    if (enroll_service_draft_active(s_uid))
+        f |= DG_AUTH_FACE;
+    if (s_face_clear_pending)
+        f &= ~(uint32_t)DG_AUTH_FACE;
+    return f;
+}
 
 /* 槽位快照(refresh 显示 已录 n/3 用;录入/删除流已迁指纹管理页) */
 static int32_t  s_fp_pages[DG_FINGER_PAGES_MAX];
@@ -178,6 +199,31 @@ static const char *role_name(int32_t role)
     }
 }
 
+/* 方式位 → 展示文本(已开启项「/」连接;全关给专门文案) */
+static void flags_text(uint32_t flags, char *buf, size_t cap)
+{
+    /* 每调用构建(翻译是运行时查表,静态表吃不到语言切换) */
+    const struct { uint32_t bit; const char *name; } nm[] = {
+        { DG_AUTH_FACE,   _("人脸") },
+        { DG_AUTH_FINGER, _("指纹") },
+        { DG_AUTH_PWD,    _("密码") },
+        { DG_AUTH_IC,     _("IC卡") },
+    };
+    size_t off = 0;
+    buf[0] = '\0';
+    for (int i = 0; i < 4 && off < cap; i++) {
+        if (!(flags & nm[i].bit))
+            continue;
+        const int n = snprintf(buf + off, cap - off, "%s%s", off ? "/" : "",
+                               nm[i].name);
+        if (n < 0)
+            return;
+        off += (size_t)n;
+    }
+    if (off == 0)
+        snprintf(buf, cap, "%s", _("全部关闭"));
+}
+
 static void refresh(void)
 {
     if (s_add_mode) {
@@ -188,6 +234,11 @@ static void refresh(void)
         val_set(s_val_face, _("无"));
         val_set(s_val_finger, _("无"));
         val_set(s_val_ic, _("无"));
+        {
+            char fv[48];
+            flags_text(s_flags_draft, fv, sizeof(fv));
+            val_set(s_val_auth, fv);
+        }
         if (s_btn_pwd)
             dg_btn_set_label(s_btn_pwd, s_pending_has_pwd ? _("修改") : _("设置"));
         if (s_btn_face)
@@ -211,6 +262,11 @@ static void refresh(void)
     val_set(s_val_name, s_draft_name[0] ? s_draft_name : _("无"));
     val_set(s_val_role, role_name(s_draft_role));
     val_set(s_val_pwd, s_draft_pwd[0] ? _("已修改") : _("已设置"));
+    {
+        char fv[48];
+        flags_text(eff_flags(), fv, sizeof(fv));
+        val_set(s_val_auth, fv);
+    }
 
     /* 人脸行三态草稿显示:服务内草稿(已拍未保存)> 清除标志(待清除)>
      * DB 现值。按钮一律「修改」;弹窗内提供 重录/清除 */
@@ -355,6 +411,80 @@ static void on_role(lv_event_t *e)
     dg_popup_choice(_("权限"), opts, 3, draft_role, NULL, NULL);
 }
 
+/* ---- 验证方式(多选草稿;「位 ⇒ 已录凭据」不变式的 UI 前置拦截) ---- */
+
+static void apply_flags_multi(void *ud, uint32_t mask)
+{
+    (void)ud;
+    if (mask != s_flags_draft) {
+        s_flags_draft = mask;
+        s_dirty = true;
+    }
+    refresh();
+}
+
+static void on_auth(lv_event_t *e)
+{
+    (void)e;
+    /* 弹窗存续期内的项状态(dg_popup_multi 只在回调前使用它们) */
+    static char     items[4][48];
+    static bool     enabled[4];
+    static bool     checked[4];
+    const char     *item_p[4];
+    uint32_t        fp_cnt = 0;
+    int32_t         pages[DG_FINGER_PAGES_MAX];
+
+    if (s_add_mode && !s_pending_has_pwd) {
+        dg_popup_fail(_("请先设置密码"), 1500, NULL, NULL);
+        return;
+    }
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    if (!s_add_mode && enroll_service_user_get(s_uid, &rec) != DG_OK)
+        return;
+    if (!s_add_mode &&
+        (enroll_service_finger_pages(s_uid, pages, DG_FINGER_PAGES_MAX,
+                                     &fp_cnt) != DG_OK))
+        fp_cnt = 0;
+
+    /* 可勾选 = 凭据已在(或在保存时会随本次保存落库)。未启用项附注
+     * 「未录入」;清除待保存的人脸按「将未录入」处理,不许在清除的同时勾上 */
+    const bool face_ok = !s_add_mode && !s_face_clear_pending &&
+                         (rec.face_vec_len > 0 ||
+                          enroll_service_draft_active(s_uid));
+    const bool finger_ok = !s_add_mode && fp_cnt > 0;
+    const bool ic_ok = !s_add_mode && rec.ic_card[0] != '\0';
+    const bool avail[4] = { face_ok, finger_ok,
+                            true /* 密码必填,恒可勾 */, ic_ok };
+    const uint32_t bits[4] = { DG_AUTH_FACE, DG_AUTH_FINGER, DG_AUTH_PWD,
+                               DG_AUTH_IC };
+    const char *const names[4] = {
+        _("人脸"), _("指纹"), _("密码"), _("IC卡"),
+    };
+    const uint32_t cur = s_add_mode ? s_flags_draft : eff_flags();
+
+    for (int i = 0; i < 4; i++) {
+        if (avail[i])
+            snprintf(items[i], sizeof(items[i]), "%s", names[i]);
+        else
+            snprintf(items[i], sizeof(items[i]), "%s%s", names[i],
+                     _("（未录入）"));
+        item_p[i] = items[i];
+        enabled[i] = avail[i];
+        checked[i] = (cur & bits[i]) != 0;
+    }
+
+    const dg_popup_multi_cfg_t cfg = {
+        .title = _("验证方式"),
+        .items = item_p,
+        .enabled = enabled,
+        .checked = checked,
+        .cnt = 4,
+        .on_confirm = apply_flags_multi,
+    };
+    dg_popup_multi(&cfg);
+}
+
 static void apply_face_pick(void *ud, int idx);   /* on_face 先用后定义 */
 
 static void on_face(lv_event_t *e)
@@ -381,13 +511,17 @@ static void apply_face_pick(void *ud, int idx)
         return;
     }
     /* 清除 = 草稿语义:先丢服务内草稿(若有),再挂清除标志;保存才生效。
-     * DB 本就无人脸且无草稿时无事可做 */
+     * DB 本就无人脸且无草稿时无事可做。方式位随行关闭(「清除凭据 =
+     * 关闭方式」,与 IC 解绑/指纹删光同语义),保存一并落库 */
     enroll_service_discard_draft(s_uid);
     user_rec_t rec;
     memset(&rec, 0, sizeof(rec));
     if (enroll_service_user_get(s_uid, &rec) == DG_OK && rec.face_vec_len > 0) {
         s_face_clear_pending = true;
-        s_dirty = true;
+        if (s_flags_draft & DG_AUTH_FACE) {
+            s_flags_draft &= ~(uint32_t)DG_AUTH_FACE;
+            s_dirty = true;
+        }
     }
     refresh();
 }
@@ -466,8 +600,11 @@ static bool save(void)
             dg_popup_fail(_("请先设置密码"), 1500, NULL, NULL);
             return false;
         }
-        int rc = enroll_service_user_save(s_uid, s_pending_name,
-                                          DG_ROLE_NORMAL, s_pending_pwd);
+        /* 方式位草稿随建号落库(ADD 弹窗只放行密码位;越界位由 storage
+         * 不变式拒收兜底) */
+        int rc = enroll_service_user_save_ex(s_uid, s_pending_name,
+                                             DG_ROLE_NORMAL, s_pending_pwd,
+                                             s_flags_draft);
         if (rc != DG_OK) {
             dg_popup_fail(err_text(rc), 2000, NULL, NULL);
             return false;
@@ -480,8 +617,9 @@ static bool save(void)
         return true;
     }
 
-    /* EDIT:草稿校验 → 存在性前置(user_save 对不存在的 uid 会走建用户
-     * 分支,编辑页语义必须报「用户不存在」)→ 字段+密码一次落库 → 特征草稿提交 */
+    /* EDIT:草稿校验 → 存在性前置 → **特征草稿先落**(置位含在 flags 目标值
+     * 里,须在方式位落库前完成,否则「位 ⇒ 已录凭据」校验会拒)→ 字段+
+     * 方式位一次落库 */
     if (dg_ui_valid_name(s_draft_name)) {
         dg_popup_fail(_("姓名不合法"), 1500, NULL, NULL);
         return false;
@@ -491,18 +629,10 @@ static bool save(void)
         dg_popup_fail(_("用户不存在"), 1500, NULL, NULL);
         return false;
     }
-    int rc = enroll_service_user_save(s_uid, s_draft_name, s_draft_role,
-                                      s_draft_pwd[0] ? s_draft_pwd : NULL);
-    if (rc != DG_OK) {
-        dg_popup_fail(err_text(rc), 2000, NULL, NULL);
-        return false;
-    }
-    s_draft_pwd[0] = '\0';
-    s_dirty = false;                    /* 字段部分已保存;dirty 只剩特征草稿 */
+    const uint32_t flags = eff_flags();  /* 先取:commit 会消费草稿改变依据 */
 
-    /* 特征草稿:有人脸草稿 = commit(草稿覆盖清除语义);否则清除标志生效 */
     if (enroll_service_draft_active(s_uid)) {
-        rc = enroll_service_commit_draft(s_uid);
+        const int rc = enroll_service_commit_draft(s_uid);
         if (rc != DG_OK) {
             /* 查重冲突等:草稿保留,可重拍覆盖或返回时放弃 */
             dg_popup_fail(err_text(rc), 2000, NULL, NULL);
@@ -511,7 +641,7 @@ static bool save(void)
         }
         dg_avatar_invalidate(s_uid);    /* DB 头像已换,缓存作废重解码 */
     } else if (s_face_clear_pending) {
-        rc = enroll_service_clear_face(s_uid);
+        const int rc = enroll_service_clear_face(s_uid);
         if (rc != DG_OK) {
             dg_popup_fail(err_text(rc), 2000, NULL, NULL);
             refresh();
@@ -519,7 +649,21 @@ static bool save(void)
         }
         dg_avatar_invalidate(s_uid);
     }
+
+    const int rc = enroll_service_user_save_ex(s_uid, s_draft_name, s_draft_role,
+                                               s_draft_pwd[0] ? s_draft_pwd
+                                                              : NULL, flags);
+    if (rc != DG_OK) {
+        /* 人脸已提交而字段失败:状态仍一致(人脸合法落库),重试保存即可,
+         * 不做反向回滚(rollback 窗口换来的复杂度不值得) */
+        dg_popup_fail(err_text(rc), 2000, NULL, NULL);
+        refresh();
+        return false;
+    }
+    s_draft_pwd[0] = '\0';
+    s_flags_draft = flags;              /* 与库值同步(含录入写位的效果) */
     s_face_clear_pending = false;
+    s_dirty = false;
     dg_popup_success(_("已保存"), 800, NULL, NULL);
     refresh();
     return true;
@@ -681,6 +825,9 @@ void page_user_edit_create(lv_obj_t *parent)
     row = row_create(col, _("权限"), &s_val_role, NULL);
     row_action_btn(row, on_role);
 
+    row = row_create(col, _("验证方式"), &s_val_auth, NULL);
+    s_btn_auth = row_action_btn_label(row, _("修改"), on_auth);
+
     row_create(col, _("密码"), &s_val_pwd, &s_btn_pwd);
     lv_obj_add_event_cb(s_btn_pwd, on_pwd, LV_EVENT_CLICKED, NULL);
 
@@ -718,10 +865,10 @@ void page_user_edit_create(lv_obj_t *parent)
 void page_user_edit_destroy(void)
 {
     s_title = s_val_name = s_val_role = s_val_pwd = NULL;
-    s_val_face = s_val_finger = s_val_ic = NULL;
+    s_val_face = s_val_finger = s_val_ic = s_val_auth = NULL;
     s_img_face = NULL;
     s_btn_pwd = s_btn_face = NULL;
-    s_btn_finger = s_btn_ic = NULL;
+    s_btn_finger = s_btn_ic = s_btn_auth = NULL;
     s_row_del = NULL;
     cancel_bio_flows();                  /* 页面销毁:录入流不悬挂 */
     memset(s_pending_pwd, 0, sizeof(s_pending_pwd));
@@ -749,12 +896,14 @@ void page_user_edit_open(const char *uid)
         /* 草稿 = 当前库值;保存才落库 */
         snprintf(s_draft_name, sizeof(s_draft_name), "%s", rec.user_name);
         s_draft_role = rec.role;
+        s_flags_draft = rec.auth_flags;
         s_draft_pwd[0] = '\0';
     } else {
         s_add_mode = true;
         snprintf(s_uid, sizeof(s_uid), "%s", uid ? uid : "");
         s_draft_name[0] = '\0';
         s_draft_role = DG_ROLE_NORMAL;
+        s_flags_draft = DG_AUTH_PWD;    /* 新用户默认密码方式(录入路径写位) */
         s_draft_pwd[0] = '\0';
     }
     s_dirty = false;

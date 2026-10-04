@@ -31,7 +31,9 @@
   | POST | `/api/account` | token + 旧口令 | 改账号/口令,成功后**吊销全部会话** |
   | POST | `/api/system/reboot` | token | **远程重启**(2026-09-27):202 受理后延迟 1s 发布 `EV_SYS_REBOOT` → sysctl 服务执行(与设备端「重启设备」同一入口);重启期间门禁与上位机短暂不可用 |
   | POST | `/api/ota/upload` | token | 流式收包 + sha256 校验(§2) |
-  | GET | `/api/ws` | `?token=` | WebSocket 推送四类消息:`auth`(验证事件)/ `ntp`(校时结果)/ `net`(地址变化,web 轮询与 5s 监视触发)/ `uptime`(运行时长,5s 周期,概览实时显示) |
+  | POST | `/api/users/face_clear` | token | 清除已录人脸(保留用户),受理制(经 enroll 服务,异步) |
+  | POST | `/api/users/face_set` | token | **人脸录入/重录(2026-10-04)**:原始 JPEG 走 body(`Content-Type: image/jpeg`,服务端硬顶 512KB、SOI 前置校验),uid 走 query。受理制:`202 {seq}` → vision worker 异步提取(检测→质量闸→对齐→ArcFace,与拍摄流同口径;解压炸弹防线=先探尺寸选缩放倍率再分配缓冲)→ 查重落库(置位+头像)→ 结果经 WS `enroll` 消息(seq 配对)。前端负责降采样(canvas 重编码,最长边 ≤1024,顺带抹 EXIF);错误码 FACE_NONE/MULTI/QUALITY 对应"未检测到/多张/质量不合格" |
+  | GET | `/api/ws` | `?token=` | WebSocket 推送五类消息:`auth`(验证事件)/ `enroll`(录入回执,kind/seq/ok/err/msg,2026-10-04 起)/ `ntp`(校时结果)/ `net`(地址变化,web 轮询与 5s 监视触发)/ `uptime`(运行时长,5s 周期,概览实时显示) |
 
 - **实时门禁状态**:WebSocket 推送每次验证事件(时间/ID/姓名/方式/结果,与 access_logs 字段一致)、
   NTP 结果、网络地址变化、运行时长(5s)。总线回调入队 + netcore_post,由 loop 线程排空并逐连接

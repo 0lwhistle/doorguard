@@ -109,7 +109,10 @@ int main(void)
     snprintf(u.user_id, sizeof(u.user_id), "10001");
     snprintf(u.user_name, sizeof(u.user_name), "张三");
     u.role = DG_ROLE_NORMAL;
+    /* 方式位不变式(2026-10-04):人脸位配哑特征(sim mock 不读内容) */
     u.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
+    memcpy(u.face_vec, "dummy-face-10001", 16);
+    u.face_vec_len = 16;
     DG_CHECK(db_user_set_password(&u, "1234") == DG_OK);
     DG_CHECK(db_user_add(&u) == DG_OK);
 
@@ -119,6 +122,8 @@ int main(void)
     snprintf(adm.user_name, sizeof(adm.user_name), "管理员A");
     adm.role = DG_ROLE_ADMIN;
     adm.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;   /* 下面要走 1:1 人脸子步 */
+    memcpy(adm.face_vec, "dummy-face-00001", 16);
+    adm.face_vec_len = 16;
     DG_CHECK(db_user_set_password(&adm, "8888") == DG_OK);
     DG_CHECK(db_user_add(&adm) == DG_OK);
 

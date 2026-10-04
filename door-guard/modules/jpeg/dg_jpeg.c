@@ -211,3 +211,42 @@ int dg_jpeg_decode_rgb(const uint8_t *jpeg, size_t len, int scale_denom,
     *h = dh;
     return DG_OK;
 }
+
+/* 只探尺寸不解码(web 上传的"解压炸弹"防线前置:先按原图边长选缩放倍率,
+ * 再按缩放后尺寸分配缓冲——绝不为未知来源的图分配全幅 RGB) */
+int dg_jpeg_dimensions(const uint8_t *jpeg, size_t len, int *w, int *h)
+{
+    if (!jpeg || !w || !h || len < 4)
+        return DG_ERR_PARAM;
+
+    struct dg_jpeg_err jerr;
+    struct jpeg_decompress_struct cinfo;
+    memset(&cinfo, 0, sizeof(cinfo));
+    memset(&jerr, 0, sizeof(jerr));
+    cinfo.err = jpeg_std_error(&jerr.pub);
+    jerr.pub.error_exit = dg_jpeg_error_exit;
+    if (setjmp(jerr.jmp)) {
+        jpeg_destroy_decompress(&cinfo);
+        return DG_ERR_INTERNAL;
+    }
+
+    struct dg_mem_src src;
+    memset(&src, 0, sizeof(src));
+    src.pub.init_source = mem_src_init;
+    src.pub.fill_input_buffer = mem_src_fill;
+    src.pub.skip_input_data = mem_src_skip;
+    src.pub.resync_to_restart = jpeg_resync_to_restart;
+    src.pub.term_source = mem_src_term;
+    src.pub.bytes_in_buffer = len;
+    src.pub.next_input_byte = (const JOCTET *)jpeg;
+
+    jpeg_create_decompress(&cinfo);
+    cinfo.src = &src.pub;
+    jpeg_read_header(&cinfo, TRUE);
+    *w = (int)cinfo.image_width;
+    *h = (int)cinfo.image_height;
+    jpeg_destroy_decompress(&cinfo);
+    if (*w <= 0 || *h <= 0)
+        return DG_ERR_INTERNAL;
+    return DG_OK;
+}

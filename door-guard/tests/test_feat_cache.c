@@ -72,11 +72,13 @@ int main(void)
     DG_CHECK(user_make(&rec, "1001", f1, DG_ROLE_NORMAL,
                        DG_AUTH_FACE | DG_AUTH_PWD) == DG_OK);
     DG_CHECK(db_user_add(&rec) == DG_OK);
-    DG_CHECK(user_make(&rec, "1002", f2, DG_ROLE_ADMIN, DG_AUTH_ALL) == DG_OK);
+    DG_CHECK(user_make(&rec, "1002", f2, DG_ROLE_ADMIN,
+                       DG_AUTH_FACE | DG_AUTH_PWD) == DG_OK);
     DG_CHECK(db_user_add(&rec) == DG_OK);
     DG_CHECK(user_make(&rec, "1003", NULL, DG_ROLE_NORMAL, DG_AUTH_PWD) == DG_OK);
     DG_CHECK(db_user_add(&rec) == DG_OK);
-    DG_CHECK(user_make(&rec, "1004", f4, DG_ROLE_BLACKLIST, DG_AUTH_ALL) == DG_OK);
+    DG_CHECK(user_make(&rec, "1004", f4, DG_ROLE_BLACKLIST,
+                       DG_AUTH_FACE | DG_AUTH_PWD) == DG_OK);
     DG_CHECK(db_user_add(&rec) == DG_OK);
 
     s = storage_features_ro();
@@ -87,7 +89,8 @@ int main(void)
     DG_CHECK(e1 && e2 && e4);
     DG_CHECK(e1->face_len == 64 && memcmp(e1->face_vec, f1, 64) == 0);
     DG_CHECK(e1->role == DG_ROLE_NORMAL);
-    DG_CHECK(e2->role == DG_ROLE_ADMIN && e2->auth_flags == DG_AUTH_ALL);
+    DG_CHECK(e2->role == DG_ROLE_ADMIN
+             && e2->auth_flags == (DG_AUTH_FACE | DG_AUTH_PWD));
     DG_CHECK(e4->role == DG_ROLE_BLACKLIST);        /* 黑名单在快照里,过滤归消费方 */
     DG_CHECK(snap_find(s, "1003") == NULL);
     storage_features_ro_done();

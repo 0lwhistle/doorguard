@@ -131,6 +131,17 @@ void rknn_align_warp_ex(const uint8_t *src, int sw, int sh, const float m[6],
 /** 原地 L2 归一化(零向量保持不变) */
 void rknn_l2_normalize(float *v, int n);
 
+/**
+ * RGB888 letterbox(静态图录入,2026-10-04):等比缩放 + 居中补边,与
+ * npu_pre 的 RGA 版同语义(scale/pad/fit 由 npu_letterbox_plan 算出;
+ * pad_value 用检测模型训练约定的 114)。双线性采样,纯 CPU——静态图路径
+ * (解码后最长边 ≤1536)一次几毫秒,性能非关键,换宿主可测与
+ * "JPEG→RGB→检测输入"无需 RGA 的直通路。
+ */
+void rknn_rgb_letterbox(const uint8_t *src, int sw, int sh,
+                        float scale, int pad_x, int pad_y, int fit_w, int fit_h,
+                        uint8_t pad_value, uint8_t *dst, int dw, int dh);
+
 /** 余弦相似度(0~1 视用途;未归一化也正确,已归一化则退化为点积)。
  *  aarch64 走 NEON(1:N 检索热内核),其他平台标量 */
 float rknn_cosine(const float *a, const float *b, int n);

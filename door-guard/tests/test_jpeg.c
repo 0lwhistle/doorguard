@@ -81,5 +81,13 @@ int main(void)
     DG_CHECK(dg_jpeg_decode_rgb(garbage, sizeof(garbage), 1, out, sizeof(out),
                                 &w, &h) != DG_OK);
 
+    /* ---- 只探尺寸(web 上传的解压炸弹防线前置,2026-10-04) ---- */
+    int pw = 0, ph = 0;
+    DG_CHECK(dg_jpeg_dimensions(jpeg, jlen, &pw, &ph) == DG_OK);
+    DG_CHECK(pw == W && ph == H);
+    DG_CHECK(dg_jpeg_dimensions(garbage, sizeof(garbage), &pw, &ph) != DG_OK);
+    /* 注:截断但头完好的 JPEG 探尺寸合法成功——防线靠"先探后分配",
+     * 不靠拒绝截断图,故不对其断言失败 */
+
     DG_TEST_EXIT();
 }

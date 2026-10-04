@@ -56,12 +56,39 @@ int enroll_service_log_query(const log_query_t *q, log_page_t *out);
 
 /** 用户生命周期保存(编辑页「保存」唯一入口;字段+密码一次落库):
  *  uid 不存在 = 建用户:密码必填(空 → DG_ERR_NO_PASSWORD),auth_flags
- *  固定 FACE|PWD——指纹/IC 事件两端未接硬件,放开只会让用户白录白验
- *  (机制见 spec-auth-business「验证方式开关」);
- *  已存在   = 覆写姓名/权限;pwd 非空才改密(空/NULL = 保持原密码)。
+ *  固定 DG_AUTH_PWD——「方式位 ⇒ 已录凭据」不变式(spec-database §1,
+ *  2026-10-04)下新用户只有密码一种可用方式,人脸/指纹/IC 由录入路径在
+ *  凭据落库时写位;
+ *  已存在   = 覆写姓名/权限;pwd 非空才改密(空/NULL = 保持原密码);
+ *  auth_flags 保持现值(不改方式位)。
  *  @return DG_OK;失败码透传 storage(DUP_UID/NO_PASSWORD/BAD_NAME/…) */
 int enroll_service_user_save(const char *user_id, const char *name,
                              int32_t role, const char *pwd);
+
+/** 同上,另覆写验证方式位(编辑页「验证方式」草稿提交口)。flags 是
+ *  **完整目标值**(覆盖语义非增量);新增的无凭据位被 storage 拒收
+ *  (DG_ERR_AUTH_NO_CRED),设备端 UI 以"未录入灰显"前置拦截 */
+int enroll_service_user_save_ex(const char *user_id, const char *name,
+                                int32_t role, const char *pwd,
+                                uint32_t auth_flags);
+
+/* ---- web 静态图人脸录入(2026-10-04;受理制) ----
+ * web 上传 JPEG(前端降采样最长边 ≤1024,服务端硬顶 DG_FACE_UPLOAD_MAX)
+ * → 本入口校验后经 vision 静态图槽 + EV_VISION_STILL_REQ 交视觉后端提取
+ * (板上 rknn 线程:检测→质量闸→对齐→ArcFace;sim = 伪特征)→ 成功直接
+ * 查重落库(不经 UI 草稿槽,与 commit_draft 共用同一落库公共尾,含置位),
+ * 结果 EV_ENROLL_RESULT{FACE,seq};失败 EV_VISION_STILL_FAIL 同形回执。
+ * web 直调本服务属登记例外:web_server 本就直调 storage 管用户生命周期,
+ * 录入编排收口进 enroll 同理(docs/architecture-v2-proposal §1)。
+ * 单飞:一次一张,受理中再传 → DG_ERR_BUSY。 */
+
+/** 受理一次静态图录入。@param seq_out 回执配对句柄(可 NULL)
+ *  @return DG_OK 受理;DG_ERR_BUSY 已有在途;其余透传(用户不存在等) */
+int enroll_service_face_upload(const char *user_id, const uint8_t *jpeg,
+                               size_t len, uint32_t *seq_out);
+
+/** 是否有在途静态图录入(web 防重复提交/超时提示用) */
+bool enroll_service_upload_busy(void);
 
 /* ---- 人脸草稿(单槽;UI 线程直调,登记见 docs/architecture-v2-proposal §1) ---- */
 

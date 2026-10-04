@@ -138,13 +138,14 @@ int main(void)
     DG_CHECK(vision_backend_register(&vision_backend_sim) == DG_OK);
     DG_CHECK(vision_backend_start(true) == DG_OK);
 
-    /* ---- 预置用户 10001(密码 1234,无特征) ---- */
+    /* ---- 预置用户 10001(密码 1234,无特征;方式位只有密码,
+     *     人脸位由 E2E-1 的 commit 录入写位,2026-10-04) ---- */
     user_rec_t u;
     memset(&u, 0, sizeof(u));
     snprintf(u.user_id, sizeof(u.user_id), "10001");
     snprintf(u.user_name, sizeof(u.user_name), "张三");
     u.role = DG_ROLE_NORMAL;
-    u.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
+    u.auth_flags = DG_AUTH_PWD;
     DG_CHECK(db_user_set_password(&u, "1234") == DG_OK);
     DG_CHECK(db_user_add(&u) == DG_OK);
 

@@ -35,6 +35,10 @@ const char *dg_err_name(dg_err_t err)
     case DG_ERR_MISMATCH:       return "MISMATCH";
     case DG_ERR_FINGER_FULL:    return "FINGER_FULL";
     case DG_ERR_FINGER_LIMIT:   return "FINGER_LIMIT";
+    case DG_ERR_AUTH_NO_CRED:   return "AUTH_NO_CRED";
+    case DG_ERR_FACE_NONE:      return "FACE_NONE";
+    case DG_ERR_FACE_MULTI:     return "FACE_MULTI";
+    case DG_ERR_FACE_QUALITY:   return "FACE_QUALITY";
     default:                    return "UNKNOWN";
     }
 }

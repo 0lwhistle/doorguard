@@ -91,6 +91,18 @@ int64_t vision_backend_heartbeat_ms(void);
 int vision_service_put_avatar(uint32_t seq, const uint8_t *jpeg, size_t len);
 int vision_service_fetch_avatar(uint32_t seq, uint8_t *out, size_t cap, size_t *len);
 
+/* ---- 静态图录入槽(单槽;web 上传 JPEG 暂存,2026-10-04) ----
+ * enroll 编排在受理时 put(先于事件),后端在 EV_VISION_STILL_REQ 处理中
+ * 按 seq fetch(与照片槽同款"put 先行、按 seq 递一趟"配对);新 put 顶旧槽。
+ * 提取结果仍走特征槽/照片槽,失败路径 EV_VISION_STILL_FAIL。 */
+
+int vision_service_still_put(uint32_t seq, const uint8_t *jpeg, size_t len);
+int vision_service_still_fetch(uint32_t seq, uint8_t *out, size_t cap, size_t *len);
+
+/** 当前生效后端是否支持静态图录入(enroll 受理前置;不支持 → 请求在
+ *  受理时即拒绝,不会出现"受理后石沉大海") */
+bool vision_service_still_supported(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -80,17 +80,17 @@ static void test_add(void)
     fresh_setup();
     DG_CHECK(storage_set_feature_cmp(cmp_bytes, cmp_bytes, NULL) == DG_OK);
 
-    /* 正常 */
+    /* 正常(方式位不变式:无凭据的 FACE 位在建号时被拒,默认只带密码位) */
     user_rec_t u1 = make_user("10001", "张三", "pwd1");
     u1.role = DG_ROLE_ADMIN;
-    u1.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
+    u1.auth_flags = DG_AUTH_PWD;
     DG_CHECK(db_user_add(&u1) == DG_OK);
 
     user_rec_t got;
     DG_CHECK(db_user_get("10001", &got) == DG_OK);
     DG_CHECK(strcmp(got.user_name, "张三") == 0);
     DG_CHECK(got.role == DG_ROLE_ADMIN);
-    DG_CHECK(got.auth_flags == (DG_AUTH_FACE | DG_AUTH_PWD));
+    DG_CHECK(got.auth_flags == DG_AUTH_PWD);
 
     uint32_t n = 0;
     DG_CHECK(db_user_count(&n) == DG_OK && n == 1);
@@ -859,6 +859,96 @@ static void test_finger_migration(void)
              && strcmp(uid, "40001") == 0);
 }
 
+/* 方式位不变式(spec-database §1,2026-10-04):位 ⇒ 已录凭据。
+ * add/update 拒收无凭据的新增位(AUTH_NO_CRED);同 update 提供凭据则放行;
+ * 清脸清位/解绑卡清位;开机迁移规范化历史脏位 */
+static void test_auth_flags_invariant(void)
+{
+    printf("[S11] auth_flags 不变式:add/update 拒无凭据位/清位/迁移规范化\n");
+    fresh_setup();
+
+    user_rec_t u = make_user("50001", "甲", "pwd1234");
+
+    /* 建号带凭据位:新用户不可能有已录特征,一律拒 */
+    u.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
+    DG_CHECK(db_user_add(&u) == DG_ERR_AUTH_NO_CRED);
+    u.auth_flags = DG_AUTH_FINGER | DG_AUTH_PWD;
+    DG_CHECK(db_user_add(&u) == DG_ERR_AUTH_NO_CRED);
+    u.auth_flags = DG_AUTH_IC | DG_AUTH_PWD;
+    DG_CHECK(db_user_add(&u) == DG_ERR_AUTH_NO_CRED);
+    u.auth_flags = DG_AUTH_ALL;
+    DG_CHECK(db_user_add(&u) == DG_ERR_AUTH_NO_CRED);
+
+    /* 密码位恒可(密码必填) */
+    u.auth_flags = DG_AUTH_PWD;
+    DG_CHECK(db_user_add(&u) == DG_OK);
+    DG_CHECK(db_user_get("50001", &u) == DG_OK && u.auth_flags == DG_AUTH_PWD);
+
+    /* update 新增人脸位:无凭据拒;同 update 带特征放行 */
+    user_rec_t mod;
+    DG_CHECK(db_user_get("50001", &mod) == DG_OK);
+    mod.auth_flags |= DG_AUTH_FACE;
+    DG_CHECK(db_user_update(&mod) == DG_ERR_AUTH_NO_CRED);
+    memcpy(mod.face_vec, "dummy-face-plain", 16);
+    mod.face_vec_len = 16;
+    DG_CHECK(db_user_update(&mod) == DG_OK);
+    DG_CHECK(db_user_get("50001", &u) == DG_OK
+             && (u.auth_flags & DG_AUTH_FACE));
+
+    /* 保留旧位不动:face_len=0=保留语义下,已有位不算"新增" */
+    user_rec_t keep;
+    DG_CHECK(db_user_get("50001", &keep) == DG_OK);
+    keep.face_vec_len = 0;
+    keep.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
+    DG_CHECK(db_user_update(&keep) == DG_OK);
+
+    /* 清脸 = 清位(清除凭据即关闭方式) */
+    DG_CHECK(db_user_clear_face("50001") == DG_OK);
+    DG_CHECK(db_user_get("50001", &u) == DG_OK
+             && (u.auth_flags & DG_AUTH_FACE) == 0);
+
+    /* 指纹位:无指纹行拒;落一行后放行 */
+    DG_CHECK(db_user_get("50001", &mod) == DG_OK);
+    mod.auth_flags |= DG_AUTH_FINGER;
+    DG_CHECK(db_user_update(&mod) == DG_ERR_AUTH_NO_CRED);
+    DG_CHECK(db_finger_add("50001", 7, NULL, 0) == DG_OK);   /* 无副本行也算凭据 */
+    DG_CHECK(db_user_update(&mod) == DG_OK);
+
+    /* IC 位:带卡号一起改放行;解绑(空卡)自动回收 IC 位 */
+    DG_CHECK(db_user_get("50001", &mod) == DG_OK);
+    snprintf(mod.ic_card, sizeof(mod.ic_card), "CARD-50001");
+    mod.auth_flags |= DG_AUTH_IC;
+    DG_CHECK(db_user_update(&mod) == DG_OK);
+    DG_CHECK(db_user_get("50001", &u) == DG_OK
+             && (u.auth_flags & DG_AUTH_IC));
+    mod.ic_card[0] = '\0';
+    DG_CHECK(db_user_update(&mod) == DG_OK);
+    DG_CHECK(db_user_get("50001", &u) == DG_OK
+             && (u.auth_flags & DG_AUTH_IC) == 0);
+
+    /* 迁移规范化:直接改库造历史脏位(人脸位+无凭据),重启 init 清掉 */
+    storage_deinit();
+    {
+        sqlite3 *raw = NULL;
+        char db[128];
+        snprintf(db, sizeof(db), "%s/db.sqlite", s_dir);
+        DG_CHECK(sqlite3_open(db, &raw) == SQLITE_OK);
+        char *err = NULL;
+        DG_CHECK(sqlite3_exec(raw,
+            "UPDATE users SET auth_flags = 15 WHERE user_id='50001';",  /* 全位 */
+            NULL, NULL, &err) == SQLITE_OK);
+        sqlite3_free(err);
+        sqlite3_close(raw);
+    }
+    char db[128], key[128];
+    snprintf(db, sizeof(db), "%s/db.sqlite", s_dir);
+    snprintf(key, sizeof(key), "%s/dg.key", s_dir);
+    DG_CHECK(storage_init(db, key) == DG_OK);
+    /* 库内实况:人脸无/指纹 1 行/卡无/密码有 → 规范化后 = FINGER|PWD */
+    DG_CHECK(db_user_get("50001", &u) == DG_OK);
+    DG_CHECK(u.auth_flags == (DG_AUTH_FINGER | DG_AUTH_PWD));
+}
+
 int main(void)
 {
     test_add();          /* 含 2000 边界,最慢 */
@@ -875,6 +965,7 @@ int main(void)
     test_avatar();
     test_finger();
     test_finger_migration();
+    test_auth_flags_invariant();
 
     snprintf(s_dir, sizeof(s_dir), "/tmp/dg_st_%d", (int)getpid());
     char cmd[96];

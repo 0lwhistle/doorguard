@@ -46,6 +46,10 @@ fi
 # 干净沙箱:清掉上次跑留下的库(否则凭据/日志残留会让断言不稳定)
 rm -f sim/data/door-guard.db sim/data/dg.key
 mkdir -p /tmp/dg_webtest
+# 宿主以 root 跑时 web 会绑 80(非 root 才回退 8080,2026-10-04 WSL root
+# 实测),脚本全部按 8080 断言——沙箱里显式钉住端口,root/非 root 一致
+mkdir -p sim/data
+printf '{"network":{"web_port":8080}}' > sim/data/cur_config.json
 
 SDL_VIDEODRIVER=dummy DG_SIM_VISION=0 ./build-pc/door-guard sim/media \
     >/tmp/dg_webtest/server.log 2>&1 &

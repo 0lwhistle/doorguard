@@ -83,10 +83,12 @@ ST_VERIFY ←──每步 5s 超时/用户取消──(各子步)
    - 收到未开启的方式(陈旧弹窗/上位机注入)→ 红弹窗 reason=6,退回
    - **指纹/IC 位在硬件接入前自然不出现**(2026-09-28 B2 拍板钉死):  **→ 2026-10-01 已接入**:指纹/IC 录入路径把位写进 auth_flags,
      方式选择自然列出,机制如约未改(实现见 fp_provider/enroll_service)。
-     指纹/IC 事件两端皆未接驱动,无法录入也无法验证;两处建用户入口——
-     设备端编辑页 ADD(经 `enroll_service_user_save`)与 web /api/users/add
-     ——的**默认 auth_flags 均为 FACE|PWD**(web 表单默认只勾人脸+密码;
-     显式传入指纹/IC 位仍合法,属管理员显式开启,方式选择会照列)。
+     两处建用户入口——设备端编辑页 ADD(经 `enroll_service_user_save`)与
+     web /api/users/add——的**默认 auth_flags 均为仅 PWD**(2026-10-04 起:
+     「方式位 ⇒ 已录凭据」不变式,spec-database §1,无凭据位在存储层拒收)。
+     人脸位同样由录入路径写(commit_draft / web 上传 face_upload 落库即置位,
+     clear_face 清位);设备端编辑页「验证方式」行与 web 用户编辑表单提供
+     显式开/关,未录入的方式灰显不可勾。
      指纹/IC 硬件接入后此机制无需改动:录入路径把位写进 auth_flags,
      方式选择自然列出
 3. 各方式子页:

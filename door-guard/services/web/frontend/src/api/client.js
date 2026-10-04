@@ -43,12 +43,15 @@ function notifyUnauthorized(payload) {
 /**
  * 发起请求。
  * @param {string} path 接口路径(见 endpoints.js)
- * @param {{method?:string, body?:object, params?:object, signal?:AbortSignal}} opts
+ * @param {{method?:string, body?:object, rawBody?:Blob|string, rawType?:string,
+ *          params?:object, signal?:AbortSignal}} opts
+ *     rawBody:原始请求体(如人脸 JPEG 上传),与 body 互斥;
+ *     rawType 为其 Content-Type(默认 application/octet-stream)。
  * @returns {Promise<object>} 解析后的 JSON
  * @throws {ApiError} 网络失败/非 2xx
  */
 export async function request(path, opts = {}) {
-  const { method = 'GET', body, params, signal } = opts
+  const { method = 'GET', body, rawBody, rawType, params, signal } = opts
   let url = path
   if (params) {
     const qs = new URLSearchParams()
@@ -61,14 +64,18 @@ export async function request(path, opts = {}) {
 
   const headers = {}
   if (token) headers['X-Auth-Token'] = token
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  if (rawBody !== undefined) headers['Content-Type'] = rawType || 'application/octet-stream'
+  else if (body !== undefined) headers['Content-Type'] = 'application/json'
 
   let res
   try {
     res = await fetch(url, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body:
+        rawBody !== undefined ? rawBody
+        : body === undefined ? undefined
+        : JSON.stringify(body),
       signal,
     })
   } catch (err) {

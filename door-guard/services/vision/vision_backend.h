@@ -50,6 +50,12 @@ typedef struct {
     const char *model_tag;
     /** 是否提供人脸关键点(B8 活体需要;false 时 liveness_enable=1 会被告警) */
     bool has_landmarks;
+    /** 是否支持静态图录入(web 上传 JPEG,2026-10-04)。true 的后端必须
+     *  订阅 EV_VISION_STILL_REQ 并实现收尾契约:按 seq 取静态图槽
+     *  (vision_service_still_fetch)→ 提取 → 成功 submit_feature(seq)+
+     *  put_avatar(seq),失败发布 EV_VISION_STILL_FAIL{uid,seq,err};
+     *  两条收尾路径恰好其一(编排方 enroll 按此配对) */
+    bool has_still_enroll;
 
     /** 装配接线(storage 比较器/订阅/相机监听)+ 初始化;失败返回非 0 */
     int (*start)(bool enable_mock);

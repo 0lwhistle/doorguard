@@ -21,7 +21,9 @@
  *   POST /api/system/reboot  远程重启(→ EV_SYS_REBOOT;202 回执后 1s 执行)
  *   POST /api/ota/upload  OTA 包流式接收(MG_EV_HTTP_HDRS + MG_EV_READ 喂入,
  *                         按 ota_can_accept() 限流,绝不阻塞 loop;见 ota_service.h)
- *   GET  /api/ws          WebSocket:实时推送认证事件/NTP 结果/网络地址变化
+ *   POST /api/users/face_set  人脸录入/重录(原始 JPEG body + ?uid=;受理制,
+ *                         提取在 vision worker 异步完成,结果走 WS enroll 消息)
+ *   GET  /api/ws          WebSocket:实时推送认证事件/录入回执/NTP/网络地址变化
  *
  * 地址变化监视:loop 里 5s 定时轮询 net_info_read(纯 getifaddrs,无阻塞),
  * 与上次快照不同才发布 EV_NET_ADDR——DHCP 续租换址/静态应用后,上位机经
@@ -51,6 +53,7 @@
 #include "events.h"
 #include "cfg.h"
 #include "storage.h"
+#include "enroll/enroll_service.h"
 #include "valid.h"
 
 #include <cJSON.h>
@@ -1077,7 +1080,22 @@ static const char *user_err_text(int rc)
     case DG_ERR_BAD_NAME:    return dg_valid_hint(DG_ERR_BAD_NAME);
     case DG_ERR_BAD_PWD:     return dg_valid_hint(DG_ERR_BAD_PWD);
     case DG_ERR_BAD_UID:     return dg_valid_hint(DG_ERR_BAD_UID);
+    case DG_ERR_AUTH_NO_CRED: return "该验证方式未录入，无法开启";
     default:                 return "操作失败";
+    }
+}
+
+/* 录入结果 → 上位机提示文案(WS enroll 消息;设备端同源映射在 ui/valid_ui.c) */
+static const char *enroll_err_text(int32_t kind, int err)
+{
+    if (err == DG_OK)
+        return kind == DG_ENROLL_FACE_CLEAR ? "人脸已清除" : "人脸已录入";
+    switch (err) {
+    case DG_ERR_FACE_NONE:    return "未检测到人脸";
+    case DG_ERR_FACE_MULTI:   return "检测到多张人脸，请上传单人照片";
+    case DG_ERR_FACE_QUALITY: return "人脸质量不合格，请换一张更清晰的照片";
+    case DG_ERR_BUSY:         return "已有处理中的录入请求，请稍候";
+    default:                  return user_err_text(err);
     }
 }
 
@@ -1188,7 +1206,13 @@ static void handle_users_list(struct mg_connection *c, struct mg_http_message *h
         cJSON_AddNumberToObject(o, "role", (double)rec.role);
         cJSON_AddNumberToObject(o, "auth_flags", (double)rec.auth_flags);
         cJSON_AddBoolToObject(o, "has_face", rec.face_vec_len > 0);
-        cJSON_AddBoolToObject(o, "has_finger", rec.finger_vec_len > 0);
+        /* 指纹唯一事实源 = fingerprints 表(users.finger_vec 已废弃,新录
+         * 指纹不写它);IC 同行给出,前端据 Disable 未录方式位 */
+        uint32_t fp_cnt = 0;
+        if (db_finger_count_user(rec.user_id, &fp_cnt) != DG_OK)
+            fp_cnt = 0;
+        cJSON_AddBoolToObject(o, "has_finger", fp_cnt > 0);
+        cJSON_AddBoolToObject(o, "has_ic", rec.ic_card[0] != '\0');
         cJSON_AddNumberToObject(o, "created_at", (double)rec.created_at);
         cJSON_AddNumberToObject(o, "updated_at", (double)rec.updated_at);
         cJSON_AddItemToArray(arr, o);
@@ -1211,7 +1235,9 @@ static void handle_users_add(struct mg_connection *c, struct mg_http_message *hm
 
     char uid[DG_UID_LEN], name[DG_NAME_LEN], pwd[DG_PWD_MAX_LEN];
     int32_t role = DG_ROLE_NORMAL;
-    uint32_t flags = DG_AUTH_FACE | DG_AUTH_PWD;   /* 与设备端新建默认一致 */
+    /* 默认只开密码:方式位 ⇒ 已录凭据 不变式(spec-database §1)下,新建
+     * 用户除密码外没有可用方式;人脸等由录入路径落库时写位 */
+    uint32_t flags = DG_AUTH_PWD;
 
     bool ok = jstr(body, "uid", uid, sizeof(uid)) &&
               jstr(body, "name", name, sizeof(name)) &&
@@ -1442,6 +1468,66 @@ static void handle_users_face_clear(struct mg_connection *c, struct mg_http_mess
     json_msg(c, 202, "清除请求已受理");
 }
 
+/* web 人脸录入/重录(2026-10-04):原始 JPEG 走 body,uid 走 query
+ * (?uid=...)——二进制体不走 body_json。前端约定降采样到最长边 ≤1024
+ * (canvas 重编码 JPEG);这里做服务端硬顶与基本形态校验,提取/查重/
+ * 落库在 enroll→vision 链路异步完成,结果经 WS enroll 消息回推 */
+static void handle_users_face_set(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    char uid[DG_UID_LEN];
+    if (mg_http_get_var(&hm->query, "uid", uid, sizeof(uid)) <= 0 || !uid[0]) {
+        json_msg(c, 400, "需要 uid");
+        return;
+    }
+    const size_t blen = hm->body.len;
+    if (blen == 0 || blen > DG_FACE_UPLOAD_MAX) {
+        json_msg(c, 413, "图片大小超出限制(前端应降采样到最长边 1024 再上传)");
+        return;
+    }
+    /* JPEG 形态前置(SOI):损坏/非 JPEG 输入当场报,不进提取链路 */
+    if (blen < 4 || hm->body.buf[0] != (char)0xFF || hm->body.buf[1] != (char)0xD8) {
+        json_msg(c, 400, "仅支持 JPEG 图片");
+        return;
+    }
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    const int grc = db_user_get(uid, &rec);
+    if (grc != DG_OK) {
+        reply_user_err(c, grc);
+        return;
+    }
+
+    uint32_t seq = 0;
+    const int rc = enroll_service_face_upload(uid, (const uint8_t *)hm->body.buf,
+                                              blen, &seq);
+    switch (rc) {
+    case DG_OK: {
+        cJSON *root = cJSON_CreateObject();
+        cJSON_AddNumberToObject(root, "seq", (double)seq);
+        char msg[96];
+        snprintf(msg, sizeof(msg), "已受理,正在提取人脸特征(seq=%u)", seq);
+        cJSON_AddStringToObject(root, "msg", msg);
+        json_reply(c, 202, root);            /* reply 内部序列化,root 由这里删 */
+        cJSON_Delete(root);
+        DG_LOGI(TAG, "web 人脸录入受理 %s(%zuB)", uid, blen);
+        break;
+    }
+    case DG_ERR_BUSY:
+        json_msg(c, 429, "已有处理中的录入请求,请稍候");
+        break;
+    case DG_ERR_UNSUPPORTED:
+        json_msg(c, 501, "人脸识别后端不可用,无法提取特征");
+        break;
+    default:
+        json_msg(c, 400, user_err_text(rc));
+        break;
+    }
+}
+
 /* 远程重启:与设备端「重启设备」同一入口(EV_SYS_REBOOT → sysctl 服务)。
  * 延迟 1s 发布执行,让本 202 回执先落到客户端再断连 */
 static void handle_system_reboot(struct mg_connection *c, struct mg_http_message *hm)
@@ -1638,6 +1724,7 @@ static const route_t s_routes[] = {
     { "POST", "/api/users/pwd",        "改密码只接受 POST",     handle_users_pwd },
     { "POST", "/api/users/delete",     "删除用户只接受 POST",   handle_users_delete },
     { "POST", "/api/users/face_clear", "清除人脸只接受 POST",   handle_users_face_clear },
+    { "POST", "/api/users/face_set",   "人脸录入只接受 POST",   handle_users_face_set },
     { "GET",  "/api/access_set",       "门禁设置只接受 GET",    handle_access_set_get },
     { "POST", "/api/access_set",       "门禁设置只接受 POST",   handle_access_set_post },
     { "POST", "/api/system/reboot",    "重启接口只接受 POST",   handle_system_reboot },
@@ -1763,6 +1850,34 @@ static int on_auth_result(const event_t *e, void *ud)
 {
     (void)ud;
     ws_push_auth((const ev_auth_result_t *)e->data);
+    return 0;
+}
+
+/* 录入结果 → WS(2026-10-04):人脸录入/清除的受理制回执通道;带 seq 供
+ * 前端与自己的上传请求配对,其余 kind 也透传(指纹/IC 回执暂无前端消费者) */
+static void ws_push_enroll(const ev_enroll_result_t *r)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "enroll");
+    cJSON_AddStringToObject(root, "user_id", r->user_id);
+    cJSON_AddNumberToObject(root, "kind", (double)r->kind);
+    cJSON_AddNumberToObject(root, "seq", (double)r->seq);
+    cJSON_AddBoolToObject(root, "ok", r->err == DG_OK);
+    cJSON_AddNumberToObject(root, "err", (double)r->err);
+    cJSON_AddStringToObject(root, "msg", enroll_err_text(r->kind, r->err));
+    char *s = cJSON_PrintUnformatted(root);
+    if (s) {
+        ws_enqueue(s);
+        ws_push_async();
+        free(s);
+    }
+    cJSON_Delete(root);
+}
+
+static int on_enroll_result(const event_t *e, void *ud)
+{
+    (void)ud;
+    ws_push_enroll((const ev_enroll_result_t *)e->data);
     return 0;
 }
 
@@ -2029,6 +2144,7 @@ int web_server_start(void)
 
     s_sub_cnt = 0;
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_AUTH_RESULT, on_auth_result, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_ENROLL_RESULT, on_enroll_result, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_NTP_RESULT, on_ntp_result, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_WEB_STATE_REQ, on_web_state_req, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_WEB_SET, on_web_set, NULL);

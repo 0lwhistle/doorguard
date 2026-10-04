@@ -53,6 +53,12 @@ typedef enum {
     DG_ERR_MISMATCH       = -35, /**< 生物特征 1:1 不匹配 */
     DG_ERR_FINGER_FULL    = -36, /**< 指纹模组库容量已满(FINGERPRINT_AS608 决策 C) */
     DG_ERR_FINGER_LIMIT   = -37, /**< 单用户指纹已达上限 3 枚(独立 fingerprints 表) */
+
+    /* ---- 验证方式不变式 / 录入图像质量(2026-10-04) ---- */
+    DG_ERR_AUTH_NO_CRED   = -38, /**< 开启的方式位没有对应已录凭据(spec-database §1) */
+    DG_ERR_FACE_NONE      = -39, /**< 录入图中未检测到人脸(web 上传/静态图) */
+    DG_ERR_FACE_MULTI     = -40, /**< 录入图中有多张人脸(与拍摄页 MULTI 同口径) */
+    DG_ERR_FACE_QUALITY   = -41, /**< 录入图人脸质量不合格(太小/模糊/检测分低) */
 } dg_err_t;
 
 /** 错误码名称(日志/上位机用);未知名返回 "UNKNOWN" */

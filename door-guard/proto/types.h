@@ -31,6 +31,11 @@ extern "C" {
 /** 头像 JPEG 上限(160×160 q80 实测 6~10KB,给足余量):storage 落库上限、
  *  vision 照片槽与 enroll 取件缓冲共用同一常量,避免三处魔数漂移 */
 #define DG_AVATAR_JPEG_MAX  (32 * 1024)
+/** web 上传人脸原图上限(2026-10-04):前端约定降采样到最长边 ≤1024(q85
+ *  实测 50~200KB);512KB 是服务端硬顶——超过即拒,防未降级客户端把 mongoose
+ *  接收缓冲(MG_MAX_RECV_SIZE 3MB)顶满。注意这只限制"提取源图",落库头像
+ *  仍由后端重编 160×160(DG_AVATAR_JPEG_MAX 口径) */
+#define DG_FACE_UPLOAD_MAX  (512 * 1024)
 #define DG_PWD_HASH_LEN     32    /**< PBKDF2-HMAC-SHA256 输出 256bit */
 #define DG_PWD_SALT_LEN     16    /**< 每用户随机盐(spec-database §3) */
 

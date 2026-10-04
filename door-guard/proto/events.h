@@ -136,6 +136,7 @@ typedef struct {
 #define EV_UI_RESULT         EV_DEF(DG_MODULE_ID_UI, 0x0029)     /**< 结果弹窗(ok/reason/用户名) */
 #define EV_UI_HINT_CLEAR     EV_DEF(DG_MODULE_ID_UI, 0x002A)     /**< 清提示条 */
 #define EV_UI_FACEBOX        EV_DEF(DG_MODULE_ID_UI, 0x002B)     /**< 服务侧脸框颜色(绿/红/隐藏) */
+#define EV_UI_BRIGHTNESS     EV_DEF(DG_MODULE_ID_UI, 0x002C)     /**< 屏幕背光亮度设置(0~100,百分比;滑条/web) */
 
 /* access 内部:FSM 定时器/心跳经 tasker 回注(私有;FSM 全部在总线线程驱动) */
 #define EV_ACCESS_TIMER      EV_DEF(DG_MODULE_ID_AUTH, 0x0010)
@@ -144,6 +145,12 @@ typedef struct {
 /* 视觉录入抓取(特征大数据走 vision 槽位句柄,事件只带 seq) */
 #define EV_VISION_CAPTURE_REQ EV_DEF(DG_MODULE_ID_VISION, 0x0010)
 #define EV_VISION_FEATURE     EV_DEF(DG_MODULE_ID_VISION, 0x0011)
+/* 静态图录入(web 上传 JPEG,2026-10-04):与 CAPTURE_REQ 同形载荷(复用
+ * ev_capture_req_t),后端从暂存图提取特征;收尾恰好其一——成功走
+ * EV_VISION_FEATURE(特征槽),失败走 EV_VISION_STILL_FAIL(错误码)。
+ * 配对契约的编排方是 enroll_service(受理制,见其头文件) */
+#define EV_VISION_STILL_REQ   EV_DEF(DG_MODULE_ID_VISION, 0x0012)
+#define EV_VISION_STILL_FAIL  EV_DEF(DG_MODULE_ID_VISION, 0x0013)
 
 /* ---- 负载结构(字段与 access_logs / web 推送一致处显式注明) ---- */
 
@@ -426,6 +433,12 @@ typedef struct {
     char    page[16];                     /**< "home"/"menu"/"standby" */
 } ev_goto_page_t;
 
+/** EV_UI_BRIGHTNESS:背光亮度(0~100;执行=bridge 订阅后直写 display 原语,
+ *  持久化=发布方自行 cfg_set——生效与落盘两条通道解耦) */
+typedef struct {
+    int32_t pct;                          /**< 0~100,越界由 display 原语钳制 */
+} ev_brightness_t;
+
 /** EV_UI_HINT:提示条文案语义
  *  method >= 0:验证方式提示(_(「请正对摄像头/请按指纹/请输入密码/请刷卡」))
  *  method <  0:非验证方式的一次性 UI 语义(见 DG_HINT_*) */
@@ -482,6 +495,13 @@ typedef struct {
     uint32_t seq;
 } ev_capture_req_t;
 
+/** EV_VISION_STILL_FAIL:静态图录入失败(错误码即用户文案依据) */
+typedef struct {
+    char    user_id[DG_UID_LEN];
+    uint32_t seq;
+    int32_t err;                          /**< dg_err_t(-39/-40/-41 或通用码) */
+} ev_still_fail_t;
+
 typedef struct {
     int32_t timer_id;                     /**< fsm_timer_t */
     uint32_t seq;
@@ -527,6 +547,7 @@ _Static_assert(sizeof(ev_ui_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ui_result
 _Static_assert(sizeof(ev_ui_facebox_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ui_facebox_t 超限");
 _Static_assert(sizeof(ev_feature_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_feature_t 超限");
 _Static_assert(sizeof(ev_capture_req_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_capture_req_t 超限");
+_Static_assert(sizeof(ev_still_fail_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_still_fail_t 超限");
 _Static_assert(sizeof(ev_access_timer_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_access_timer_t 超限");
 
 /** 事件名(EV_* 优先,回退 event_bus 内置名);日志/web 用 */

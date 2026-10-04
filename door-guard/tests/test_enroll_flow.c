@@ -64,6 +64,16 @@ static int user_face_len(const char *uid)
     return rec.face_vec_len;
 }
 
+/* 方式位读回(用户不存在返回 0xFFFFFFFF 哨兵) */
+static uint32_t user_flags(const char *uid)
+{
+    user_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+    if (db_user_get(uid, &rec) != DG_OK)
+        return 0xFFFFFFFFu;
+    return rec.auth_flags;
+}
+
 /* 头像落库形态:返回 JPEG 字节数;0 = 未录头像;-1 = 用户不存在/形态异常 */
 static int user_avatar_len(const char *uid)
 {
@@ -141,13 +151,14 @@ int main(void)
 
     event_bus_subscribe(EV_ENROLL_RESULT, on_result, NULL);
 
-    /* ---- 建用户(编辑页"保存"等价操作:密码必设) ---- */
+    /* ---- 建用户(编辑页"保存"等价操作:密码必设) ----
+     * 方式位不变式(2026-10-04)下建号只有密码位;人脸位由 commit 置位 */
     user_rec_t rec;
     memset(&rec, 0, sizeof(rec));
     snprintf(rec.user_id, sizeof(rec.user_id), "10001");
     snprintf(rec.user_name, sizeof(rec.user_name), "张三");
     rec.role = DG_ROLE_NORMAL;
-    rec.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
+    rec.auth_flags = DG_AUTH_PWD;
     DG_CHECK(db_user_set_password(&rec, "abcd1234") == DG_OK);
     DG_CHECK(db_user_add(&rec) == DG_OK);
     DG_CHECK(user_face_len("10001") == 0);      /* 初始无人脸 */
@@ -162,7 +173,8 @@ int main(void)
     DG_CHECK(enroll_service_draft_active("10001"));
     DG_CHECK(draft_avatar_ok("10001"));         /* 草稿头像 = JPEG 明文 */
 
-    /* ---- ② commit = UI「保存」:特征+头像一次落库,草稿消费 ---- */
+    /* ---- ② commit = UI「保存」:特征+头像一次落库,草稿消费;
+     * 录入写位:人脸位自动开启(与指纹/IC 同语义,2026-10-04) ---- */
     DG_CHECK(enroll_service_commit_draft("10001") == DG_OK);
     const int len1 = user_face_len("10001");
     DG_CHECK(len1 > 0);
@@ -171,6 +183,7 @@ int main(void)
     DG_CHECK(av1 > 0);
     printf("  avatar jpeg %d B\n", av1);
     DG_CHECK(!enroll_service_draft_active("10001"));
+    DG_CHECK((user_flags("10001") & DG_AUTH_FACE) != 0);   /* 录入写位 */
 
     /* ---- ③ 重采 → discard:UI「直接退出」放弃,DB 保持原值 ---- */
     publish_req("10001", DG_ENROLL_FACE);
@@ -191,6 +204,7 @@ int main(void)
     DG_CHECK(enroll_service_clear_face("10001") == DG_OK);
     DG_CHECK(user_face_len("10001") == 0);
     DG_CHECK(user_avatar_len("10001") == 0);    /* 清人脸连带头像消失 */
+    DG_CHECK((user_flags("10001") & DG_AUTH_FACE) == 0);  /* 清除清位 */
 
     /* ---- ④b commit 时内存特征库写失败:DB 必须还原,不留半状态(2026-09-28) ----
      * 注入点 = vision_service_set_lib_ops(装配层同款接线):后端降级
@@ -232,7 +246,7 @@ int main(void)
     DG_CHECK(!enroll_service_draft_active("10001"));
 
     /* ---- ⑧ user_save 语义(A1:编辑页「保存」收口进 enroll 服务)----
-     * ADD 建用户(密码必设/auth_flags=FACE|PWD)/ EDIT 覆写字段(密码
+     * ADD 建用户(密码必设/auth_flags=密码位)/ EDIT 覆写字段(密码
      * NULL=保持、ic_card 等未动字段不解绑)/ 错误码透传 / user_page 分页读 */
     DG_CHECK(enroll_service_user_save("20001", "李四", DG_ROLE_NORMAL, NULL)
              == DG_ERR_NO_PASSWORD);                 /* 无密码禁止建用户 */
@@ -240,7 +254,7 @@ int main(void)
     DG_CHECK(enroll_service_user_save("20001", "李四", DG_ROLE_NORMAL,
                                       "abcd1234") == DG_OK);
     DG_CHECK(enroll_service_user_get("20001", &rec) == DG_OK);
-    DG_CHECK(rec.auth_flags == (DG_AUTH_FACE | DG_AUTH_PWD)); /* 指纹/IC 不放开 */
+    DG_CHECK(rec.auth_flags == DG_AUTH_PWD);   /* 不变式:建号只有密码位 */
     DG_CHECK(db_verify_password("20001", "abcd1234", &rec) == DG_OK);
 
     /* EDIT:覆写姓名/权限;密码 NULL = 保持;ic_card 以库内记录为基线不解绑 */
@@ -279,6 +293,47 @@ int main(void)
         DG_CHECK(rows[0].role == DG_ROLE_ADMIN);
         DG_CHECK(enroll_service_user_page(rows, ENROLL_USER_PAGE_MAX + 1,
                                           &n, &total) == DG_ERR_PARAM);
+    }
+
+    /* ---- ⑨ web 静态图上传(sim 后端 mock 提取;2026-10-04)----
+     * 链路:face_upload 受理(单飞+槽)→ EV_VISION_STILL_REQ → sim 提交
+     * 伪特征/头像 → EV_VISION_FEATURE → 直落库(不经草稿)→ 回执。
+     * 与草稿路径同尾:查重/置位/头像,结果按 seq 回执 */
+    {
+        static uint8_t jpg[4096];
+        memcpy(jpg, "\xFF\xD8\xFF\xE0", 4);      /* SOI 形态(sim 不解析内容) */
+        memset(jpg + 4, 0xA5, sizeof(jpg) - 4);
+        uint32_t seq = 0;
+
+        DG_CHECK(enroll_service_upload_busy() == false);
+        DG_CHECK(enroll_service_face_upload("20002", jpg, sizeof(jpg), &seq)
+                 == DG_OK);
+        DG_CHECK(seq != 0);
+        DG_CHECK(enroll_service_upload_busy() == true);   /* 受理即单飞闸 */
+        wait_cnt(&s_result_cnt[DG_ENROLL_FACE], 7, 3000);
+        DG_CHECK(atomic_load(&s_result_err[DG_ENROLL_FACE]) == DG_OK);
+        DG_CHECK(enroll_service_upload_busy() == false);  /* 回执即解除 */
+        DG_CHECK(user_face_len("20002") > 0);             /* 直落库 */
+        DG_CHECK(user_avatar_len("20002") > 0);
+        DG_CHECK((user_flags("20002") & DG_AUTH_FACE) != 0);  /* 录入写位 */
+
+        /* 重传 = 覆盖(重录语义);迟到槽位/串号由 seq 配对挡 */
+        DG_CHECK(enroll_service_face_upload("20002", jpg, 128, &seq) == DG_OK);
+        wait_cnt(&s_result_cnt[DG_ENROLL_FACE], 8, 3000);
+        DG_CHECK(atomic_load(&s_result_err[DG_ENROLL_FACE]) == DG_OK);
+        DG_CHECK(user_face_len("20002") > 0);
+
+        /* 边界:不存在用户 / 超上限 / 空体,全部当场拒,不进提取链路 */
+        DG_CHECK(enroll_service_face_upload("99999", jpg, 128, &seq)
+                 == DG_ERR_NOT_FOUND);
+        {
+            static uint8_t big[DG_FACE_UPLOAD_MAX + 1];
+            DG_CHECK(enroll_service_face_upload("20002", big, sizeof(big), &seq)
+                     == DG_ERR_PARAM);
+        }
+        DG_CHECK(enroll_service_face_upload("20002", jpg, 0, &seq)
+                 == DG_ERR_PARAM);
+        DG_CHECK(enroll_service_upload_busy() == false);
     }
 
     cleanup();

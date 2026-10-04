@@ -82,6 +82,7 @@ static const char *TAG = "[VISION]";
 #define RKNN_ROI_MARGIN     2.2f
 #define RKNN_AVATAR_SZ      160         /* 头像边长(列表 40px/预览 160px 都够) */
 #define RKNN_Q_PUB_MS       1000        /* 质量事件兜底刷新(拍摄页 UI 状态) */
+#define RKNN_STILL_MAX_DIM  1536        /* 静态图解码最长边(缩放解码;防解压炸弹) */
 
 static npu_model_t *s_face, *s_rec;
 static bool s_ready;
@@ -138,6 +139,17 @@ static struct {
     int      w, h;
     bool     has;
 } s_mb;
+
+/* 静态图录入(web 上传,2026-10-04):总线线程把静态图槽内容拷进专属缓冲后
+ * 交付 worker;单飞由 enroll 侧保证(受理→回执间不会再有第二张),缓冲
+ * 无并发写。任务与帧共用信箱锁/条件变量,worker 静态图优先(web 端在等) */
+static uint8_t s_still_jpeg[DG_FACE_UPLOAD_MAX];
+static struct {
+    char     uid[DG_UID_LEN];
+    uint32_t seq;
+    size_t   len;
+    bool     has;
+} s_still;
 
 /* 最新「特征 + 同帧头像大图」成对缓存(analyse 路径同帧写入;录入
  * CAPTURE_REQ 读)。一把锁保护成对性:照片与特征必须出自同一帧,
@@ -623,6 +635,7 @@ static void antispoof_run(const uint8_t *nv12, int w, int h,
 /* ---- 帧入口 -------------------------------------------------------------- */
 
 static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id);
+static void process_still(const char *uid, uint32_t seq, size_t jlen);
 
 /* 主循环回调(camera_poll 调用):只投信箱,任何阻塞都会拖垮 UI/取流。
  * worker 忙时新帧顶掉旧帧,旧帧立即归还——永远推理最新画面,不积压。 */
@@ -652,9 +665,12 @@ static void on_frame_push(const uint8_t *data, int w, int h, uint32_t frame_id)
 static void *vision_worker(void *arg)
 {
     (void)arg;
+    char still_uid[DG_UID_LEN];
+    uint32_t still_seq = 0;
+    size_t still_len = 0;
     for (;;) {
         pthread_mutex_lock(&s_mb_mtx);
-        while (!s_mb.has) {
+        while (!s_mb.has && !s_still.has) {
             /* 定时等待:相机断流时没有帧可处理,worker 的"活着"只能靠
              * 醒来这件事自证——心跳义务见 vision_backend.heartbeat_ms */
             struct timespec ts;
@@ -663,13 +679,24 @@ static void *vision_worker(void *arg)
             pthread_cond_timedwait(&s_mb_cond, &s_mb_mtx, &ts);
             atomic_store(&s_worker_hb_ms, now_mono_ms());
         }
-        const uint8_t *data = s_mb.data;
-        const uint32_t fid = s_mb.fid;
-        const int w = s_mb.w, h = s_mb.h;
-        s_mb.has = false;
-        pthread_mutex_unlock(&s_mb_mtx);
+        if (s_still.has) {
+            /* 静态图优先:web 端在等回执,帧晚几帧无感 */
+            snprintf(still_uid, sizeof(still_uid), "%s", s_still.uid);
+            still_seq = s_still.seq;
+            still_len = s_still.len;
+            s_still.has = false;
+            pthread_mutex_unlock(&s_mb_mtx);
 
-        process_frame(data, w, h, fid); /* 所有路径内部保证归还缓冲 */
+            process_still(still_uid, still_seq, still_len);
+        } else {
+            const uint8_t *data = s_mb.data;
+            const uint32_t fid = s_mb.fid;
+            const int w = s_mb.w, h = s_mb.h;
+            s_mb.has = false;
+            pthread_mutex_unlock(&s_mb_mtx);
+
+            process_frame(data, w, h, fid); /* 所有路径内部保证归还缓冲 */
+        }
         atomic_store(&s_worker_hb_ms, now_mono_ms());
     }
     return NULL;                        /* 进程生命周期线程,无退出路径 */
@@ -908,6 +935,221 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
     EVENT_BUS_PUBLISH(EV_VISION_FACE_BOX, &box);
 }
 
+/* ---- 静态图录入(web 上传,worker 线程执行) ---------------------------------
+ * 与拍摄流的关键差异:无旋转(图即所见)、无取景框约束(构图不限)、
+ * 不跑反欺骗/活体(录入路径本就不挑战)、头像按人脸方框裁剪(无取景框
+ * 可直裁)。质量闸门/对齐/归一化与 recognize() 完全同口径——录进库的
+ * 特征质量与摄像头采集的可比,查重与 1:N 行为才一致 */
+
+static void still_fail(const char *uid, uint32_t seq, int err)
+{
+    ev_still_fail_t ev;
+    memset(&ev, 0, sizeof(ev));
+    snprintf(ev.user_id, sizeof(ev.user_id), "%s", uid);
+    ev.seq = seq;
+    ev.err = err;
+    EVENT_BUS_PUBLISH(EV_VISION_STILL_FAIL, &ev);
+    DG_LOGW(TAG, "静态图录入失败 %s(seq=%u):%s", uid, seq, dg_err_name(err));
+}
+
+static void process_still(const char *uid, uint32_t seq, size_t jlen)
+{
+    if (!s_ready || s_rec_dim != RKNN_REC_DIM) {
+        still_fail(uid, seq, DG_ERR_NOT_INIT);
+        return;
+    }
+
+    /* 解压炸弹防线:先探原图尺寸选缩放倍率,再按缩放后尺寸分配缓冲 */
+    int w = 0, h = 0;
+    if (dg_jpeg_dimensions(s_still_jpeg, jlen, &w, &h) != DG_OK || w < 32 || h < 32) {
+        still_fail(uid, seq, DG_ERR_PARAM);      /* 解不出尺寸 = 不是有效 JPEG */
+        return;
+    }
+    int denom = 1;
+    while (denom < 8 && (w > RKNN_STILL_MAX_DIM || h > RKNN_STILL_MAX_DIM))
+        denom *= 2;
+    const int ew = (w + denom - 1) / denom;
+    const int eh = (h + denom - 1) / denom;
+    uint8_t *rgb = malloc((size_t)ew * (size_t)eh * 3);
+    if (!rgb) {
+        still_fail(uid, seq, DG_ERR_NO_MEMORY);
+        return;
+    }
+    int dw = 0, dh = 0;
+    int rc = dg_jpeg_decode_rgb(s_still_jpeg, jlen, denom, rgb,
+                                (size_t)ew * (size_t)eh * 3, &dw, &dh);
+    if (rc != DG_OK) {
+        free(rgb);
+        still_fail(uid, seq, rc);                /* 解码失败按原码透传 */
+        return;
+    }
+
+    /* 检测:JPEG→RGB→CPU letterbox(补边 114)→ 模型;缓冲(s_rgb/s_loc/
+     * s_cand…)与帧路径同一套,worker 线程独占,顺序执行无冲突 */
+    npu_letterbox_t lb;
+    npu_letterbox_plan(dw, dh, s_in_w, s_in_h, &lb);
+    rknn_rgb_letterbox(rgb, dw, dh, lb.scale, lb.pad_x, lb.pad_y,
+                       lb.fit_w, lb.fit_h, NPU_PRE_PAD_VALUE,
+                       s_rgb, s_in_w, s_in_h);
+    uint32_t elems = 0;
+    const bool ok_out =
+        npu_model_run(s_face, s_rgb, s_in_bytes, DG_NPU_TYPE_U8) == DG_OK &&
+        npu_model_output_f32(s_face, 0, s_loc, (uint32_t)s_nanchor * 4, &elems) == DG_OK &&
+        npu_model_output_f32(s_face, 1, s_conf, (uint32_t)s_nanchor * 2, &elems) == DG_OK &&
+        npu_model_output_f32(s_face, 2, s_landm, (uint32_t)s_nanchor * 10, &elems) == DG_OK;
+    if (!ok_out) {
+        free(rgb);
+        still_fail(uid, seq, DG_ERR_INTERNAL);
+        return;
+    }
+    int n = rknn_retinaface_decode(s_loc, s_conf, s_landm, s_nanchor, s_in_w,
+                                   cfg_get()->face_det_threshold,
+                                   s_cand, RKNN_MAX_CAND);
+    if (n < 0) {
+        free(rgb);
+        still_fail(uid, seq, DG_ERR_INTERNAL);
+        return;
+    }
+    if (n > RKNN_MAX_CAND)
+        n = RKNN_MAX_CAND;
+    n = rknn_nms(s_cand, n, RKNN_NMS_IOU);
+    if (n <= 0) {
+        free(rgb);
+        still_fail(uid, seq, DG_ERR_FACE_NONE);
+        return;
+    }
+    if (n >= 2) {
+        /* 与拍摄流同口径:录入特征必须唯一成脸,多脸 = 拒(配错人的代价
+         * 远高于让用户换张单人照) */
+        free(rgb);
+        still_fail(uid, seq, DG_ERR_FACE_MULTI);
+        return;
+    }
+
+    /* 候选逆映射回原图坐标(此图无"预览域",框/kps 即原图像素) */
+    rknn_face_t *f = &s_cand[0];
+    for (int k = 0; k < RKNN_FACE_KPS; k++)
+        npu_letterbox_unmap(&lb, f->kps[k][0], f->kps[k][1],
+                            &f->kps[k][0], &f->kps[k][1]);
+    npu_letterbox_unmap(&lb, f->x1, f->y1, &f->x1, &f->y1);
+    npu_letterbox_unmap(&lb, f->x2, f->y2, &f->x2, &f->y2);
+    if (f->x1 < 0) f->x1 = 0;
+    if (f->y1 < 0) f->y1 = 0;
+    if (f->x2 > (float)dw) f->x2 = (float)dw;
+    if (f->y2 > (float)dh) f->y2 = (float)dh;
+
+    /* ROI:关键点外接框 × margin 的正方形,平移夹进图内(与 recognize 同口径) */
+    float kmin_x = 1e9f, kmin_y = 1e9f, kmax_x = -1e9f, kmax_y = -1e9f;
+    for (int k = 0; k < RKNN_FACE_KPS; k++) {
+        if (f->kps[k][0] < kmin_x) kmin_x = f->kps[k][0];
+        if (f->kps[k][0] > kmax_x) kmax_x = f->kps[k][0];
+        if (f->kps[k][1] < kmin_y) kmin_y = f->kps[k][1];
+        if (f->kps[k][1] > kmax_y) kmax_y = f->kps[k][1];
+    }
+    const float cx = (kmin_x + kmax_x) * 0.5f;
+    const float cy = (kmin_y + kmax_y) * 0.5f;
+    float span = (kmax_x - kmin_x > kmax_y - kmin_y ? kmax_x - kmin_x
+                                                    : kmax_y - kmin_y)
+                 * RKNN_ROI_MARGIN;
+    if (span < 64.0f) {
+        free(rgb);
+        still_fail(uid, seq, DG_ERR_FACE_QUALITY);   /* 脸太小,识别无意义 */
+        return;
+    }
+    int side = (int)span;
+    if (side > dw) side = dw;
+    if (side > dh) side = dh;
+    int rx = (int)cx - side / 2, ry = (int)cy - side / 2;
+    if (rx < 0) rx = 0;
+    if (ry < 0) ry = 0;
+    if (rx + side > dw) rx = dw - side;
+    if (ry + side > dh) ry = dh - side;
+
+    /* 裁缩进 s_roi(warp 直达,无 RGA);RGB 无偶对齐约束,宽度仍保持 4 对齐
+     * 惯例(与 RGA 输出形态一致) */
+    const int dw_roi = (side < RKNN_ROI_MAX ? side : RKNN_ROI_MAX) & ~3;
+    const float ks = (float)dw_roi / (float)side;
+    const float m_roi[6] = { ks, 0.0f, -(float)rx * ks, 0.0f, ks, -(float)ry * ks };
+    rknn_align_warp_ex(rgb, dw, dh, m_roi, s_roi, dw_roi, dw_roi, true);
+
+    /* 关键点映射进 ROI 坐标 → 相似变换对齐 112×112 */
+    float kps_roi[RKNN_FACE_KPS][2];
+    for (int k = 0; k < RKNN_FACE_KPS; k++) {
+        kps_roi[k][0] = (f->kps[k][0] - (float)rx) * ks;
+        kps_roi[k][1] = (f->kps[k][1] - (float)ry) * ks;
+    }
+    float m[6];
+    if (rknn_align_plan(kps_roi, m) != 0) {
+        free(rgb);
+        still_fail(uid, seq, DG_ERR_INTERNAL);
+        return;
+    }
+    rknn_align_warp(s_roi, dw_roi, dw_roi, m, s_aligned, 112, 112);
+
+    /* 质量闸门(与 recognize 同一三因子:脸像素/清晰度/检测分) */
+    {
+        static uint8_t s_gray[112 * 112];        /* worker 独占静态(同 recognize) */
+        face_quality_gray(s_aligned, 112, 112, s_gray);
+        face_quality_thr_t thr;
+        thr.min_face_px = cfg_get()->face_min_px;
+        thr.blur_min = cfg_get()->face_blur_min;
+        thr.det_score_min = cfg_get()->face_det_score_min;
+
+        face_quality_t q;
+        const float bw = f->x2 - f->x1, bh = f->y2 - f->y1;
+        q.face_px = (int32_t)(bw < bh ? bw : bh);
+        q.det_score = f->score;
+        q.blur = face_quality_blur(s_gray, 112, 112);
+        const face_quality_verdict_t v = face_quality_check(&q, &thr);
+        if (v != FQ_OK) {
+            DG_LOGI(TAG, "静态图质量闸门拦下(%s):脸 %dpx 清晰度 %.0f 检测分 %.2f",
+                    face_quality_reason_str(v), q.face_px, q.blur, q.det_score);
+            free(rgb);
+            still_fail(uid, seq, DG_ERR_FACE_QUALITY);
+            return;
+        }
+    }
+
+    /* 特征:归一化 → NPU → L2 */
+    rknn_rgb_norm_f32(s_aligned, 112 * 112, s_norm_in);
+    if (npu_model_run(s_rec, s_norm_in, s_rec_in_bytes, DG_NPU_TYPE_F32) != DG_OK) {
+        free(rgb);
+        still_fail(uid, seq, DG_ERR_INTERNAL);
+        return;
+    }
+    float feat[RKNN_REC_DIM];
+    uint32_t nelem = 0;
+    if (npu_model_output_f32(s_rec, 0, feat, RKNN_REC_DIM, &nelem) != DG_OK ||
+        nelem != (uint32_t)s_rec_dim) {
+        free(rgb);
+        still_fail(uid, seq, DG_ERR_INTERNAL);
+        return;
+    }
+    rknn_l2_normalize(feat, s_rec_dim);
+
+    /* 头像 = 人脸方框裁剪缩到 160²(clamp 边缘延展,特写不黑角)→ JPEG q80 */
+    {
+        const float k = (float)RKNN_AVATAR_SZ / span;
+        const float m_av[6] = { k, 0.0f, -(cx - span * 0.5f) * k,
+                                0.0f, k, -(cy - span * 0.5f) * k };
+        rknn_align_warp_ex(rgb, dw, dh, m_av, s_avatar_warp,
+                           RKNN_AVATAR_SZ, RKNN_AVATAR_SZ, true);
+        static uint8_t jpeg[DG_AVATAR_JPEG_MAX]; /* worker 独占(同 on_capture_req) */
+        size_t jout = 0;
+        if (dg_jpeg_encode_rgb(s_avatar_warp, RKNN_AVATAR_SZ, RKNN_AVATAR_SZ,
+                               80, jpeg, sizeof(jpeg), &jout) == DG_OK)
+            vision_service_put_avatar(seq, jpeg, jout);
+        else
+            DG_LOGW(TAG, "静态图头像编码失败:本次入库无头像");
+    }
+    free(rgb);
+
+    /* 收尾:特征槽 + EV_VISION_FEATURE → enroll 直落库(查重/置位/头像) */
+    vision_service_submit_feature(uid, seq, (const uint8_t *)feat,
+                                  RKNN_FEATURE_BYTES);
+    DG_LOGI(TAG, "静态图录入提取完成 %s(seq=%u,%dx%d 缩放 %d)", uid, seq, w, h, denom);
+}
+
 /* 录入抓取请求:提交近 3s 缓存特征 + 同帧头像(编码成 JPEG 走照片槽) */
 static int on_capture_req(const event_t *e, void *ud)
 {
@@ -959,6 +1201,34 @@ static int on_capture_req(const event_t *e, void *ud)
         DG_LOGW(TAG, "同帧头像缺失:本次入库无头像");
     }
     vision_service_submit_feature(r->user_id, r->seq, buf, len);
+    return 0;
+}
+
+/* 静态图录入请求(总线线程):取静态图槽 → 交付 worker(优先处理)。
+ * 单飞由 enroll 保证(受理→回执间无第二张),这里不设排队 */
+static int on_still_req(const event_t *e, void *ud)
+{
+    (void)ud;
+    const ev_capture_req_t *r = (const ev_capture_req_t *)e->data;
+    if (!s_ready) {
+        still_fail(r->user_id, r->seq, DG_ERR_NOT_INIT);
+        return 0;
+    }
+    size_t len = 0;
+    if (vision_service_still_fetch(r->seq, s_still_jpeg,
+                                   sizeof(s_still_jpeg), &len) != DG_OK) {
+        still_fail(r->user_id, r->seq, DG_ERR_NOT_FOUND);   /* 槽位失效 */
+        return 0;
+    }
+    pthread_mutex_lock(&s_mb_mtx);
+    if (s_still.has)
+        DG_LOGW(TAG, "静态图任务未消化就被覆盖(单飞被破坏?)");
+    snprintf(s_still.uid, sizeof(s_still.uid), "%s", r->user_id);
+    s_still.seq = r->seq;
+    s_still.len = len;
+    s_still.has = true;
+    pthread_cond_signal(&s_mb_cond);
+    pthread_mutex_unlock(&s_mb_mtx);
     return 0;
 }
 
@@ -1109,6 +1379,7 @@ static int rknn_start(bool enable_mock)
     /* ---- 接线与特征库装载 ---- */
     camera_set_nv12_listener(on_frame_push, NULL);
     event_bus_subscribe(EV_VISION_CAPTURE_REQ, on_capture_req, NULL);
+    event_bus_subscribe(EV_VISION_STILL_REQ, on_still_req, NULL);
     db_user_iter_face(lib_load_cb, NULL);
     pthread_mutex_lock(&s_lib.mtx);
     const int loaded = s_lib.n;
@@ -1158,6 +1429,7 @@ const vision_backend_ops_t vision_backend_rknn = {
     .name = "rknn",
     .model_tag = "rknn-arcface-r50-v1",  /* ArcFace-R50 512 维特征空间 */
     .has_landmarks = true,               /* 5 点关键点,供 B8 几何活体 */
+    .has_still_enroll = true,            /* web 上传静态图提取(worker 线程) */
     .start = rknn_start,
     .lib_add = lib_add,
     .lib_del = lib_del,

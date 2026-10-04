@@ -92,26 +92,21 @@ static void *mock_thread(void *arg)
     return NULL;
 }
 
-/* ---- 录入抓取:确定性伪特征(演示/测试用) ---- */
+/* ---- 录入抓取:确定性伪特征(演示/测试用) ----
+ * 拍摄(EV_VISION_CAPTURE_REQ)与静态图上传(EV_VISION_STILL_REQ)共用
+ * 同一提交尾:伪特征按 user_id 哈希派生(同人恒定 → 查重可判定),伪头像
+ * 是同 seed 渐变图编码的真 JPEG;seq 原样回传(请求-回执配对语义) */
 
-static int on_capture_req(const event_t *e, void *ud)
+static void sim_submit_mock(const char *user_id, uint32_t seq)
 {
-    (void)ud;
-    const ev_capture_req_t *r = (const ev_capture_req_t *)e->data;
-
     /* 伪特征 = user_id 字节重复展开(同人恒定,异人不同;查重可判定) */
     uint8_t feat[64];
     size_t len = 32;
     uint8_t seed = 0;
-    for (const char *p = r->user_id; *p; p++)
+    for (const char *p = user_id; *p; p++)
         seed ^= (uint8_t)*p;
     memset(feat, seed, sizeof(feat));
 
-    /* 伪头像 = 同 seed 派生的渐变图,编码成真 JPEG(与板上 rknn 后端同路:
-     * 照片槽 → enroll 按 seq 取件落库;宿主端到端要能验到 DB 里那张图)。
-     * seq 原样回传请求里的 r->seq(与 rknn 后端一致:enroll/页面按请求 seq
-     * 对回执;自增计数会让"请求-回执"配对语义只在 rknn 后端成立) */
-    const uint32_t seq = r->seq;
     /* static:总线分发线程栈仅 64KB,大数组上栈会溢出(与板上后端同纪律) */
     static uint8_t rgb[64 * 64 * 3];
     static uint8_t jpeg[DG_AVATAR_JPEG_MAX];
@@ -128,7 +123,31 @@ static int on_capture_req(const event_t *e, void *ud)
     else
         DG_LOGW("[VISION]", "sim 头像编码失败(忽略:测试环境异常)");
 
-    vision_service_submit_feature(r->user_id, seq, feat, len);
+    vision_service_submit_feature(user_id, seq, feat, len);
+}
+
+static int on_capture_req(const event_t *e, void *ud)
+{
+    (void)ud;
+    const ev_capture_req_t *r = (const ev_capture_req_t *)e->data;
+    sim_submit_mock(r->user_id, r->seq);
+    return 0;
+}
+
+/* 静态图上传:与拍摄同 mock 提交(上传图内容本身不参与伪特征派生;
+ * 宿主端到端只验"受理→提取→直落库→回执"链路,不验图像语义) */
+static int on_still_req(const event_t *e, void *ud)
+{
+    (void)ud;
+    static uint8_t jpg[DG_FACE_UPLOAD_MAX];   /* 总线线程栈小,静态接图 */
+    size_t len = 0;
+    const ev_capture_req_t *r = (const ev_capture_req_t *)e->data;
+    if (vision_service_still_fetch(r->seq, jpg, sizeof(jpg), &len) != DG_OK) {
+        DG_LOGW("[VISION]", "sim 静态图槽取件失败(seq=%u)", r->seq);
+        return 0;
+    }
+    DG_LOGI("[VISION]", "sim 静态图录入 %s(%zu B,seq=%u)", r->user_id, len, r->seq);
+    sim_submit_mock(r->user_id, r->seq);
     return 0;
 }
 
@@ -194,6 +213,7 @@ static int sim_start(bool enable_mock)
 
     /* 录入抓取订阅:bus 分发线程回调,无需独立线程 */
     event_bus_subscribe(EV_VISION_CAPTURE_REQ, on_capture_req, NULL);
+    event_bus_subscribe(EV_VISION_STILL_REQ, on_still_req, NULL);
 
     if (enable_mock) {
         pthread_t tid;
@@ -209,6 +229,7 @@ const vision_backend_ops_t vision_backend_sim = {
     .name = "sim",
     .model_tag = NULL,          /* 伪特征无口径:服务层不校验 */
     .has_landmarks = false,     /* 不做活体(PC 只验链路) */
+    .has_still_enroll = true,   /* 静态图上传走同一 mock 提交尾 */
     .start = sim_start,
     .lib_add = sim_lib_add,
     .lib_del = sim_lib_del,

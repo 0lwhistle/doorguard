@@ -133,6 +133,49 @@ int vision_service_fetch_avatar(uint32_t seq, uint8_t *out, size_t cap, size_t *
     return rc;
 }
 
+/* ---- 静态图录入槽:单槽,web 上传驱动(节奏同拍摄,单飞由 enroll 保证) ---- */
+static struct {
+    pthread_mutex_t mtx;
+    bool used;
+    uint32_t seq;
+    uint8_t data[DG_FACE_UPLOAD_MAX];
+    size_t len;
+} s_still_slot = { .mtx = PTHREAD_MUTEX_INITIALIZER };
+
+int vision_service_still_put(uint32_t seq, const uint8_t *jpeg, size_t len)
+{
+    if (!jpeg || len == 0 || len > sizeof(s_still_slot.data))
+        return DG_ERR_PARAM;
+    pthread_mutex_lock(&s_still_slot.mtx);
+    memcpy(s_still_slot.data, jpeg, len);
+    s_still_slot.len = len;
+    s_still_slot.seq = seq;
+    s_still_slot.used = true;
+    pthread_mutex_unlock(&s_still_slot.mtx);
+    return DG_OK;
+}
+
+int vision_service_still_fetch(uint32_t seq, uint8_t *out, size_t cap, size_t *len)
+{
+    if (!out || !len)
+        return DG_ERR_PARAM;
+    pthread_mutex_lock(&s_still_slot.mtx);
+    int rc = DG_ERR_NOT_FOUND;
+    if (s_still_slot.used && s_still_slot.seq == seq) {
+        if (cap < s_still_slot.len)
+            rc = DG_ERR_NO_MEMORY;
+        else {
+            memcpy(out, s_still_slot.data, s_still_slot.len);
+            *len = s_still_slot.len;
+            memset(s_still_slot.data, 0, sizeof(s_still_slot.data)); /* 即取即清 */
+            s_still_slot.used = false;
+            rc = DG_OK;
+        }
+    }
+    pthread_mutex_unlock(&s_still_slot.mtx);
+    return rc;
+}
+
 static vision_lib_add_fn s_lib_add;
 static vision_lib_del_fn s_lib_del;
 
@@ -165,6 +208,11 @@ int vision_backend_register(const vision_backend_ops_t *ops)
 const vision_backend_ops_t *vision_backend_active(void)
 {
     return s_active;
+}
+
+bool vision_service_still_supported(void)
+{
+    return s_active && s_active->has_still_enroll && s_active_ok;
 }
 
 const char *vision_backend_name(void)

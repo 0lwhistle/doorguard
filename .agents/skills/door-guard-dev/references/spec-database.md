@@ -29,6 +29,13 @@ CREATE TABLE users (
 - **管理员可多个**:role=1 不限数量;管理员验证(菜单进入)只匹配 role=1
 - **auth_flags 可全为 0**(用户存在但关闭全部验证方式):该用户不可被任何方式验证,
   验证入口直接失败(见 spec-auth-business.md);不等于删除
+- **方式位不变式(2026-10-04,存储层强制)**:开启的每个方式位必须对应已录凭据
+  ——bit0 人脸 ⇒ face_vec 非空、bit1 指纹 ⇒ fingerprints 表有行、bit3 IC ⇒ ic_card
+  非空;bit2 密码免前置(密码必填恒可用)。db_user_add/db_user_update 对**新增的
+  无凭据位**返回 `DG_ERR_AUTH_NO_CRED`(-38);解绑卡/删指纹/清人脸时存储层
+  同步回收对应位。落库侧的写位/清位在 enroll 服务(face_commit 置位、
+  clear_face 清位、指纹 provider 加删、IC 绑解)。建号新用户固定只有
+  `DG_AUTH_PWD`(无凭据可言);历史脏位由 storage_init 开机一次性规范化迁移清理
 - **密码必填**(`NOT NULL`):添加用户时必须设置密码,否则拒绝添加 —— 业务层在 INSERT 前
   校验,不靠 DB 约束兜底
 - **密码可重复**:验证语义是 ID+密码,重复无歧义;每用户独立盐,存哈希不存明文

@@ -36,6 +36,7 @@ const char *dg_ui_enroll_err_text(int rc)
     case DG_ERR_DUP_FINGER:   return _("该指纹已绑定其他用户");
     case DG_ERR_FINGER_FULL:  return _("指纹库已满");
     case DG_ERR_FINGER_LIMIT: return _("该用户指纹已达上限");
+    case DG_ERR_AUTH_NO_CRED: return _("该验证方式未录入，无法开启");
     case DG_ERR_USER_LIMIT:   return _("用户数已达上限");
     case DG_ERR_BAD_NAME:     return _("姓名不合法");
     case DG_ERR_BAD_PWD:      return _("密码不合法");

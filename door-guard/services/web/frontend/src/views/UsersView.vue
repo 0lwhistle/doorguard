@@ -1,22 +1,25 @@
 <!--
-  UsersView.vue — 用户管理(列表 / 添加 / 编辑 / 删除 / 改密 / 清人脸)
+  UsersView.vue — 用户管理(列表 / 添加 / 编辑 / 删除 / 改密 / 人脸录入与清除)
 
   与设备端同一套业务规则:字段校验 JS 版先反馈,服务端(storage 层权威)
-  兜底,错误文案直接呈现服务端 msg。删除/清人脸是受理制(经 enroll 服务
-  事件,DB+特征库+头像一起动):返回后延时刷新列表确认。
+  兜底,错误文案直接呈现服务端 msg。删除/清人脸/人脸录入是受理制(经
+  enroll 服务与视觉后端,DB+特征库+头像一起动),结果经 WS enroll 消息
+  (seq 配对)回推后刷新确认。验证方式勾选受「方式位 ⇒ 已录凭据」约束:
+  未录入的方式在服务端会被拒,前端直接禁用并标注。
 -->
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import AppButton from '../components/AppButton.vue'
 import AppCard from '../components/AppCard.vue'
 import AppField from '../components/AppField.vue'
 import AppPager from '../components/AppPager.vue'
 import DataTable from '../components/DataTable.vue'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '../api/logs'
+import { onEnrollResult } from '../stores/events'
 import {
   AUTH_FLAGS, NAME_HINT, PWD_HINT, ROLE_TEXT, ROLES, UID_HINT,
-  addUser, clearUserFace, deleteUser, listUsers, setUserPwd, updateUser,
-  validName, validPwd, validUid,
+  addUser, clearUserFace, deleteUser, downscaleJpeg, listUsers, setUserFace,
+  setUserPwd, updateUser, validName, validPwd, validUid,
 } from '../api/users'
 import { toast } from '../stores/toast'
 
@@ -36,12 +39,30 @@ const total = ref(0)
 const pageSize = ref(DEFAULT_PAGE_SIZE)
 const pageSizeOptions = PAGE_SIZES.map((n) => ({ value: n, label: String(n) }))
 
-/* form: null=收起;add / edit(uid) 两用 */
+/* form: null=收起;add / edit(uid) 两用。creds = 该用户已录凭据
+ * (has_face/has_finger/has_ic),验证方式勾选据此禁用 */
 const form = ref(null)
 const busy = ref(false)
-const f = reactive({ uid: '', name: '', pwd: '', role: 0, flags: [1, 4] })
+const f = reactive({ uid: '', name: '', pwd: '', role: 0, flags: [4] })
+
+/* 人脸上传状态(编辑表单内;受理制,seq 配对 WS 回执) */
+const fileInput = ref(null)
+const previewUrl = ref('')
+const uploading = ref(false)
+let pendingSeq = null
 
 const FLAGS_BIT_TEXT = { 1: '人脸', 2: '指纹', 4: '密码', 8: 'IC 卡' }
+
+/* 各方式位是否可勾:编辑 = 对应凭据已录;添加 = 仅密码(密码必填恒有) */
+function bitEnabled(bit) {
+  if (!form.value) return false
+  if (form.value.mode === 'add') return bit === 4
+  const c = form.value.creds
+  if (bit === 1) return !!c.has_face
+  if (bit === 2) return !!c.has_finger
+  if (bit === 8) return !!c.has_ic
+  return true
+}
 
 function authText(row) {
   return AUTH_FLAGS.filter((a) => row.auth_flags & a.bit).map((a) => a.label).join('/') || '—'
@@ -77,20 +98,30 @@ function openAdd() {
   f.name = ''
   f.pwd = ''
   f.role = 0
-  f.flags = [1, 4]
+  f.flags = [4]
+  previewUrl.value = ''
 }
 
 function openEdit(row) {
-  form.value = { mode: 'edit', uid: row.uid, has_face: row.has_face }
+  form.value = {
+    mode: 'edit',
+    uid: row.uid,
+    creds: { has_face: row.has_face, has_finger: row.has_finger, has_ic: row.has_ic },
+  }
   f.uid = row.uid
   f.name = row.name
   f.pwd = ''
   f.role = row.role
-  f.flags = AUTH_FLAGS.filter((a) => row.auth_flags & a.bit).map((a) => a.bit)
+  /* 初始勾选 = 库值;未录入的方式直接不勾(服务端会拒,前端禁用) */
+  f.flags = AUTH_FLAGS.filter((a) => (row.auth_flags & a.bit) && bitEnabled(a.bit)).map((a) => a.bit)
+  previewUrl.value = ''
 }
 
 function closeForm() {
   form.value = null
+  previewUrl.value = ''
+  pendingSeq = null
+  if (fileInput.value) fileInput.value.value = ''
 }
 
 function flagsValue() {
@@ -137,6 +168,45 @@ async function onSave() {
   }
 }
 
+/* ---- 人脸照片录入/重录(受理制) ---- */
+
+async function onPickFile(ev) {
+  const file = ev.target.files && ev.target.files[0]
+  if (!file) return
+  if (!/^image\//.test(file.type)) {
+    toast.err('请选择图片文件')
+    return
+  }
+  try {
+    /* 先降采样再上传:最长边 1024,q85(实测 50~200KB,远低于服务端
+     * 512KB 硬顶);canvas 重编码同时抹掉 EXIF/方向 */
+    const { blob, width, height } = await downscaleJpeg(file)
+    if (blob.size > 512 * 1024) {
+      toast.err('图片过大,请换一张尺寸更小的照片')
+      return
+    }
+    previewUrl.value = URL.createObjectURL(blob)
+    uploading.value = true
+    const res = await setUserFace({ uid: form.value.uid, blob })
+    pendingSeq = res.seq ?? null
+    toast.info(res.msg || '已受理,正在提取人脸特征')
+  } catch (err) {
+    toast.err(err.message || '上传失败')
+  } finally {
+    uploading.value = false
+    if (fileInput.value) fileInput.value.value = ''
+  }
+}
+
+/* WS enroll 回执:kind=0(人脸)且 seq 配对(或非本人上传的提示落地)→ 刷新 */
+const unsubEnroll = onEnrollResult((msg) => {
+  if (msg.kind !== 0) return
+  if (pendingSeq !== null && msg.seq === pendingSeq) {
+    pendingSeq = null
+    load(page.value)
+  }
+})
+
 async function onResetPwd(row) {
   const pwd = window.prompt(`为用户 ${row.uid}(${row.name})设置新密码,4~31 位可见字符、不含空格:`)
   if (pwd === null) return
@@ -180,13 +250,19 @@ async function onDelete(row) {
   }
 }
 
-onMounted(() => load())
+onMounted(() => {
+  load()
+})
+
+onUnmounted(() => {
+  unsubEnroll()
+})
 </script>
 
 <template>
   <AppCard v-if="!form" title="用户管理" :index="0">
     <div class="bar">
-      <span class="muted small">共 {{ total }} 人;录入/重录人脸在设备端拍摄页完成</span>
+      <span class="muted small">共 {{ total }} 人;人脸可在编辑页上传录入,指纹/IC 在设备端录入</span>
       <AppButton icon="check" size="sm" @click="openAdd">添加用户</AppButton>
     </div>
     <DataTable :columns="COLUMNS" :rows="rows" row-key="uid" :loading="loading">
@@ -226,17 +302,49 @@ onMounted(() => load())
       <AppField v-model="f.role" label="权限" size="sm" :options="ROLES" />
       <div class="flags">
         <span class="small muted">验证方式</span>
-        <label v-for="a in AUTH_FLAGS" :key="a.bit" class="flags__item">
-          <input v-model="f.flags" type="checkbox" :value="a.bit" />
-          <span>{{ a.label }}</span>
+        <label
+          v-for="a in AUTH_FLAGS"
+          :key="a.bit"
+          class="flags__item"
+          :class="{ disabled: !bitEnabled(a.bit) }"
+        >
+          <input
+            v-model="f.flags"
+            type="checkbox"
+            :value="a.bit"
+            :disabled="!bitEnabled(a.bit)"
+          />
+          <span>{{ a.label }}<template v-if="!bitEnabled(a.bit)">(未录入)</template></span>
         </label>
+      </div>
+      <div v-if="form.mode === 'edit'" class="face-upload">
+        <span class="small muted">人脸照片({{ form.creds.has_face ? '重录将覆盖已录人脸' : '尚未录入' }})</span>
+        <div class="face-upload__row">
+          <img v-if="previewUrl" :src="previewUrl" class="face-upload__preview" alt="预览" />
+          <input
+            ref="fileInput"
+            type="file"
+            accept="image/*"
+            style="display: none"
+            @change="onPickFile"
+          />
+          <AppButton
+            size="sm"
+            variant="ghost"
+            :loading="uploading"
+            @click="fileInput && fileInput.click()"
+          >
+            {{ form.creds.has_face ? '重录人脸' : '上传人脸' }}
+          </AppButton>
+        </div>
+        <span class="small muted">选图后自动降采样(最长边 1024)上传;提取在设备端后台进行,完成后提示结果</span>
       </div>
     </div>
     <div class="ops">
       <AppButton icon="check" :loading="busy" @click="onSave">保存</AppButton>
       <AppButton variant="ghost" @click="closeForm">取消</AppButton>
     </div>
-    <p class="muted small">新用户必须设密码;人脸/指纹/IC 卡特征在设备端录入。权限与验证方式保存后立即生效。</p>
+    <p class="muted small">新用户必须设密码;未录入的方式不能勾选(人脸可在本页上传,指纹/IC 卡在设备端录入)。</p>
   </AppCard>
 </template>
 
@@ -282,6 +390,26 @@ onMounted(() => load())
   align-items: center;
   gap: 4px;
   font-size: 13px;
+}
+.flags__item.disabled {
+  opacity: 0.5;
+}
+.face-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.face-upload__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.face-upload__preview {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line, #e5e7eb);
 }
 .ops {
   display: flex;
