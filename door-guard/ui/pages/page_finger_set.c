@@ -22,7 +22,9 @@
 #include "enroll_service.h"
 #include "err.h"
 #include "events.h"
-#include "fp_provider.h"
+/* 相对路径而非裸名:dg_ui 未链接 fp 目标,include path 无 fingerprint 目录
+ * (裸名只有 main 可执行目标用;这里只要 ready 声明,不值得为此动依赖图) */
+#include "services/verify/fingerprint/fp_provider.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
 #include "theme.h"
