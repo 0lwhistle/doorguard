@@ -19,6 +19,7 @@
 #include "port.h"
 #include "theme.h"
 #include "ui_events.h"
+#include "widgets/dg_avatar.h"
 #include "widgets/dg_popup.h"
 
 #include <string.h>
@@ -30,6 +31,7 @@ extern void presenter_users_register(void);
 extern void presenter_user_edit_register(void);
 extern void presenter_capture_register(void);
 extern void presenter_device_register(void);
+extern void presenter_display_set_register(void);
 extern void presenter_access_set_register(void);
 extern void presenter_logs_register(void);
 extern void presenter_web_set_register(void);
@@ -51,6 +53,17 @@ static void ui_evt_pump_cb(lv_timer_t *t)
             dg_popup_close();               /* 弹窗属当前页,切页即收(top layer 不随页销毁) */
             navigator_switch(evt.page.page); /* 栈内回退/平级切换 */
         } else {
+            /* 录入结果终态的头像缓存集中失效:web 上传(与任何未来的录入
+             * 路径)改 DB 头像时设备端没有任何页面在场,各页面自己的
+             * invalidate 都顾不到;这里在 UI 线程统一兜底(缓存失效近零
+             * 开销,误失效只是下次 get 重解码一次)。FACE_OK 也失效是刻意
+             * 的:该事件同时承载「草稿就绪」(设备拍摄)与「直落库」(web),
+             * UI 层无从区分,按「可能变了」处理最稳 */
+            if (evt.kind == UI_EVT_ENROLL_RESULT &&
+                evt.enroll.err == DG_OK &&
+                (evt.enroll.kind == DG_ENROLL_FACE ||
+                 evt.enroll.kind == DG_ENROLL_FACE_CLEAR))
+                dg_avatar_invalidate(evt.enroll.user_id);
             navigator_dispatch_evt(&evt);    /* 内容事件给当前页渲染 */
         }
     }
@@ -85,6 +98,7 @@ int ui_init(const dg_ui_args_t *args)
     presenter_user_edit_register();
     presenter_capture_register();
     presenter_device_register();
+    presenter_display_set_register();
     presenter_access_set_register();
     presenter_logs_register();
     presenter_web_set_register();

@@ -47,3 +47,12 @@ for size in 16 26 30 40; do
     --no-prefilter -o "font/dg_font_cn_${size}.c"
   echo "生成 ui/font/dg_font_cn_${size}.c"
 done
+
+# 待机时钟专属档(2026-10-04):DejaVu Bold 仅数字+冒号(0x30-0x3A),
+# 150px 大数字挂钟观感;独立 TTF 不并 CJK(无字母/汉字字形)
+npx --yes lv_font_conv --no-compress --bpp 4 --size 150 \
+  --font "${DG_FONT_CLOCK_TTF:-/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf}" \
+  -r 0x30-0x3A \
+  --format lvgl --lv-include lvgl.h \
+  --no-prefilter -o "font/dg_font_clock.c"
+echo "生成 ui/font/dg_font_clock.c"

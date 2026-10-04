@@ -68,6 +68,11 @@ LV_FONT_DECLARE(dg_font_cn_40);
 #define DG_FONT_CN    &dg_font_cn_30
 #define DG_FONT_TITLE &dg_font_cn_40
 
+/** 待机时钟专属字体(DejaVu Bold 仅 0-9 与冒号,150px):大数字挂钟观感;
+ * 字集极小(11 字形)不占 rodata,别拿它排其他文本(无字母/汉字) */
+LV_FONT_DECLARE(dg_font_clock);
+#define DG_FONT_CLOCK &dg_font_clock
+
 #ifdef __cplusplus
 }
 #endif

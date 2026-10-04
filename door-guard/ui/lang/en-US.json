@@ -225,5 +225,12 @@
   "全部关闭": "All off",
   "确定": "OK",
   "该验证方式未录入，无法开启": "Method has no enrolled credential",
-  "（未录入）": " (not enrolled)"
+  "（未录入）": " (not enrolled)",
+  "周日": "Sun",
+  "周一": "Mon",
+  "周二": "Tue",
+  "周三": "Wed",
+  "周四": "Thu",
+  "周五": "Fri",
+  "周六": "Sat"
 }

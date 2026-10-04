@@ -24,11 +24,12 @@ import {
 import { toast } from '../stores/toast'
 
 const COLUMNS = [
-  { key: 'uid', label: '用户 ID' },
+  { key: 'uid', label: '用户 ID', width: '18%' },
   { key: 'name', label: '姓名' },
-  { key: 'roleText', label: '权限' },
+  { key: 'roleText', label: '权限', width: '10%' },
   { key: 'authText', label: '验证方式' },
-  { key: 'faceText', label: '人脸' },
+  { key: 'faceText', label: '人脸', width: '9%' },
+  { key: 'ops', label: '操作', width: '30%' },
 ]
 
 const rows = ref([])
@@ -266,24 +267,18 @@ onUnmounted(() => {
       <AppButton icon="check" size="sm" @click="openAdd">添加用户</AppButton>
     </div>
     <DataTable :columns="COLUMNS" :rows="rows" row-key="uid" :loading="loading">
-      <template #cell="{ row, col }">
-        <span v-if="col.key === 'faceText'" :class="{ dim: !row.has_face }">{{ row.faceText }}</span>
-        <span v-else>{{ row[col.key] }}</span>
+      <template #cell-faceText="{ row }">
+        <span :class="{ dim: !row.has_face }">{{ row.faceText }}</span>
+      </template>
+      <template #cell-ops="{ row }">
+        <span class="cell-ops">
+          <AppButton size="sm" variant="ghost" @click="openEdit(row)">编辑</AppButton>
+          <AppButton size="sm" variant="ghost" @click="onResetPwd(row)">改密</AppButton>
+          <AppButton size="sm" variant="ghost" @click="onClearFace(row)">清人脸</AppButton>
+          <AppButton size="sm" variant="warn" @click="onDelete(row)">删除</AppButton>
+        </span>
       </template>
     </DataTable>
-    <div class="rowops">
-      <template v-for="row in rows" :key="row.uid">
-        <div class="rowops__item">
-          <span class="small">{{ row.uid }}</span>
-          <span class="rowops__btns">
-            <AppButton size="sm" variant="ghost" @click="openEdit(row)">编辑</AppButton>
-            <AppButton size="sm" variant="ghost" @click="onResetPwd(row)">改密</AppButton>
-            <AppButton size="sm" variant="ghost" @click="onClearFace(row)">清人脸</AppButton>
-            <AppButton size="sm" variant="warn" @click="onDelete(row)">删除</AppButton>
-          </span>
-        </div>
-      </template>
-    </div>
     <AppPager :page="page" :pages="pages" :total="total" @change="load" />
   </AppCard>
 
@@ -356,22 +351,13 @@ onUnmounted(() => {
   gap: 10px;
   margin-bottom: 10px;
 }
-.rowops {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 10px;
-}
-.rowops__item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-top: 1px dashed var(--line, #e5e7eb);
-  padding-top: 4px;
-}
-.rowops__btns {
-  display: flex;
+.cell-ops {
+  display: inline-flex;
   gap: 6px;
+  white-space: nowrap;
+}
+.dim {
+  opacity: 0.55;
 }
 .form {
   display: flex;
@@ -415,8 +401,5 @@ onUnmounted(() => {
   display: flex;
   gap: 8px;
   margin-bottom: 10px;
-}
-.dim {
-  opacity: 0.55;
 }
 </style>
