@@ -22,6 +22,7 @@
 #include "enroll_service.h"
 #include "err.h"
 #include "events.h"
+#include "fp_provider.h"
 #include "i18n.h"
 #include "navigator/navigator.h"
 #include "theme.h"
@@ -175,6 +176,12 @@ static void enroll_begin(void)
 {
     if (s_enrolling)
         return;
+    /* 模组不在位(串口没接/握手未过/掉线降级)入口即拒:否则引导窗弹
+     * 「请按压」后永远等不到任何回执。文案对齐主页/验证侧(reason=9) */
+    if (!fp_provider_ready()) {
+        dg_popup_fail(_("指纹模块未就绪"), 1500, NULL, NULL);
+        return;
+    }
     s_seq = bridge_enroll_request(s_uid, DG_ENROLL_FINGER);
     s_enrolling = true;
     overlay_stage(DG_ENROLL_FP_STEP_PRESS1);   /* 文案先上屏,进度随后对齐 */

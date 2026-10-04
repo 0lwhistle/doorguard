@@ -20,6 +20,7 @@
  * 特征草稿先落(带置位)→ 字段+方式位,否则不变式校验会拒。
  */
 #include "dg_log.h"
+#include "card_provider.h"
 #include "enroll_service.h"
 #include "err.h"
 #include "events.h"
@@ -548,6 +549,13 @@ static void apply_ic_pick(void *ud, int idx)
 {
     (void)ud;
     if (idx == 0) {                       /* 录入/重新录入 */
+        /* 读卡器不在位则入口即拒:provider 打不开节点会一直降级,永远等
+         * 不到 EV_IC_CARD,不预检就是「请刷卡...」无限空等(验证侧 FSM 有
+         * reason=9 门禁,录入侧此前漏了这层) */
+        if (!card_provider_ready()) {
+            dg_popup_fail(_("读卡器未就绪"), 1500, NULL, NULL);
+            return;
+        }
         s_ic_enrolling = true;
         bridge_enroll_request(s_uid, DG_ENROLL_IC);
         refresh();
