@@ -92,7 +92,6 @@ void page_standby_create(lv_obj_t *parent)
     lv_obj_set_style_text_color(s_clock, DG_COL_BG(), 0);
     lv_obj_set_style_text_font(s_clock, DG_FONT_CLOCK, 0);
     lv_obj_align(s_clock, LV_ALIGN_CENTER, 0, -40);
-    clock_timer_cb(NULL);
 
     s_date = lv_label_create(parent);
     lv_obj_set_style_text_color(s_date, DG_COL_BG(), 0);
@@ -100,6 +99,10 @@ void page_standby_create(lv_obj_t *parent)
     lv_obj_set_style_text_font(s_date, DG_FONT_CN, 0);
     lv_obj_align(s_date, LV_ALIGN_CENTER, 0, 72);
     lv_obj_clear_flag(s_date, LV_OBJ_FLAG_CLICKABLE);
+
+    /* 两个标签都就位后再首刷:label 默认文案是「Text」,先建后刷会让日期
+     * 位置闪现一秒默认文案再被真日期顶掉(2026-10-04 板上实测) */
+    clock_timer_cb(NULL);
 
     s_timer = lv_timer_create(clock_timer_cb, 1000, NULL);
 
