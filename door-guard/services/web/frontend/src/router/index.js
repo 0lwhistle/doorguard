@@ -1,66 +1,76 @@
 /*
  * router/index.js — 路由表 + 登录守卫
  *
- * 视图用 () => import() 声明(源码层面按需加载、模块边界清晰);构建时配置了
- * inlineDynamicImports,最终会合并进单个 app.js——固件里少一个 chunk 维度,
- * 代码里仍保持模块化写法。
+ * 视图一律静态导入:构建产物本来就是单 bundle(inlineDynamicImports),
+ * 懒加载在运行期没有收益;而异步组件包在 <transition mode=out-in> 里会
+ * 触发「导航完成但组件不挂载」的白屏(实测,2026-10-05),静态导入从
+ * 根上消除这个组合。
  *
  * 守卫只做"有没有 token"这一件事(不做权限模型:上位机只有管理员一种角色)。
  */
 import { createRouter, createWebHashHistory } from 'vue-router'
+import LoginView from '../views/LoginView.vue'
+import AppShell from '../layouts/AppShell.vue'
+import DashboardView from '../views/DashboardView.vue'
+import UsersView from '../views/UsersView.vue'
+import SettingsView from '../views/SettingsView.vue'
+import LogsView from '../views/LogsView.vue'
+import AccountView from '../views/AccountView.vue'
+import FirmwareView from '../views/FirmwareView.vue'
+import VideoView from '../views/VideoView.vue'
 import { getToken, onUnauthorized } from '../api/client'
 
 const routes = [
   {
     path: '/login',
     name: 'login',
-    component: () => import('../views/LoginView.vue'),
+    component: LoginView,
     meta: { public: true, title: '登录' },
   },
   {
     path: '/',
-    component: () => import('../layouts/AppShell.vue'),
+    component: AppShell,
     children: [
       {
         path: '',
         name: 'dashboard',
-        component: () => import('../views/DashboardView.vue'),
+        component: DashboardView,
         meta: { title: '设备概览' },
       },
       {
         path: 'users',
         name: 'users',
-        component: () => import('../views/UsersView.vue'),
+        component: UsersView,
         meta: { title: '用户管理' },
       },
       {
         path: 'settings',
         name: 'settings',
-        component: () => import('../views/SettingsView.vue'),
+        component: SettingsView,
         meta: { title: '系统设置' },
       },
       {
         path: 'logs',
         name: 'logs',
-        component: () => import('../views/LogsView.vue'),
+        component: LogsView,
         meta: { title: '记录查询' },
       },
       {
         path: 'account',
         name: 'account',
-        component: () => import('../views/AccountView.vue'),
+        component: AccountView,
         meta: { title: '账号安全' },
       },
       {
         path: 'firmware',
         name: 'firmware',
-        component: () => import('../views/FirmwareView.vue'),
+        component: FirmwareView,
         meta: { title: '固件升级' },
       },
       {
         path: 'video',
         name: 'video',
-        component: () => import('../views/VideoView.vue'),
+        component: VideoView,
         meta: { title: '监控画面' },
       },
     ],
