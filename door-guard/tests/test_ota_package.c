@@ -159,7 +159,7 @@ int main(void)
     DG_CHECK(memcmp(back, s_payload, PAYLOAD_SZ) == 0);
     snprintf(path, sizeof(path), "%s/ota_staged.bin.sha256", s_dir);
     DG_CHECK(access(path, F_OK) == 0);
-    snprintf(path, sizeof(path), "%s/ota_staged.bin.ver", s_dir);
+    snprintf(path, sizeof(path), "%s/ota_staged.ver", s_dir);
     DG_CHECK(access(path, F_OK) == 0);
 
     /* [P9] extract 坏包:失败且不留半成品(.part 已清,旧 staged 不动) */

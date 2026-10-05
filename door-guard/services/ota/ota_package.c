@@ -204,7 +204,7 @@ int ota_package_extract(const char *pkg_path, const char *staged_dir,
     snprintf(part, sizeof(part), "%s/ota_staging.part", staged_dir);
     snprintf(staged, sizeof(staged), "%s/ota_staged.bin", staged_dir);
     snprintf(sha_path, sizeof(sha_path), "%s/ota_staged.bin.sha256", staged_dir);
-    snprintf(ver_path, sizeof(ver_path), "%s/ota_staged.bin.ver", staged_dir);
+    snprintf(ver_path, sizeof(ver_path), "%s/ota_staged.ver", staged_dir);
 
     FILE *dst = fopen(part, "wb");
     if (!dst) {
