@@ -1,6 +1,28 @@
 # 开发日志(DEVLOG)
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
+## 2026-10-05(一)IC 卡业务补齐:web 直输卡号绑定/解绑+日志掩码+web 预检——46/46、web 67/67、api 58/58、交叉零告警
+
+1. **审计先行**:IC 应用层(HAL→card_provider→FSM 三分支→enroll→UI→配置→4 测试)
+   2026-10-01 已落地,本次按协议文档承诺盘点缺口补齐:web 端、日志掩码、死代码。
+2. **web 补齐**:POST /api/users/ic_set|ic_clear(卡号直输同步落库,经
+   enroll_service_ic_set/ic_clear 与设备端刷卡共用查重排除自身+置位实现);
+   GET /api/users 增 ic_mask(********+末4,原卡号不出设备);前端 UsersView
+   IC 列+编辑页录入/重绑/解绑(小写归一)。drv/iccard 增 iccard_no_valid(§5 域)。
+3. **日志掩码合规(协议 §5)**:card_provider 回读卡/enroll 绑卡解绑三处改掩码输出。
+4. **真 bug:users_update 开 IC 位静默成功**——storage「空 ic_card=解绑」语义会把
+   无卡用户请求的 IC 位剥掉不报错(api_test 首跑抓到);web 层显式预检拒收,
+   与 face/finger 口径对齐(storage 契约不动,test_storage S11 不受影响)。
+5. **死代码清理**:删 v2 草案 services/verify/auth_provider.h(user_id=uint32_t
+   旧口径,无引用;协议 §7.4 改决策记录留档);events.h EV_IC_CARD 标注已激活;
+   协议文档修 §5 16B UID 口径笔误(有效域实为 4~15B/8~30 字符,DG_IC_LEN 含 NUL)。
+6. 验证:ctest 46/46、web_test 67/67、api_test 58/58(新增 15 个 IC 端点用例)、
+   交叉零告警;前端重建(pages/+web_pages.c 随本批提交)。
+7. 下一步:等用户 SPI 驱动 .ko 交付(接口契约 ICCARD_PROTOCOL §2~§6),板上
+   四项验收:真卡开门/按住只开一次/重复卡录入被拒/拔模块降级提示。
+
+---
+> 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 ---
 ## 2026-10-04(三)三项体验修复:头像集中失效/用户列表合一/待机大字挂钟——46/46 绿,已推板 B 槽(da812e0)
 
