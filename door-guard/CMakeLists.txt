@@ -399,6 +399,13 @@ string(TIMESTAMP DG_BUILD_DATE "%Y-%m-%d %H:%M")
 # 「构建日期」,作为关于设备页的版本附带信息)
 add_compile_definitions(DG_FW_VERSION="${DG_GIT_DESC}" DG_BUILD_DATE="${DG_BUILD_DATE}")
 
+# alarm:远程报警上报(类型/详情 → <prefix>/event/alarm;触发源待业务
+# 接入,接口先立)。依赖 mqtt 通道(dg_net),测试经 sink 注入脱离 mqtt
+add_library(dg_alarm STATIC services/alarm/alarm_service.c)
+target_include_directories(dg_alarm PUBLIC ${CMAKE_SOURCE_DIR}/services
+                                            ${CMAKE_SOURCE_DIR}/services/mqtt)
+target_link_libraries(dg_alarm PUBLIC dg_net dg_proto dg_log dg_timeutil)
+
 # sysctl:系统控制(设备重启;UI/web 经 EV_SYS_REBOOT 请求,服务统一执行。
 # 宿主构建注入 DG_SYSCTL_FAKE=sim/ctest 只模拟重启,不真执行)
 add_library(dg_sysctl STATIC services/sysctl/sysctl_service.c
@@ -504,13 +511,6 @@ if(NOT DG_SIM)
     target_link_libraries(dg_vision PUBLIC rockiva dg_storage dg_config dg_camera
                                            dg_liveness dg_npu dg_rknn_face)
 endif()
-
-# alarm:远程报警上报(类型/详情 → <prefix>/event/alarm;触发源待业务
-# 接入,接口先立)。依赖 mqtt 通道(dg_net),测试经 sink 注入脱离 mqtt
-add_library(dg_alarm STATIC services/alarm/alarm_service.c)
-target_include_directories(dg_alarm PUBLIC ${CMAKE_SOURCE_DIR}/services
-                                            ${CMAKE_SOURCE_DIR}/services/mqtt)
-target_link_libraries(dg_alarm PUBLIC dg_net dg_proto dg_log dg_timeutil)
 
 # ---- 应用(交叉编译产物,dg-deploy 推板) ----
 # ROCKIVA 的头与库都取自 sysroot(与板上 .so 同源):
