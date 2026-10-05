@@ -200,7 +200,7 @@ static void *writer_thread(void *arg)
             }
             s_ctx.sha_hex[64] = '\0';
             remove(s_slot);
-            if (rename(s_staging, s_slot) != 0) {
+            if (rename(s_slot_staging, s_slot) != 0) {
                 rc = DG_ERR_IO;
             } else {
                 DG_LOGI(TAG, "槽位收包完成 → %s(%uB)", s_slot,

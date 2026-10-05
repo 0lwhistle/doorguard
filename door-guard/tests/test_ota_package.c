@@ -50,6 +50,18 @@ static void build_pkg(const char *version, const char *date,
     fclose(f);
 }
 
+/* 篡改包文件里偏移 header+idx 的一个载荷字节(制造摘要不符) */
+static void corrupt_payload_byte(const char *path, size_t idx)
+{
+    FILE *f = fopen(path, "r+b");
+    if (!f)
+        exit(2);
+    fseek(f, (long)(OTA_PKG_HEADER_LEN + idx), SEEK_SET);
+    const uint8_t b = 0x5A;
+    fwrite(&b, 1, 1, f);
+    fclose(f);
+}
+
 int main(void)
 {
     snprintf(s_dir, sizeof(s_dir), "/tmp/dg_pkg_%d", (int)getpid());
@@ -102,11 +114,10 @@ int main(void)
     DG_CHECK(strcmp(m.version, "9.8.7") == 0);
     DG_CHECK(m.payload_size == PAYLOAD_SZ);
 
-    /* [P4] 摘要不符:改一个载荷字节 → MISMATCH */
+    /* [P4] 摘要不符:打包后篡改文件里的一个载荷字节 → MISMATCH */
     printf("[P4] 摘要不符拒收\n");
-    s_payload[0] ^= 0xFF;
     build_pkg("9.8.7", "2026-10-05", s_payload, PAYLOAD_SZ, s_pkg);
-    s_payload[0] ^= 0xFF;                     /* 头按坏字节打包,载荷还原 */
+    corrupt_payload_byte(s_pkg, 0);
     DG_CHECK(ota_package_parse_file(s_pkg, &m) == DG_ERR_MISMATCH);
 
     /* [P5] 截断包:总长不符 → PARAM */
@@ -153,9 +164,7 @@ int main(void)
 
     /* [P9] extract 坏包:失败且不留半成品(.part 已清,旧 staged 不动) */
     printf("[P9] 坏包提取不留半成品\n");
-    s_payload[1] ^= 0xFF;
-    build_pkg("1.2.3", "2026-10-05", s_payload, PAYLOAD_SZ, s_pkg);
-    s_payload[1] ^= 0xFF;
+    corrupt_payload_byte(s_pkg, 1);
     DG_CHECK(ota_package_extract(s_pkg, s_dir, ver, sizeof(ver)) ==
              DG_ERR_MISMATCH);
     snprintf(path, sizeof(path), "%s/ota_staging.part", s_dir);
