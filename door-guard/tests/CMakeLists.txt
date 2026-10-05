@@ -212,6 +212,14 @@ set_tests_properties(test_audio PROPERTIES TIMEOUT 60)
 dg_add_test(test_mqtt dg_net dg_config dg_event_bus)
 set_tests_properties(test_mqtt PROPERTIES TIMEOUT 60)
 
+# .ota 全量升级包解析/提取(头部契约/摘要复核/暂存交接)
+add_executable(test_ota_package test_ota_package.c)
+target_include_directories(test_ota_package PRIVATE
+    ${CMAKE_SOURCE_DIR}/services/ota)
+target_link_libraries(test_ota_package PRIVATE dg_net crypto pthread)
+add_test(NAME test_ota_package COMMAND test_ota_package)
+set_tests_properties(test_ota_package PROPERTIES TIMEOUT 60)
+
 # MQTT OTA 升级编排(公告解析/版本比较/下载状态机;传输注入,零网络依赖)
 dg_add_test(test_ota_update dg_net dg_config dg_event_bus crypto pthread)
 set_tests_properties(test_ota_update PROPERTIES TIMEOUT 120)

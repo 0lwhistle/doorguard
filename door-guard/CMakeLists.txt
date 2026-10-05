@@ -369,6 +369,7 @@ add_library(dg_net STATIC
     services/web/web_auth.c
     services/web/web_session.c
     services/ota/ota_service.c
+    services/ota/ota_package.c
     services/ota/ota_update.c
     services/ota/ota_http.c
     services/ntp/ntp_service.c

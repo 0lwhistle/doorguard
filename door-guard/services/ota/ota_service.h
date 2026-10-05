@@ -46,6 +46,29 @@ int ota_finish(char *stage_path, size_t path_cap);
 /** 取消并清理暂存 */
 void ota_abort(void);
 
+/* ---- web 升级包槽位模式(2026-10-05) ----
+ * 与暂存模式共用同一单会话流水线(互斥 BUSY),差异只在收口:
+ * 不做客户端声明摘要比对(.ota 包的载荷摘要在 apply 时由 ota_package
+ * 复核),写完改名为 fw_slot.ota 并回报实算 sha256。 */
+
+/** 开始槽位接收(size=整个 .ota 文件字节数;offset 续传语义同 ota_begin) */
+int ota_begin_slot(uint32_t size, uint32_t offset, bool *resumed);
+
+/** 结束槽位接收:path 回 fw_slot.ota 全路径,sha_hex 回整文件实算摘要 */
+int ota_finish_slot(char *path, size_t path_cap, char *sha_hex, size_t sha_cap);
+
+/** 当前是否有会话在途(暂存或槽位;web 上传/删除/apply 的互斥依据) */
+bool ota_session_active(void);
+
+/** fw_slot.ota 全路径(查询/删除用) */
+void ota_slot_path(char *path, size_t cap);
+
+/** 暂存目录全路径(ota_package_extract 的目标;web apply 用) */
+void ota_staged_dir(char *path, size_t cap);
+
+/** 校验闭环的暂存包是否在位(未装槽时 true;S60 装槽后进程重启自然翻假) */
+bool ota_staged_present(void);
+
 /** 当前暂存字节数(续传对拍) */
 size_t ota_staged_bytes(void);
 

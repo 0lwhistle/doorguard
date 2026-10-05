@@ -199,6 +199,30 @@ int main(void)
     /* 偏移与已暂存不符:显式拒绝 */
     DG_CHECK(ota_begin(&m, 12345, &resumed) == DG_ERR_STATE);
 
+    /* ---- O6 槽位模式:begin_slot→收包→finish_slot→fw_slot.ota+实算摘要;
+     * 与暂存模式互斥(BUSY);finish_slot 对暂存会话显式拒绝 ---- */
+    printf("[O6] slot mode: begin_slot + finish_slot + mutual busy
+");
+    char slot_path[192], sha_out[65] = "";
+    bool slot_resumed = false;
+    DG_CHECK(ota_begin_slot(CONTENT_SZ, 0, &slot_resumed) == DG_OK);
+    DG_CHECK(!slot_resumed);
+    DG_CHECK(ota_begin(&m, 0, &resumed) == DG_ERR_BUSY);       /* 模式互斥 */
+    DG_CHECK(ota_begin_slot(CONTENT_SZ, 0, &slot_resumed) == DG_ERR_BUSY);
+    DG_CHECK(push_all(s_content, 0, CONTENT_SZ) == DG_OK);
+    DG_CHECK(ota_finish_slot(slot_path, sizeof(slot_path), sha_out,
+                             sizeof(sha_out)) == DG_OK);
+    snprintf(slot_path, sizeof(slot_path), "%s/fw_slot.ota", s_dir);
+    DG_CHECK(access(slot_path, F_OK) == 0);
+    DG_CHECK(strcmp(sha_out, s_sha_hex) == 0);                 /* 实算=内容摘要 */
+    DG_CHECK(ota_finish(slot_path, sizeof(slot_path)) == DG_ERR_STATE); /* 槽收口后暂存 finish 拒 */
+
+    /* 槽位残留 .part 会被全新槽位上传清掉;slot→staged 切换无残留影响 */
+    DG_CHECK(ota_begin(&m, 0, &resumed) == DG_OK);
+    DG_CHECK(push_all(s_content, 0, CONTENT_SZ) == DG_OK);
+    DG_CHECK(ota_finish(path, sizeof(path)) == DG_OK);
+    DG_CHECK(access(staged, F_OK) == 0);
+
     /* 收尾:事件总数只增不减;清理 */
     pthread_mutex_lock(&s_ev_mu);
     DG_CHECK(s_ev_count >= cnt_after_o1);

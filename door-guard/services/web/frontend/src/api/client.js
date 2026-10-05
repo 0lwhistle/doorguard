@@ -41,6 +41,55 @@ function notifyUnauthorized(payload) {
 }
 
 /**
+ * 带上传进度的原始体上传(XHR;fetch 拿不到 upload progress)。
+ * @param {string} path 接口路径
+ * @param {Blob|File} blob 原始请求体
+ * @param {{headers?:object, onProgress?:(pct:number)=>void,
+ *          signal?:AbortSignal}} opts
+ * @returns {Promise<object>} 解析后的 JSON
+ * @throws {ApiError} 网络失败/非 2xx/中止
+ */
+export function uploadWithProgress(path, blob, opts = {}) {
+  const { headers = {}, onProgress, signal } = opts
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', path, true)
+    xhr.responseType = 'text'
+    if (token) xhr.setRequestHeader('X-Auth-Token', token)
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+    Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v))
+    if (signal) {
+      const abort = () => xhr.abort()
+      signal.addEventListener('abort', abort, { once: true })
+      xhr.addEventListener('loadend', () => signal.removeEventListener('abort', abort))
+    }
+    if (onProgress) {
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
+      })
+    }
+    xhr.addEventListener('load', () => {
+      let payload = null
+      try { payload = JSON.parse(xhr.responseText) } catch { payload = null }
+      if (xhr.status === 401) {
+        setToken('')
+        notifyUnauthorized(payload)
+        reject(new ApiError((payload && payload.msg) || '会话已过期,请重新登录', 401, payload))
+        return
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new ApiError((payload && payload.msg) || `请求失败(${xhr.status})`, xhr.status, payload))
+        return
+      }
+      resolve(payload || {})
+    })
+    xhr.addEventListener('error', () => reject(new ApiError('网络中断,上传未完成', 0, null)))
+    xhr.addEventListener('abort', () => reject(new ApiError('上传已取消', 0, { aborted: true })))
+    xhr.send(blob)
+  })
+}
+
+/**
  * 发起请求。
  * @param {string} path 接口路径(见 endpoints.js)
  * @param {{method?:string, body?:object, rawBody?:Blob|string, rawType?:string,

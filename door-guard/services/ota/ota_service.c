@@ -35,6 +35,7 @@ static const char *TAG = "[OTA]";
 
 static char s_dir[128] = OTA_DEFAULT_DIR;
 static char s_staging[192], s_staged[192], s_staged_sha[200], s_staged_ver[200];
+static char s_slot_staging[192], s_slot[192];   /* web 升级包槽(fw_slot.*) */
 
 typedef struct {
     bool active;
@@ -48,6 +49,8 @@ typedef struct {
     bool abort;                               /* 生产者要求丢弃退出 */
     bool done;                                /* 写线程已退出(结果就绪) */
     int  result;                              /* 写线程终态(dg_err_t) */
+    bool slot_mode;                           /* 槽位会话:收口不比对声明摘要 */
+    char sha_hex[65];                         /* 槽位会话:整文件实算摘要(hex) */
     uint32_t last_permille;
     uint8_t pipe[OTA_PIPE_CAP];
     size_t head, tail, count;
@@ -83,6 +86,8 @@ static void paths_init(void)
     snprintf(s_staged, sizeof(s_staged), "%s/ota_staged.bin", s_dir);
     snprintf(s_staged_sha, sizeof(s_staged_sha), "%s/ota_staged.bin.sha256", s_dir);
     snprintf(s_staged_ver, sizeof(s_staged_ver), "%s/ota_staged.ver", s_dir);
+    snprintf(s_slot_staging, sizeof(s_slot_staging), "%s/fw_slot.part", s_dir);
+    snprintf(s_slot, sizeof(s_slot), "%s/fw_slot.ota", s_dir);
 }
 
 static void publish_progress(uint32_t permille, bool done, int err)
@@ -145,7 +150,8 @@ static void *writer_thread(void *arg)
             break;
         }
         if (have) {
-            FILE *f = fopen(s_staging, s_ctx.received ? "ab" : "wb");
+            FILE *f = fopen(s_ctx.slot_mode ? s_slot_staging : s_staging,
+                            s_ctx.received ? "ab" : "wb");
             if (!f) {
                 rc = DG_ERR_IO;
                 break;
@@ -181,6 +187,25 @@ static void *writer_thread(void *arg)
             DG_LOGW(TAG, "大小不符 received=%zu 声明=%u", s_ctx.received,
                     s_ctx.manifest.size);
             rc = DG_ERR_IO;                   /* 不完整:保留 .part 供续传 */
+        } else if (s_ctx.slot_mode) {
+            uint8_t digest[32];
+            unsigned dlen = 0;
+            EVP_DigestFinal_ex(s_ctx.md, digest, &dlen);
+            EVP_MD_CTX_free(s_ctx.md);
+            s_ctx.md = NULL;
+            static const char *const HEXD = "0123456789abcdef";
+            for (int i = 0; i < 32; i++) {
+                s_ctx.sha_hex[i * 2] = HEXD[digest[i] >> 4];
+                s_ctx.sha_hex[i * 2 + 1] = HEXD[digest[i] & 0xF];
+            }
+            s_ctx.sha_hex[64] = '\0';
+            remove(s_slot);
+            if (rename(s_staging, s_slot) != 0) {
+                rc = DG_ERR_IO;
+            } else {
+                DG_LOGI(TAG, "槽位收包完成 → %s(%uB)", s_slot,
+                        s_ctx.manifest.size);
+            }
         } else {
             uint8_t digest[32], expect[32];
             unsigned dlen = 0;
@@ -232,7 +257,54 @@ finish:
     return NULL;
 }
 
+static int begin_common(const ota_manifest_t *m, uint32_t offset,
+                        bool *resumed, bool slot_mode);
+
 int ota_begin(const ota_manifest_t *m, uint32_t offset, bool *resumed)
+{
+    return begin_common(m, offset, resumed, false);
+}
+
+int ota_begin_slot(uint32_t size, uint32_t offset, bool *resumed)
+{
+    ota_manifest_t m;
+    memset(&m, 0, sizeof(m));
+    snprintf(m.version, sizeof(m.version), "slot");
+    m.size = size;
+    return begin_common(&m, offset, resumed, true);
+}
+
+bool ota_session_active(void)
+{
+    return s_ctx.active;
+}
+
+void ota_slot_path(char *path, size_t cap)
+{
+    if (!path || cap == 0)
+        return;
+    paths_init();
+    snprintf(path, cap, "%s", s_slot);
+}
+
+void ota_staged_dir(char *path, size_t cap)
+{
+    if (!path || cap == 0)
+        return;
+    paths_init();
+    snprintf(path, cap, "%s", s_dir);
+}
+
+bool ota_staged_present(void)
+{
+    paths_init();
+    struct stat st;
+    return stat(s_staged, &st) == 0 && st.st_size > 0;
+}
+
+/* 公共开始逻辑(暂存/槽位两模式;slot_mode 只差目标文件与收口行为) */
+static int begin_common(const ota_manifest_t *m, uint32_t offset, bool *resumed,
+                        bool slot_mode)
 {
     if (!m || !resumed)
         return DG_ERR_PARAM;
@@ -246,8 +318,9 @@ int ota_begin(const ota_manifest_t *m, uint32_t offset, bool *resumed)
     paths_init();
     mkdir(s_dir, 0755);                     /* 已存在则忽略 */
 
+    const char *staging = slot_mode ? s_slot_staging : s_staging;
     size_t staged = 0;
-    FILE *probe = fopen(s_staging, "rb");
+    FILE *probe = fopen(staging, "rb");
     if (probe) {
         fseek(probe, 0, SEEK_END);
         staged = (size_t)ftell(probe);
@@ -261,7 +334,7 @@ int ota_begin(const ota_manifest_t *m, uint32_t offset, bool *resumed)
             return DG_ERR_STATE;
         *resumed = true;
     } else if (staged > 0) {
-        remove(s_staging);                  /* 全新上传:清残留 */
+        remove(staging);                    /* 全新上传:清残留 */
         staged = 0;
     }
     if (staged > m->size)
@@ -278,6 +351,8 @@ int ota_begin(const ota_manifest_t *m, uint32_t offset, bool *resumed)
     s_ctx.result = DG_OK;
     s_ctx.last_permille = 0;
     s_ctx.manifest = *m;
+    s_ctx.slot_mode = slot_mode;
+    s_ctx.sha_hex[0] = '\0';
     s_ctx.received = staged;
     s_ctx.md = md;
     s_ctx.active = true;                    /* 会话生效:写线程的最终裁决前拒新会话 */
@@ -381,6 +456,30 @@ int ota_finish(char *stage_path, size_t path_cap)
         return rc;
     if (stage_path)
         snprintf(stage_path, path_cap, "%s", s_staged);
+    return DG_OK;
+}
+
+int ota_finish_slot(char *path, size_t path_cap, char *sha_hex, size_t sha_cap)
+{
+    if (!s_ctx.active || !s_ctx.slot_mode)
+        return DG_ERR_STATE;
+
+    pthread_mutex_lock(&s_ctx.mu);
+    s_ctx.eof = true;
+    pthread_cond_broadcast(&s_ctx.cv_data);
+    int rc = wait_writer_done(60);
+    s_ctx.tid_valid = false;
+    s_ctx.active = false;
+    char sha[65];
+    snprintf(sha, sizeof(sha), "%s", s_ctx.sha_hex);
+    pthread_mutex_unlock(&s_ctx.mu);
+
+    if (rc != DG_OK)
+        return rc;
+    if (path)
+        snprintf(path, path_cap, "%s", s_slot);
+    if (sha_hex && sha_cap >= 65)
+        snprintf(sha_hex, sha_cap, "%s", sha);
     return DG_OK;
 }
 

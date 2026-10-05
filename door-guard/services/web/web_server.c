@@ -42,6 +42,7 @@
 #include "web_auth.h"
 #include "web_session.h"
 #include "web_pages.h"
+#include "ota/ota_package.h"
 #include "ota/ota_service.h"
 #include "ntp/ntp_service.h"
 #include "net_info.h"
@@ -1028,6 +1029,301 @@ static void ota_start(struct mg_connection *c, struct mg_http_message *hm)
     ota_feed_from(c);
 }
 
+/* ---- OTA 升级包槽(.ota 全量包;与暂存上传同款流式管线) ----
+ * 槽位 = 板上唯一暂存的升级包(web 上传即覆盖)。收整个 .ota 文件,
+ * 收完 ota_package_parse_file 做载荷摘要复核,meta 写 fw_slot.json;
+ * apply 提取载荷 → ota_staged.bin 交 S60 装槽(与裸包上传同一出口)。 */
+
+static struct mg_connection *s_fw_c = NULL;    /* 槽位上传连接(loop 私有) */
+static int64_t s_fw_remain = 0;
+static atomic_bool s_fw_applying = false;      /* 提取线程在途 */
+
+/* meta sidecar 路径(与 fw_slot.ota 同目录) */
+static void fw_meta_path(char *path, size_t cap)
+{
+    char slot[192];
+    ota_slot_path(slot, sizeof(slot));
+    snprintf(path, cap, "%s.json", slot);
+}
+
+static void fw_fail(struct mg_connection *c, int code, const char *msg)
+{
+    ota_abort();
+    s_fw_c = NULL;
+    json_msg(c, code, msg);
+}
+
+/* 收完:finish_slot → 解析复核(结构+载荷摘要)→ meta 落盘 → 应答 */
+static void fw_complete(void)
+{
+    struct mg_connection *c = s_fw_c;
+    s_fw_c = NULL;
+    if (!c)
+        return;
+    char slot[192] = "", sha[65] = "";
+    int rc = ota_finish_slot(slot, sizeof(slot), sha, sizeof(sha));
+    if (rc != DG_OK) {
+        json_msg(c, 422, "接收不完整(大小不符),请重传或续传");
+        return;
+    }
+
+    ota_pkg_meta_t m;
+    rc = ota_package_parse_file(slot, &m);
+    if (rc != DG_OK) {
+        remove(slot);                        /* 坏包不占槽 */
+        json_msg(c, 422, "包校验失败(非 .ota 包/结构损坏/摘要不符)");
+        return;
+    }
+
+    char meta[256];
+    fw_meta_path(meta, sizeof(meta));
+    FILE *f = fopen(meta, "w");
+    if (f) {
+        /* received_at 用墙钟(展示用;板时钟未同步时值不代表真实时刻) */
+        fprintf(f,
+                "{\"version\":\"%s\",\"date\":\"%s\",\"size\":%u,"
+                "\"sha256\":\"%s\",\"received_at\":%lld}",
+                m.version, m.date, m.payload_size, m.sha256_hex,
+                (long long)time(NULL));
+        fclose(f);
+    }
+    DG_LOGI(TAG, "升级包入槽 v=%s(%uB)", m.version, m.payload_size);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddStringToObject(root, "version", m.version);
+    cJSON_AddStringToObject(root, "date", m.date);
+    cJSON_AddNumberToObject(root, "size", (double)m.payload_size);
+    json_reply(c, 200, root);
+    cJSON_Delete(root);
+}
+
+static void fw_feed_from(struct mg_connection *c)
+{
+    while (s_fw_c == c && s_fw_remain > 0 && c->recv.len > 0) {
+        size_t take = c->recv.len;
+        if (take > (size_t)s_fw_remain)
+            take = (size_t)s_fw_remain;
+        size_t room = ota_can_accept();
+        if (room == 0)
+            return;
+        if (take > room)
+            take = room;
+        size_t got = 0;
+        if (ota_write_chunk((const uint8_t *)c->recv.buf, take, &got) != DG_OK) {
+            fw_fail(c, 400, "写入失败(超大小?)");
+            return;
+        }
+        mg_iobuf_del(&c->recv, 0, take);
+        s_fw_remain -= (int64_t)take;
+    }
+    if (s_fw_c == c && s_fw_remain == 0)
+        fw_complete();
+}
+
+static void fw_retry_cb(void *arg)
+{
+    (void)arg;
+    if (s_fw_c && s_fw_remain > 0)
+        fw_feed_from(s_fw_c);
+}
+
+/* HDRS:槽位上传开始(整个 .ota 文件;声明大小=X-OTA-Size,可带
+ * X-OTA-Offset 续传) */
+static void fw_start(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    char size_s[24] = "";
+    struct mg_str *h;
+    if ((h = mg_http_get_header(hm, "X-OTA-Size")) != NULL &&
+        h->len < sizeof(size_s))
+        memcpy(size_s, h->buf, h->len);
+    if (!size_s[0]) {
+        json_msg(c, 400, "缺少 X-OTA-Size 头");
+        return;
+    }
+    const uint32_t size = (uint32_t)strtoul(size_s, NULL, 10);
+    if (size <= OTA_PKG_HEADER_LEN) {
+        json_msg(c, 400, "文件比 .ota 包头还小");
+        return;
+    }
+
+    uint32_t offset = 0;
+    char off_s[24] = "";
+    if ((h = mg_http_get_header(hm, "X-OTA-Offset")) != NULL &&
+        h->len < sizeof(off_s)) {
+        memcpy(off_s, h->buf, h->len);
+        offset = (uint32_t)strtoul(off_s, NULL, 10);
+    }
+
+    bool resumed = false;
+    int rc = ota_begin_slot(size, offset, &resumed);
+    if (rc == DG_ERR_PARAM) {
+        json_msg(c, 400, "包大小超限(64MB)或参数非法");
+        return;
+    }
+    if (rc == DG_ERR_STATE) {
+        json_msg(c, 409, "续传偏移不符,请重传");
+        return;
+    }
+    if (rc == DG_ERR_BUSY) {
+        json_msg(c, 409, "其他上传进行中");
+        return;
+    }
+    if (rc != DG_OK) {
+        json_msg(c, 500, "开始失败");
+        return;
+    }
+
+    s_fw_c = c;
+    s_fw_remain = (int64_t)size - (int64_t)offset;
+    size_t hdr_len = (size_t)(hm->body.buf - (const char *)c->recv.buf);
+    mg_iobuf_del(&c->recv, 0, hdr_len);
+    fw_feed_from(c);
+}
+
+/* GET /api/ota/fw:槽位状态(包 meta + 在途上传进度 + 暂存态) */
+static void handle_ota_fw_get(struct mg_connection *c, struct mg_http_message *hm)
+{
+    (void)c;
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "staged", ota_staged_present());
+    cJSON_AddBoolToObject(root, "applying", atomic_load(&s_fw_applying));
+    cJSON_AddBoolToObject(root, "uploading", s_fw_c != NULL);
+
+    char slot[192];
+    ota_slot_path(slot, sizeof(slot));
+    struct stat st;
+    if (stat(slot, &st) != 0 || st.st_size == 0) {
+        cJSON_AddBoolToObject(root, "present", false);
+    } else {
+        cJSON_AddBoolToObject(root, "present", true);
+        cJSON_AddNumberToObject(root, "file_size", (double)st.st_size);
+        char meta[256];
+        fw_meta_path(meta, sizeof(meta));
+        FILE *f = fopen(meta, "rb");
+        if (f) {
+            char buf[512] = "";
+            size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+            fclose(f);
+            buf[n] = '\0';
+            cJSON *mj = cJSON_Parse(buf);
+            if (mj) {
+                cJSON *v;
+                if ((v = cJSON_GetObjectItem(mj, "version")) && cJSON_IsString(v))
+                    cJSON_AddStringToObject(root, "version", v->valuestring);
+                if ((v = cJSON_GetObjectItem(mj, "date")) && cJSON_IsString(v))
+                    cJSON_AddStringToObject(root, "date", v->valuestring);
+                if ((v = cJSON_GetObjectItem(mj, "size")) && cJSON_IsNumber(v))
+                    cJSON_AddNumberToObject(root, "size", v->valuedouble);
+                if ((v = cJSON_GetObjectItem(mj, "sha256")) && cJSON_IsString(v))
+                    cJSON_AddStringToObject(root, "sha256", v->valuestring);
+                if ((v = cJSON_GetObjectItem(mj, "received_at")) && cJSON_IsNumber(v))
+                    cJSON_AddNumberToObject(root, "received_at", v->valuedouble);
+                cJSON_Delete(mj);
+            }
+        }
+    }
+    /* 续传:在途会话的已收字节(web 刷新后对拍偏移) */
+    cJSON *partial = cJSON_AddObjectToObject(root, "partial");
+    if (s_fw_c) {
+        cJSON_AddBoolToObject(partial, "active", true);
+        cJSON_AddNumberToObject(partial, "received", (double)ota_staged_bytes());
+    } else {
+        cJSON_AddBoolToObject(partial, "active", false);
+    }
+    json_reply(c, 200, root);
+    cJSON_Delete(root);
+}
+
+/* DELETE /api/ota/fw:弃包(会话在途则中止;提取中拒绝) */
+static void handle_ota_fw_delete(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    if (atomic_load(&s_fw_applying)) {
+        json_msg(c, 409, "正在提取升级包,请稍后再试");
+        return;
+    }
+    ota_abort();                             /* 无会话则 no-op */
+    char slot[192], meta[256];
+    ota_slot_path(slot, sizeof(slot));
+    fw_meta_path(meta, sizeof(meta));
+    remove(slot);
+    remove(meta);
+    DG_LOGI(TAG, "升级包槽已清空(上位机删除)");
+    json_msg(c, 200, "已删除");
+}
+
+/* 提取线程:槽位包 → 校验 → 暂存交接面(阻塞秒级,禁在 loop 调) */
+static void *fw_apply_thread(void *arg)
+{
+    (void)arg;
+    char slot[192], dir[128], version[OTA_PKG_VER_MAX] = "";
+    ota_slot_path(slot, sizeof(slot));
+    ota_staged_dir(dir, sizeof(dir));
+
+    ota_pkg_meta_t m;
+    int rc = ota_package_parse_file(slot, &m);
+    if (rc == DG_OK)
+        rc = ota_package_extract(slot, dir, version, sizeof(version));
+    atomic_store(&s_fw_applying, false);
+    if (rc != DG_OK) {
+        DG_LOGE(TAG, "升级包提取失败(%d)", rc);
+        return NULL;
+    }
+    DG_LOGI(TAG, "升级包就绪 v=%s,交系统安装器(S60),即将重启", version);
+    return NULL;
+}
+
+/* POST /api/ota/fw/apply:提取校验并交装(202;重启与切槽由 S60 完成) */
+static void handle_ota_fw_apply(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    if (atomic_load(&s_fw_applying)) {
+        json_msg(c, 409, "提取已在进行中");
+        return;
+    }
+    if (s_fw_c || ota_session_active()) {
+        json_msg(c, 409, "上传进行中,请等待完成或取消");
+        return;
+    }
+    char slot[192];
+    ota_slot_path(slot, sizeof(slot));
+    struct stat st;
+    if (stat(slot, &st) != 0 || st.st_size == 0) {
+        json_msg(c, 409, "槽内没有升级包,请先上传");
+        return;
+    }
+
+    bool expect = false;
+    if (!atomic_compare_exchange_strong(&s_fw_applying, &expect, true)) {
+        json_msg(c, 409, "提取已在进行中");
+        return;
+    }
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, fw_apply_thread, NULL) != 0) {
+        atomic_store(&s_fw_applying, false);
+        json_msg(c, 500, "提取线程创建失败");
+        return;
+    }
+    pthread_detach(tid);
+    DG_LOGI(TAG, "升级包提取启动(上位机触发)");
+    json_msg(c, 202, "校验提取中,完成后设备将自动升级重启");
+}
+
 /* ---- 静态资源(内嵌前端产物) ---- */
 
 /* 按精确路径查资源表(pages/ 由 gen_pages.sh 生成,见 web_pages.h) */
@@ -1818,6 +2114,9 @@ static const route_t s_routes[] = {
     { "GET",  "/api/access_set",       "门禁设置只接受 GET",    handle_access_set_get },
     { "POST", "/api/access_set",       "门禁设置只接受 POST",   handle_access_set_post },
     { "POST", "/api/system/reboot",    "重启接口只接受 POST",   handle_system_reboot },
+    { "GET",  "/api/ota/fw",           "升级包状态只接受 GET",      handle_ota_fw_get },
+    { "DELETE", "/api/ota/fw",         "升级包删除只接受 DELETE",   handle_ota_fw_delete },
+    { "POST", "/api/ota/fw/apply",     "升级触发只接受 POST",       handle_ota_fw_apply },
 };
 
 /* 分派次序:精确路由 → /api/ws 升级 → 未知 /api/ 回 JSON 404 →
@@ -1881,12 +2180,18 @@ static void http_handler(struct mg_connection *c, int ev, void *ev_data)
         struct mg_http_message *hm = ev_data;
         if (uri_is(hm, "/api/ota/upload") && s_ota_c != c)
             ota_start(c, hm);
+        else if (uri_is(hm, "/api/ota/fw/upload") && s_fw_c != c)
+            fw_start(c, hm);
     } else if (ev == MG_EV_READ) {
         if (c == s_ota_c) {
             ota_feed_from(c);
             /* 环满且客户端数据已到齐(不再有 READ):定时重喂兜底 */
             if (s_ota_c == c && s_ota_remain > 0 && c->recv.len == 0)
                 netcore_post(ota_retry_cb, NULL);
+        } else if (c == s_fw_c) {
+            fw_feed_from(c);
+            if (s_fw_c == c && s_fw_remain > 0 && c->recv.len == 0)
+                netcore_post(fw_retry_cb, NULL);
         }
     } else if (ev == MG_EV_WS_MSG) {
         /* 推送不依赖客户端消息;只需保持连接 */
@@ -1894,6 +2199,10 @@ static void http_handler(struct mg_connection *c, int ev, void *ev_data)
         if (c == s_ota_c) {                  /* 客户端中途断开:保留 .part 供续传 */
             ota_abort();
             s_ota_c = NULL;
+        }
+        if (c == s_fw_c) {
+            ota_abort();
+            s_fw_c = NULL;
         }
         ws_remove(c);
     }
@@ -2185,9 +2494,10 @@ static void web_setup(void *arg)
 static void web_teardown(void *arg)
 {
     (void)arg;
-    if (s_ota_c) {
+    if (s_ota_c || s_fw_c) {
         ota_abort();
         s_ota_c = NULL;
+        s_fw_c = NULL;
     }
     /* is_closing:延迟到本轮 poll 末尾关闭;闭包跑在 poll 的定时器上下文里,
      * 立即 free(mg_close_conn)会让 poll 循环踩已释放内存(板上实测段错误) */
