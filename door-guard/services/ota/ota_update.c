@@ -330,7 +330,6 @@ static void *download_thread(void *arg)
         DG_LOGE(TAG, "ota_begin 失败(%d):升级会话被占用?", rc);
         goto close_src;
     }
-    session_open = true;
 
     for (;;) {
         if (atomic_load(&s_abort_req)) {
