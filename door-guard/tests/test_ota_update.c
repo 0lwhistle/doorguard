@@ -54,21 +54,22 @@ static bool ev_saw(ota_upd_state_t st)
 }
 
 static void wait_state(ota_upd_state_t want, int timeout_ms)
+{
+    for (int i = 0; i < timeout_ms / 5; i++) {
+        ota_upd_status_t st;
+        ota_update_status(&st);
+        if (st.state == want)
+            return;
+        usleep(5000);
+    }
+}
+
 
 /* 事件异步分发(总线线程):终态到位后再等事件落袋,避免 ev_saw 竞态 */
 static void wait_events(int n, int timeout_ms)
 {
     for (int i = 0; i < timeout_ms / 5; i++) {
         if (s_ev_cnt >= n)
-            return;
-        usleep(5000);
-    }
-}
-{
-    for (int i = 0; i < timeout_ms / 5; i++) {
-        ota_upd_status_t st;
-        ota_update_status(&st);
-        if (st.state == want)
             return;
         usleep(5000);
     }
