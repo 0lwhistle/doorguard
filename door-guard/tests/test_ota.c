@@ -201,8 +201,7 @@ int main(void)
 
     /* ---- O6 槽位模式:begin_slot→收包→finish_slot→fw_slot.ota+实算摘要;
      * 与暂存模式互斥(BUSY);finish_slot 对暂存会话显式拒绝 ---- */
-    printf("[O6] slot mode: begin_slot + finish_slot + mutual busy
-");
+    printf("[O6] slot mode: begin_slot + finish_slot + mutual busy\n");
     char slot_path[192], sha_out[65] = "";
     bool slot_resumed = false;
     DG_CHECK(ota_begin_slot(CONTENT_SZ, 0, &slot_resumed) == DG_OK);
