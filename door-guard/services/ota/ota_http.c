@@ -285,7 +285,7 @@ int ota_http_open(void *src, const char *url, uint32_t *content_len)
     s->fd = -1;
     s->l_len = s->l_pos = 0;
 
-    char cur[256];
+    char cur[512];
     snprintf(cur, sizeof(cur), "%s", url);
     for (int hop = 0; hop <= HTTP_MAX_REDIRECT; hop++) {
         char redirect[256] = "";

@@ -35,6 +35,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include <stdio.h>
 #include <string.h>
 
 static const char *TAG = "[OTA-UPD]";
