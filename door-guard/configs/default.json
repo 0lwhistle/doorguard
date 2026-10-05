@@ -44,10 +44,14 @@
     "volume": 80,
     "prompt_dir": "/userdata/doorguard/audio"
   },
+  "device": {
+    "name": "Doorguard"
+  },
   "network": {
     "ntp_server": "ntp.aliyun.com",
     "web_port": 80,
     "ota_url": "",
+    "ota_auto_update": 0,
     "net_mode": "dhcp",
     "net_ip": "",
     "net_mask": "",

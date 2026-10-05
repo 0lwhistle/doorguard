@@ -59,6 +59,16 @@ typedef struct {
 static mqtt_cmd_t s_cmds[MQTT_CMD_MAX];
 static int s_cmd_cnt;
 
+/* 订阅注册表(扩展口):注册线程写、loop 线程读,细粒度互斥;fn 永远在
+ * loop 线程执行。注册过的主题在每次(重)连接成功后统一 SUBSCRIBE */
+typedef struct {
+    char suffix[MQTT_SUB_NAME_MAX];
+    mqtt_sub_fn fn;
+} mqtt_sub_t;
+static mqtt_sub_t s_subs[MQTT_SUB_MAX];
+static int s_sub_cnt;
+static pthread_mutex_t s_subs_mtx = PTHREAD_MUTEX_INITIALIZER;
+
 static bool enabled_now(void)
 {
     return atomic_load(&s_enabled);
@@ -255,6 +265,22 @@ static void mqtt_cb(struct mg_connection *c, int ev, void *ev_data)
         struct mg_mqtt_opts so = { .topic = mg_str(topic), .qos = 1 };
         mg_mqtt_sub(s_conn, &so);
 
+        /* 扩展订阅(注册表快照取到局部,缩短持锁窗口;retained 公告会在
+         * SUBACK 前后送达,消费方自行容忍) */
+        mqtt_sub_t snap[MQTT_SUB_MAX];
+        int n;
+        pthread_mutex_lock(&s_subs_mtx);
+        n = s_sub_cnt;
+        memcpy(snap, s_subs, sizeof(mqtt_sub_t) * (size_t)n);
+        pthread_mutex_unlock(&s_subs_mtx);
+        for (int i = 0; i < n; i++) {
+            char stopic[96];
+            topic_full(stopic, sizeof(stopic), snap[i].suffix);
+            struct mg_mqtt_opts uo = { .topic = mg_str(stopic), .qos = 1 };
+            mg_mqtt_sub(s_conn, &uo);
+            DG_LOGI(TAG, "订阅 %s", stopic);
+        }
+
         pub_now("status", "{\"state\":\"online\"}", true);
         net_info_addr_t a;
         net_info_read(&a);
@@ -268,7 +294,8 @@ static void mqtt_cb(struct mg_connection *c, int ev, void *ev_data)
     } else if (ev == MG_EV_MQTT_MSG) {
         struct mg_mqtt_message *m = (struct mg_mqtt_message *)ev_data;
         s_last_rx_ms = (int64_t)mg_millis();
-        /* 主题形如 <prefix>/cmd/<name>;QoS1 的 PUBACK 由 mongoose 自动回 */
+        /* 主题形如 <prefix>/cmd/<name> 或 <prefix>/<sub 后缀>;QoS1 的
+         * PUBACK 由 mongoose 自动回 */
         char topic[96];
         snprintf(topic, sizeof(topic), "%.*s", (int)m->topic.len, m->topic.buf);
         char cmd_path[48];
@@ -283,6 +310,30 @@ static void mqtt_cb(struct mg_connection *c, int ev, void *ev_data)
             const char *name = topic + strlen(cmd_path);
             DG_LOGI(TAG, "远程命令 %s(%zuB)", name, m->data.len);
             cmd_dispatch(name, payload);
+            return;
+        }
+        /* 扩展订阅分发:精确匹配注册的 <prefix>/<suffix>(retained 公告/
+         * 平台单向推送;超长载荷截断——公告字段有长度上限,截断即坏包,
+         * 消费方解析失败自然丢弃) */
+        mqtt_sub_t snap[MQTT_SUB_MAX];
+        int n;
+        pthread_mutex_lock(&s_subs_mtx);
+        n = s_sub_cnt;
+        memcpy(snap, s_subs, sizeof(mqtt_sub_t) * (size_t)n);
+        pthread_mutex_unlock(&s_subs_mtx);
+        for (int i = 0; i < n; i++) {
+            char full[96];
+            topic_full(full, sizeof(full), snap[i].suffix);
+            if (strcmp(topic, full))
+                continue;
+            char payload[MQTT_SUB_PAYLOAD_MAX];
+            if (m->data.len < sizeof(payload))
+                snprintf(payload, sizeof(payload), "%.*s", (int)m->data.len,
+                         m->data.buf);
+            else
+                payload[0] = '\0';
+            DG_LOGI(TAG, "订阅消息 %s(%zuB)", snap[i].suffix, m->data.len);
+            snap[i].fn(snap[i].suffix, payload);
         }
     } else if (ev == MG_EV_MQTT_CMD) {
         s_last_rx_ms = (int64_t)mg_millis();  /* PUBACK/PINGRESP 等也算活性 */
@@ -543,6 +594,55 @@ int mqtt_cmd_register(const char *name, mqtt_cmd_fn fn)
     snprintf(s_cmds[s_cmd_cnt].name, MQTT_CMD_NAME_MAX, "%s", name);
     s_cmds[s_cmd_cnt].fn = fn;
     s_cmd_cnt++;
+    return DG_OK;
+}
+
+/* loop 线程:把注册表里的扩展订阅补发一遍(已在订阅的主题重复 SUBSCRIBE
+ * 无害,broker 侧幂等;比增量记账简单且覆盖「注册即断线重连」的窗口) */
+static void subs_apply(void *arg)
+{
+    (void)arg;
+    if (!s_conn || !atomic_load(&s_connected))
+        return;
+    mqtt_sub_t snap[MQTT_SUB_MAX];
+    int n;
+    pthread_mutex_lock(&s_subs_mtx);
+    n = s_sub_cnt;
+    memcpy(snap, s_subs, sizeof(mqtt_sub_t) * (size_t)n);
+    pthread_mutex_unlock(&s_subs_mtx);
+    for (int i = 0; i < n; i++) {
+        char topic[96];
+        topic_full(topic, sizeof(topic), snap[i].suffix);
+        struct mg_mqtt_opts so = { .topic = mg_str(topic), .qos = 1 };
+        mg_mqtt_sub(s_conn, &so);
+        DG_LOGI(TAG, "订阅 %s", topic);
+    }
+}
+
+int mqtt_sub_register(const char *suffix, mqtt_sub_fn fn)
+{
+    if (!suffix || !fn || !suffix[0] || strlen(suffix) >= MQTT_SUB_NAME_MAX)
+        return DG_ERR_PARAM;
+
+    pthread_mutex_lock(&s_subs_mtx);
+    for (int i = 0; i < s_sub_cnt; i++) {
+        if (!strcmp(s_subs[i].suffix, suffix)) {
+            pthread_mutex_unlock(&s_subs_mtx);
+            return DG_ERR_PARAM;              /* 重名:同一主题不可双消费 */
+        }
+    }
+    if (s_sub_cnt >= MQTT_SUB_MAX) {
+        pthread_mutex_unlock(&s_subs_mtx);
+        return DG_ERR_NO_MEMORY;
+    }
+    snprintf(s_subs[s_sub_cnt].suffix, MQTT_SUB_NAME_MAX, "%s", suffix);
+    s_subs[s_sub_cnt].fn = fn;
+    s_sub_cnt++;
+    pthread_mutex_unlock(&s_subs_mtx);
+
+    /* 已连接则立即补发;未连接等 OPEN 路径统一订阅。netcore 已停时 post
+     * 静默丢弃(进程退出路径无害,与 stop 注释同约定) */
+    netcore_post(subs_apply, NULL);
     return DG_OK;
 }
 

@@ -156,6 +156,18 @@ static int cmd_echo(const char *payload, char *resp, size_t resp_cap)
     return DG_OK;
 }
 
+/* 扩展订阅捕获(mqtt_sub_fn 契约:loop 线程,纯接收无应答) */
+static atomic_int s_sub_hit;
+static char s_sub_topic[32];
+static char s_sub_payload[128];
+
+static void sub_capture(const char *topic_suffix, const char *payload)
+{
+    snprintf(s_sub_topic, sizeof(s_sub_topic), "%s", topic_suffix);
+    snprintf(s_sub_payload, sizeof(s_sub_payload), "%s", payload);
+    atomic_fetch_add(&s_sub_hit, 1);
+}
+
 static void t_disabled(void)
 {
     printf("[M1] 未启用:start 空转,不建连接\n");
@@ -171,6 +183,8 @@ static void t_enabled(void)
 {
     printf("[M2] 连接握手:CONNECT + 订阅 cmd/+ + status retain 上线\n");
     cfg_write(true, s_port);    DG_CHECK(mqtt_cmd_register("echo", cmd_echo) == DG_OK);
+    DG_CHECK(mqtt_sub_register("ota/version", sub_capture) == DG_OK);
+    DG_CHECK(mqtt_sub_register("ota/version", sub_capture) == DG_ERR_PARAM); /* 重名拒 */
     DG_CHECK(mqtt_cmd_register("ping", cmd_echo) == DG_ERR_PARAM);  /* 重名拒 */
     DG_CHECK(mqtt_service_start() == DG_OK);
 
@@ -181,7 +195,7 @@ static void t_enabled(void)
     br_pump(300);
     DG_CHECK(mqtt_service_connected() == true);
     DG_CHECK(atomic_load(&s_br_connects) == 1);
-    DG_CHECK(atomic_load(&s_br_subscribes) == 1);
+    DG_CHECK(atomic_load(&s_br_subscribes) == 2);   /* cmd/+ + ota/version 扩展订阅 */
     const br_pub_t *st = br_find("dgtest/status");
     DG_CHECK(st != NULL && strcmp(st->payload, "{\"state\":\"online\"}") == 0);
     DG_CHECK(st != NULL && st->retain == true);              /* retain 上线态 */
@@ -234,6 +248,16 @@ static void t_enabled(void)
     rsp = br_find("dgtest/event/auth");
     DG_CHECK(rsp != NULL && strstr(rsp->payload, "\"ok\":true") != NULL);
     DG_CHECK(rsp != NULL && strstr(rsp->payload, "张\'三") != NULL); /* 引号净化 */
+
+    printf("[M4b] 扩展订阅 ota/version:平台推送直达处理器"); putchar(10);
+    atomic_store(&s_br_pub_cnt, 0);
+    br_pub("dgtest/ota/version", "{\"version\":\"1.2.3\"}");
+    br_pump(300);
+    usleep(50 * 1000);
+    br_pump(300);
+    DG_CHECK(atomic_load(&s_sub_hit) == 1);
+    DG_CHECK(strcmp(s_sub_topic, "ota/version") == 0);
+    DG_CHECK(strstr(s_sub_payload, "1.2.3") != NULL);
 
     printf("[M6] 停服:offline retain 告别\n");
     atomic_store(&s_br_pub_cnt, 0);

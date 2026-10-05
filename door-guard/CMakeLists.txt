@@ -204,6 +204,7 @@ add_library(dg_ui STATIC
     ui/pages/page_face_set.c
     ui/pages/page_finger_set.c
     ui/pages/page_display_set.c
+    ui/pages/page_about.c
     ui/presenters/presenter_home.c
     ui/presenters/presenter_standby.c
     ui/presenters/presenter_menu.c
@@ -218,6 +219,7 @@ add_library(dg_ui STATIC
     ui/presenters/presenter_face_set.c
     ui/presenters/presenter_finger_set.c
     ui/presenters/presenter_display_set.c
+    ui/presenters/presenter_about.c
     ui/ui_events.c
     ui/font/dg_font_cn_16.c
     ui/font/dg_font_cn_26.c
@@ -226,7 +228,8 @@ add_library(dg_ui STATIC
     ui/font/dg_font_clock.c
     ${DG_WIDGET_SRCS}
 )
-target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DIR}/services/access
+target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DIR}/services
+                                        ${CMAKE_SOURCE_DIR}/services/access
                                         ${CMAKE_SOURCE_DIR}/services/enroll
                                         ${CMAKE_SOURCE_DIR}/services/capture)
 target_link_libraries(dg_ui PUBLIC lvgl dg_config dg_access dg_storage dg_jpeg
@@ -366,6 +369,8 @@ add_library(dg_net STATIC
     services/web/web_auth.c
     services/web/web_session.c
     services/ota/ota_service.c
+    services/ota/ota_update.c
+    services/ota/ota_http.c
     services/ntp/ntp_service.c
     services/mqtt/mqtt_service.c
     services/mdns/mdns_responder.c
@@ -389,7 +394,10 @@ execute_process(
 if(NOT DG_GIT_DESC)
     set(DG_GIT_DESC "unknown")
 endif()
-target_compile_definitions(dg_net PUBLIC DG_FW_VERSION="${DG_GIT_DESC}")
+string(TIMESTAMP DG_BUILD_DATE "%Y-%m-%d %H:%M")
+# 全局注入(dg_net/web + dg_ui 关于设备页共用;板上与 sim 的构建机时钟即
+# 「构建日期」,作为关于设备页的版本附带信息)
+add_compile_definitions(DG_FW_VERSION="${DG_GIT_DESC}" DG_BUILD_DATE="${DG_BUILD_DATE}")
 
 # sysctl:系统控制(设备重启;UI/web 经 EV_SYS_REBOOT 请求,服务统一执行。
 # 宿主构建注入 DG_SYSCTL_FAKE=sim/ctest 只模拟重启,不真执行)
@@ -497,6 +505,13 @@ if(NOT DG_SIM)
                                            dg_liveness dg_npu dg_rknn_face)
 endif()
 
+# alarm:远程报警上报(类型/详情 → <prefix>/event/alarm;触发源待业务
+# 接入,接口先立)。依赖 mqtt 通道(dg_net),测试经 sink 注入脱离 mqtt
+add_library(dg_alarm STATIC services/alarm/alarm_service.c)
+target_include_directories(dg_alarm PUBLIC ${CMAKE_SOURCE_DIR}/services/alarm
+                                            ${CMAKE_SOURCE_DIR}/services/mqtt)
+target_link_libraries(dg_alarm PUBLIC dg_net dg_proto dg_log dg_timeutil)
+
 # ---- 应用(交叉编译产物,dg-deploy 推板) ----
 # ROCKIVA 的头与库都取自 sysroot(与板上 .so 同源):
 #   ${CMAKE_SYSROOT}/usr/include/rockiva、${CMAKE_SYSROOT}/usr/lib/librockiva.so
@@ -512,7 +527,7 @@ target_link_libraries(door-guard PRIVATE
     -Wl,--start-group
     dg_event_bus dg_tasker dg_holder dg_registry dg_proto dg_storage dg_config
     lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_relay dg_timeutil dg_uart dg_net dg_sysctl dg_display dg_camera dg_audio
-    dg_fp dg_card dg_iccard
+    dg_fp dg_card dg_iccard dg_alarm
     -Wl,--end-group)
 
 if(DG_SIM)

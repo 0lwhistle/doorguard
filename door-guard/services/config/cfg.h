@@ -68,7 +68,9 @@ typedef struct {
     /* 网络(spec-network) */
     int  web_port;             /**< web 上位机端口(含 OTA 上传端点),默认 80;PC 模拟器等非 root 绑定失败自动回退 8080 */
     char ntp_server[64];       /**< 默认 ntp.aliyun.com(国内部署实测可用) */
-    char ota_url[128];         /**< OTA 升级包源地址,可空 */
+    char ota_url[128];         /**< OTA 升级包源地址,可空;公告无 url 时作下载回落 */
+    int  ota_auto_update;      /**< 0/1:MQTT 检到新版本是否自动下载升级(关于设备页可切),默认 0 */
+    char device_name[32];      /**< 设备名称(关于设备页/web 展示),默认 Doorguard */
     char net_mode[8];          /**< 接口地址来源:"dhcp"(默认)/"static";应用在 modules/net/net_cfg */
     char net_ip[16];           /**< 静态 IP(net_mode=static 时生效),点分十进制 */
     char net_mask[16];         /**< 静态子网掩码,点分十进制 */

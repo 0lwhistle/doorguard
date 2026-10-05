@@ -22,6 +22,44 @@
    四项验收:真卡开门/按住只开一次/重复卡录入被拒/拔模块降级提示。
 
 ---
+## 2026-10-05(日)MQTT OTA 框架 + 远程报警出口 + 关于设备页——IC 链路核查完毕
+
+1. **IC 卡模块核查(用户前置任务)**:应用层全链在且完整——drv/iccard HAL
+   (含 sim 后端)→ card_provider(poll→HEX→防重窗→EV_IC_CARD)→ access
+   FSM 普通开门/1:1 分支 → enroll 设备刷卡+web ic_set 双入口 → user_edit
+   IC 行/方式位;测试 test_iccard_proto/card_dedup/fsm_ic/enroll_ic 四件齐。
+   差口只在驱动侧(/dev/dg_iccard0 的 .ko 未就绪,ko 缺位时 provider 降级),
+   应用层无需再动。
+2. **MQTT OTA(services/ota/ota_update 新服务)**:MQTT 控制面 + HTTP 直链
+   载荷面。平台 retain `ota/version` 公告(version/date/url/sha256/size/
+   notes)→ 版本比较(点分前缀,git describe 后缀忽略,发版须递增 tag)→
+   自动开(cfg ota_auto_update)立即下载 / 自动关等用户。下载 worker 线程
+   走 ota_service 流水线(sha256/大小预检/单会话 BUSY),ota_finish 校验
+   闭环止步,S60 ota_watch 装槽/切换/回滚——与 web 上传同一暂存面。
+   手动检查 = 发 `ota/query`,平台重发 retain 公告作答。新 ota_http.c:
+   raw socket GET(5s 连接/15s IO 超时、跟随 3 次重定向、https/chunked
+   显式拒绝、Content-Length 必须)。进度双发:EV_NET_OTA_UPDATE + ota/state。
+3. **mqtt 通道扩展**:mqtt_sub_register(suffix, fn)——非 cmd 的平台单向
+   推送订阅口(上限 4;OPEN 统一 SUBSCRIBE + 已连接注册立即补订;retained
+   公告消费方容忍重复)。主题表新增 ota/version、ota/query、ota/state、
+   event/alarm。
+4. **远程报警出口(services/alarm)**:alarm_report(type, detail) →
+   `<p>/event/alarm` + 本地日志;五类型(防拆/强开/胁迫/离线/自定义),
+   触发源待硬件接入,出口先收口;测试经 sink 注入。
+5. **关于设备页**(设备管理 → 关于设备):设备名称(cfg device.name)/
+   固件版本(DG_FW_VERSION)/构建日期(DG_BUILD_DATE,CMake 全局注入)+
+   最新版本/发布日期/更新说明/状态行;检查更新(mqtt 在线才可点)/
+   自动更新开关(cfg 持久化)/立即更新(仅 AVAILABLE 且自动关时出现);
+   STAGED 弹「校验通过即将升级重启」(S60 2s 内接手)。NAV_MAX_PAGES 13→14。
+6. **事件/UI 桥**:EV_NET_OTA_UPDATE(NET 0x000C)+ bridge 23 订阅;
+   UI_EVT_OTA_STATUS/UI_EVT_MQTT_STATE 经事件泵到页。
+7. **测试**:test_ota_update(版本比较表/公告解析/手动全流/坏 sha/大小
+   对拍/缺 url/慢源 BUSY,传输注入零网络依赖)、test_alarm(字段口径/
+   净化/透传)、test_mqtt 增 [M4b] 扩展订阅往返(订阅计数 1→2)。i18n
+   26 新键双表。引 dg_ui 的三个测试补链 dg_net(page_about 调 ota 符号)。
+8. **平台侧待办**(部署时):broker 订阅 ota/query 重发 retain 公告;固件
+   包放定长直链(http);用户云服务器 HA 部署方案待定。
+
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 ---
 ## 2026-10-04(三)三项体验修复:头像集中失效/用户列表合一/待机大字挂钟——46/46 绿,已推板 B 槽(da812e0)

@@ -37,6 +37,8 @@
 #include "net/netcore.h"
 #include "net/net_cfg.h"
 #include "ntp/ntp_service.h"
+#include "ota/ota_update.h"
+#include "alarm/alarm_service.h"
 #include "registry.h"
 #include "relay.h"
 #include "sysctl/sysctl_service.h"
@@ -254,6 +256,19 @@ static int mod_mqtt(void)
     return mqtt_service_start();
 }
 
+/* MQTT OTA 升级编排(2026-10-05):公告评估/下载/校验/暂存交接,只到
+ * 校验闭环为止(装槽/切换/回滚在 S60 ota_watch)。mqtt 未启用时空转 */
+static int mod_ota_update(void)
+{
+    return ota_update_start();
+}
+
+/* 远程报警上报(2026-10-05):触发源待硬件/业务接入,出口先行收口 */
+static int mod_alarm(void)
+{
+    return alarm_service_start();
+}
+
 /* 网络配置装配:cfg 记的是静态地址则开机应用一次(DHCP 交给 S41dhcpcd)。
  * 阻塞数百 ms(dhcpcd 交互)发生在装配期,业务尚未起来,无影响 */
 static int mod_net_cfg(void)
@@ -279,6 +294,7 @@ static const char *const DEP_TASKER_ONLY[] = { "tasker" };
 static const char *const DEP_WEB[]       = { "config", "netcore" };
 static const char *const DEP_MDNS[]      = { "config", "netcore" };
 static const char *const DEP_MQTT[]      = { "config", "netcore" };
+static const char *const DEP_OTA_UPDATE[] = { "config", "mqtt" };
 
 /* 跨表依赖解析:服务依赖的 modules 在 holder 表(装配层桥接,registry 保持通用) */
 static int dep_ready(const char *name)
@@ -320,6 +336,8 @@ static registry_err_t register_services(void)
         { "mdns",           mod_mdns,           false, DEP_MDNS,        2, NULL },
         { "mqtt",           mod_mqtt,           false, DEP_MQTT,        2,
           mqtt_service_heartbeat_ms },
+        { "ota_update",     mod_ota_update,     false, DEP_OTA_UPDATE,  2, NULL },
+        { "alarm",          mod_alarm,          false, DEP_OTA_UPDATE,  2, NULL },
         /* ui 依赖 display:display 由 ui_init 内部初始化(无独立模块),
          * 故此处只声明 config(语言/主题取 cfg) */
         { "ui",             mod_ui,             false, DEP_CONFIG,      1, NULL },

@@ -152,14 +152,14 @@ if(DG_USE_LVGL9)
 else()
     target_include_directories(test_i18n PRIVATE ${CMAKE_SOURCE_DIR}/third_party/lvgl)
 endif()
-target_link_libraries(test_i18n PRIVATE lvgl dg_ui cjson)
+target_link_libraries(test_i18n PRIVATE lvgl dg_ui dg_net cjson)
 add_test(NAME test_i18n COMMAND test_i18n)
 set_tests_properties(test_i18n PROPERTIES TIMEOUT 60)
 
 # widget 冒烟:无头 LVGL 下真实 widget 创建/交互/弹窗生命周期
 add_executable(test_widgets test_widgets.c)
 target_compile_definitions(test_widgets PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-target_link_libraries(test_widgets PRIVATE lvgl dg_ui)
+target_link_libraries(test_widgets PRIVATE lvgl dg_ui dg_net)
 add_test(NAME test_widgets COMMAND test_widgets)
 set_tests_properties(test_widgets PROPERTIES TIMEOUT 60)
 
@@ -188,12 +188,12 @@ if(DG_USE_LVGL9)
         ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
         ${CMAKE_SOURCE_DIR}/third_party/lvgl9)
     # dg_ui:lv_conf9 的 LV_FONT_DEFAULT=dg_font_cn_16,lvgl 核心引用该符号
-    target_link_libraries(test_touch_evdev PRIVATE lvgl dg_ui dg_log)
+    target_link_libraries(test_touch_evdev PRIVATE lvgl dg_ui dg_net dg_log)
 else()
     target_include_directories(test_touch_evdev PRIVATE
         ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
         ${CMAKE_SOURCE_DIR}/third_party/lvgl)
-    target_link_libraries(test_touch_evdev PRIVATE lvgl dg_ui dg_log)
+    target_link_libraries(test_touch_evdev PRIVATE lvgl dg_ui dg_net dg_log)
 endif()
 add_test(NAME test_touch_evdev COMMAND test_touch_evdev)
 set_tests_properties(test_touch_evdev PROPERTIES TIMEOUT 60)
@@ -211,3 +211,10 @@ set_tests_properties(test_audio PROPERTIES TIMEOUT 60)
 # MQTT 通道(2026-10-04:测试内最小 broker,握手/命令/上报往返)
 dg_add_test(test_mqtt dg_net dg_config dg_event_bus)
 set_tests_properties(test_mqtt PROPERTIES TIMEOUT 60)
+
+# MQTT OTA 升级编排(公告解析/版本比较/下载状态机;传输注入,零网络依赖)
+dg_add_test(test_ota_update dg_net dg_config dg_event_bus crypto pthread)
+set_tests_properties(test_ota_update PROPERTIES TIMEOUT 120)
+# 远程报警上报(sink 注入;类型/字段口径/净化)
+dg_add_test(test_alarm dg_alarm)
+set_tests_properties(test_alarm PROPERTIES TIMEOUT 60)

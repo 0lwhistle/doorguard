@@ -61,6 +61,8 @@ static const cfg_meta_t META[] = {
     { "ntp_server",           "network.ntp_server",       CK_STR,    0,    63 },
     { "web_port",             "network.web_port",         CK_INT, 1024, 65535 },
     { "ota_url",              "network.ota_url",          CK_STR,    0,   127 },
+    { "ota_auto_update",      "network.ota_auto_update",  CK_INT,    0,     1 },
+    { "device_name",          "device.name",              CK_STR,    0,    31 },
     { "net_mode",             "network.net_mode",         CK_STR,    0,     7 },
     { "net_ip",               "network.net_ip",           CK_STR,    0,    15 },
     { "net_mask",             "network.net_mask",         CK_STR,    0,    15 },
@@ -266,6 +268,8 @@ static void defaults_apply(dg_cfg_t *c)
     c->web_port = 80;    /* 2026-09-27 起默认 80:URL 免带端口;非 root 回退 8080 */
     snprintf(c->ntp_server, sizeof(c->ntp_server), "ntp.aliyun.com");
     c->ota_url[0] = '\0';
+    c->ota_auto_update = 0;              /* 自动升级默认关:升级是重大动作,部署侧显式开 */
+    snprintf(c->device_name, sizeof(c->device_name), "Doorguard");
     snprintf(c->net_mode, sizeof(c->net_mode), "dhcp");
     c->net_ip[0] = '\0';
     c->net_mask[0] = '\0';
@@ -310,6 +314,7 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "brightness"))           cur = c->brightness;
         else if (!strcmp(m->key, "lost_hold_ms"))         cur = c->face_lost_hold_ms;
         else if (!strcmp(m->key, "web_port"))             cur = c->web_port;
+        else if (!strcmp(m->key, "ota_auto_update"))      cur = c->ota_auto_update;
         else return;
         v = clamp_int(v, m->lo, m->hi, cur, m->key);
         if (!strcmp(m->key, "door_open_ms"))              c->door_open_ms = v;
@@ -320,6 +325,7 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "brightness"))           c->brightness = v;
         else if (!strcmp(m->key, "lost_hold_ms"))         c->face_lost_hold_ms = v;
         else if (!strcmp(m->key, "web_port"))             c->web_port = v;
+        else if (!strcmp(m->key, "ota_auto_update"))      c->ota_auto_update = v;
     } else if (m->kind == CK_DBL) {
         if (!cJSON_IsNumber(item))
             return;
@@ -351,6 +357,8 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
             copy_cstr(c->ntp_server, sizeof(c->ntp_server), item->valuestring);
         else if (!strcmp(m->key, "ota_url"))
             copy_cstr(c->ota_url, sizeof(c->ota_url), item->valuestring);
+        else if (!strcmp(m->key, "device_name"))
+            copy_cstr(c->device_name, sizeof(c->device_name), item->valuestring);
         else if (!strcmp(m->key, "net_mode"))
             copy_cstr(c->net_mode, sizeof(c->net_mode), item->valuestring);
         else if (!strcmp(m->key, "net_ip"))

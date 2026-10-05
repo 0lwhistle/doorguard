@@ -221,6 +221,30 @@ static int on_net_cfg_result(const event_t *e, void *ud)
     return 0;
 }
 
+/* OTA 升级状态机一拍 → 关于设备页(新版本/进度/暂存终态) */
+static int on_ota_update(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_OTA_STATUS;
+    evt.ota = *(const ev_ota_update_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
+/* broker 连接状态 → 关于设备页(检查更新按钮可用性) */
+static int on_mqtt_state(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_MQTT_STATE;
+    evt.mqtt_state = *(const ev_mqtt_state_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
 /* 相机断流(capture)→ 主页/拍摄页:提示「摄像头未就绪」+ 预览清半透明白 */
 static int on_capture_state(const event_t *e, void *ud)
 {
@@ -278,7 +302,9 @@ void bridge_init(void)
     event_bus_subscribe(EV_NET_CFG_RESULT, on_net_cfg_result, NULL);
     event_bus_subscribe(EV_CAPTURE_STATE, on_capture_state, NULL);
     event_bus_subscribe(EV_SYS_SERVICE_STATE, on_service_state, NULL);
-    DG_LOGI("[BRIDGE]", "事件桥就绪(21 订阅)");
+    event_bus_subscribe(EV_NET_OTA_UPDATE, on_ota_update, NULL);
+    event_bus_subscribe(EV_MQTT_STATE, on_mqtt_state, NULL);
+    DG_LOGI("[BRIDGE]", "事件桥就绪(23 订阅)");
 }
 
 void bridge_btn(const ev_ui_btn_t *btn)

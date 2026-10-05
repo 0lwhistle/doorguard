@@ -162,6 +162,13 @@ static void on_web(lv_event_t *e)
     navigator_push("web_set");
 }
 
+/* 关于设备:名称/版本/构建日期 + 检查更新/自动更新(MQTT OTA,2026-10-05) */
+static void on_about(lv_event_t *e)
+{
+    (void)e;
+    navigator_push("about");
+}
+
 /* 重启设备:红色确认(spec 删除类同规范)→ EV_SYS_REBOOT(sysctl 服务
  * 延迟执行,延迟窗口让本提示先落地) */
 static void apply_reboot(void *ud, int idx)
@@ -251,12 +258,18 @@ void page_device_create(lv_obj_t *parent)
     lv_obj_align(menuto, LV_ALIGN_TOP_MID, 0, 180 + 7 * (DG_BTN_H + DG_PAD));
     lv_obj_add_event_cb(menuto, on_menu_timeout, LV_EVENT_CLICKED, NULL);
 
-    /* 重启设备(2026-09-27):破坏性操作=红色;web 同款能力走
+    /* 关于设备(2026-10-05):设备信息 + MQTT OTA 检查/自动更新 */
+    lv_obj_t *about = dg_btn_create(parent, LV_SYMBOL_LIST, _("关于设备"));
+    lv_obj_set_size(about, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
+    lv_obj_align(about, LV_ALIGN_TOP_MID, 0, 180 + 8 * (DG_BTN_H + DG_PAD));
+    lv_obj_add_event_cb(about, on_about, LV_EVENT_CLICKED, NULL);
+
+    /* 重启设备(2026-09-27):破坏性操作=红色垫底;web 同款能力走
      * POST /api/system/reboot(同一 EV_SYS_REBOOT 入口) */
     lv_obj_t *reboot = dg_btn_create_danger(parent, LV_SYMBOL_REFRESH,
                                             _("重启设备"));
     lv_obj_set_size(reboot, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
-    lv_obj_align(reboot, LV_ALIGN_TOP_MID, 0, 180 + 8 * (DG_BTN_H + DG_PAD));
+    lv_obj_align(reboot, LV_ALIGN_TOP_MID, 0, 180 + 9 * (DG_BTN_H + DG_PAD));
     lv_obj_add_event_cb(reboot, on_reboot, LV_EVENT_CLICKED, NULL);
 
     /* 按钮内追加「当前值」label(与门禁设置页同款手法:btn>row>label) */

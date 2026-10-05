@@ -169,3 +169,21 @@ chrony 是持续 slew,SNTP 是一次步进,门禁场景接受步进(时间回拨
   (3×keepalive 无入包强制重连);停服主动发 offline retain 告别
 - 测试:`tests/test_mqtt.c`(宿主,测试内起最小 broker:握手/命令往返/
   上报/净化/停服告别全覆盖)
+
+### 5.1 MQTT OTA(2026-10-05,services/ota/ota_update)
+
+- 控制面在 MQTT,固件本体走 HTTP 直链(公告携带 url;https/chunked 显式
+  拒绝,须定长直链)。主题契约见 services/ota/README.md:`ota/version`
+  retain 公告 / `ota/query` 手动检查 / `ota/state` 状态可见性
+- 通道侧新扩展口 `mqtt_sub_register(suffix, fn)`(非 cmd 的平台单向推送;
+  重连后统一补订,retained 消息消费方容忍重复)
+- 交接边界:ota_finish 校验闭环即止,S60 ota_watch 装非活动槽+原子切换+
+  秒退回滚——与 web 上传(dg-ota-upload)同一暂存面
+- UI:设备管理 → 关于设备(名称/版本/构建日期/最新版本/发布日期/说明;
+  检查更新=MQTT 在线才可点;自动更新=cfg `network.ota_auto_update`;
+  立即更新仅 AVAILABLE 且自动关时出现)
+- 版本比较:点分数字前缀逐段(v 前缀/第 3 段后缀忽略)——**发版须递增
+  tag 或纯 x.y.z**,git describe 的 -N-gxxx 增量不参与比较
+- 测试:`tests/test_ota_update.c`(传输注入零网络依赖)+ `test_alarm.c`
+  (远程报警上报,`<p>/event/alarm`,触发源待接入但出口已收口)
+

@@ -93,6 +93,7 @@ typedef struct {
 #define EV_NET_ADDR          EV_DEF(DG_MODULE_ID_NET, 0x0009)    /**< 主接口地址变化(DHCP 续租/应用静态配置) */
 #define EV_NET_CFG_SET       EV_DEF(DG_MODULE_ID_NET, 0x000A)    /**< UI→net:应用网络配置(设备端屏幕设置) */
 #define EV_NET_CFG_RESULT    EV_DEF(DG_MODULE_ID_NET, 0x000B)    /**< net→UI:网络配置应用结果 */
+#define EV_NET_OTA_UPDATE    EV_DEF(DG_MODULE_ID_NET, 0x000C)    /**< OTA 升级状态机(公告评估/下载进度/暂存终态;services/ota/ota_update) */
 
 /* HAL:硬件事件(HAL → 服务)。IC 已激活(2026-10-01 card_provider 落地);
  * 指纹状态/门磁链路尚未接入,契约保留待硬件接入 */
@@ -295,6 +296,17 @@ typedef struct {
     int32_t err;                          /**< 失败时 dg_err_t */
     char    ip[16];                       /**< 应用后的实际地址(展示/核对) */
 } ev_net_cfg_result_t;
+
+/** EV_NET_OTA_UPDATE:OTA 升级状态机一拍(公告评估/进度/终态统一走本事件;
+ * UI 关于设备页主消费方,平台侧可见性走 mqtt ota/state 上报) */
+typedef struct {
+    uint8_t  state;                       /**< ota_upd_state_t(services/ota) */
+    int32_t  err;                         /**< FAILED 时 dg_err_t,其余 DG_OK */
+    uint32_t permille;                    /**< DOWNLOADING 进度 0~1000 */
+    char     version[32];                 /**< 可用/在装版本(IDLE/QUERYING 空) */
+    char     date[16];                    /**< 发布日期(公告携带,YYYY-MM-DD) */
+    char     notes[128];                  /**< 更新说明(公告携带) */
+} ev_ota_update_t;
 
 /** EV_NET_OTA_PROGRESS */
 typedef struct {
@@ -525,6 +537,7 @@ _Static_assert(sizeof(ev_net_addr_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_addr_t
 _Static_assert(sizeof(ev_net_cfg_set_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_cfg_set_t 超限");
 _Static_assert(sizeof(ev_net_cfg_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_cfg_result_t 超限");
 _Static_assert(sizeof(ev_ota_progress_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ota_progress_t 超限");
+_Static_assert(sizeof(ev_ota_update_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ota_update_t 超限");
 _Static_assert(sizeof(ev_web_set_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_set_t 超限");
 _Static_assert(sizeof(ev_web_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_state_t 超限");
 _Static_assert(sizeof(ev_web_set_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_set_result_t 超限");

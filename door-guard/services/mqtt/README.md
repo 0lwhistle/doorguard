@@ -31,6 +31,10 @@
 | `<p>/event/service` | 设备→平台 | 看门狗处置/服务降级 |
 | `<p>/cmd/+` | 平台→设备 | 命令入口(QoS1);内置 `ping` / `status` / `open` |
 | `<p>/rsp/<name>` | 设备→平台 | 应答 `{"ok":true,...}` 或 `{"ok":false,"err":"..."}` |
+| `<p>/ota/version` | 平台→设备 | retain 公告最新固件(OTA 消费,见 services/ota/README) |
+| `<p>/ota/query` | 设备→平台 | 手动「检查更新」请求,平台以重发上面的 retain 公告作答 |
+| `<p>/ota/state` | 设备→平台 | 下载/暂存/失败状态可见性上报(宁丢不堵) |
+| `<p>/event/alarm` | 设备→平台 | 远程报警(services/alarm) |
 
 ## 扩展接口(后续功能开发挂载点)
 
@@ -48,6 +52,11 @@ static int cmd_snap(const char *payload, char *resp, size_t cap) {
 mqtt_cmd_register("snap", cmd_snap);   /* 启动期调用;在 loop 线程执行,禁阻塞 */
 
 /* 3. 事件式消费(不便注册回调时):订阅 proto EV_MQTT_CMD */
+
+/* 4. 订阅平台单向推送(2026-10-05 增):注册 <p>/<suffix>,fn 在 loop
+ *    线程执行;连接前注册 OPEN 时统一 SUBSCRIBE,连接后注册立即补订。
+ *    OTA 版本公告走此口(不用 cmd:公告无需应答) */
+mqtt_sub_register("ota/version", on_version_msg);
 ```
 
 `cmd/open` 特殊:默认拒绝;`allow_remote_open=true` 时也只发布 EV_MQTT_CMD,

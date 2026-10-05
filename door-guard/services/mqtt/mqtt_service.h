@@ -16,7 +16,9 @@
  *   1. mqtt_publish_json(suffix, json, retain) —— 任意业务侧上报;
  *   2. mqtt_cmd_register(name, fn) —— 注册 <prefix>/cmd/<name> 处理器,
  *      fn 在 netcore loop 线程执行,返回 dg_err_t,应答自动回 rsp/<name>;
- *   3. EV_MQTT_CMD(proto/events.h)—— 不便注册回调的场景按事件消费。
+ *   3. EV_MQTT_CMD(proto/events.h)—— 不便注册回调的场景按事件消费;
+ *   4. mqtt_sub_register(suffix, fn) —— 订阅 <prefix>/<suffix> 平台单向
+ *      推送(如 OTA 版本公告 <prefix>/ota/version),fn 在 loop 线程执行。
  *
  * 线程契约:所有 mg_* 调用都在 netcore loop 线程(经 netcore_post 进入);
  * 业务线程只调本头文件 API(内部邮箱投递,永不阻塞)。
@@ -57,6 +59,20 @@ typedef int (*mqtt_cmd_fn)(const char *payload, char *resp, size_t resp_cap);
 /** 注册 <prefix>/cmd/<name> 命令处理器(启动期调用;name ≤15 字符,
  *  上限 8 个,满/重名返回 DG_ERR_PARAM) */
 int mqtt_cmd_register(const char *name, mqtt_cmd_fn fn);
+
+/** 订阅消息处理器:订阅 <prefix>/<suffix> 主题(payload = 消息原文,
+ *  ≤MQTT_SUB_PAYLOAD_MAX;fn 在 netcore loop 线程执行,禁止阻塞)。
+ *  与 cmd/+ 的差异:cmd 有自动应答契约,订阅是纯接收——OTA 版本公告
+ *  等平台单向推送走这里。启动期或连接建立前后均可注册:连接前注册在
+ *  OPEN 时统一 SUBSCRIBE,连接后注册立即补发 SUBSCRIBE(本服务保证
+ *  注册过的主题在每次(重)连接成功后都处于订阅态)。retained 消息
+ *  会在 SUBACK 前后送达,fn 需自行容忍重复。 */
+typedef void (*mqtt_sub_fn)(const char *topic_suffix, const char *payload);
+#define MQTT_SUB_NAME_MAX 24
+#define MQTT_SUB_PAYLOAD_MAX 512
+#define MQTT_SUB_MAX 4
+
+int mqtt_sub_register(const char *suffix, mqtt_sub_fn fn);
 
 /** 看门狗心跳(loop 活性;未启用返回 0 = 不判失联) */
 int64_t mqtt_service_heartbeat_ms(void);
