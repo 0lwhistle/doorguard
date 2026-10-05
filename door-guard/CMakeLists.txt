@@ -508,7 +508,7 @@ endif()
 # alarm:远程报警上报(类型/详情 → <prefix>/event/alarm;触发源待业务
 # 接入,接口先立)。依赖 mqtt 通道(dg_net),测试经 sink 注入脱离 mqtt
 add_library(dg_alarm STATIC services/alarm/alarm_service.c)
-target_include_directories(dg_alarm PUBLIC ${CMAKE_SOURCE_DIR}/services/alarm
+target_include_directories(dg_alarm PUBLIC ${CMAKE_SOURCE_DIR}/services
                                             ${CMAKE_SOURCE_DIR}/services/mqtt)
 target_link_libraries(dg_alarm PUBLIC dg_net dg_proto dg_log dg_timeutil)
 
