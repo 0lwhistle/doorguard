@@ -94,50 +94,54 @@ async function onReboot() {
 </script>
 
 <template>
-  <AppCard title="设备概览" span2 :index="0">
-    <template #actions>
-      <AppButton variant="ghost" size="sm" icon="refresh" @click="refreshQuiet">刷新</AppButton>
+  <div class="page-grid">
+
+    <AppCard title="设备概览" span2 :index="0">
+      <template #actions>
+        <AppButton variant="ghost" size="sm" icon="refresh" @click="refreshQuiet">刷新</AppButton>
+        <AppButton
+          variant="warn"
+          size="sm"
+          icon="warn"
+          :loading="rebootBusy"
+          @click="onReboot"
+        >
+          重启设备
+        </AppButton>
+      </template>
+      <StatGrid :items="statItems" />
+    </AppCard>
+
+    <AppCard title="网络配置" :index="1">
+      <NetworkCard
+        :info="device.network"
+        :pending="netBusy"
+        @apply="onApplyNetwork"
+        @refresh="refreshNetwork"
+      />
+    </AppCard>
+
+    <AppCard title="实时门禁事件" :index="2" :badge="events.status === 'open' ? 'LIVE' : ''">
+      <EventFeed :items="events.items" />
+      <AppButton variant="ghost" size="sm" icon="close" @click="clearFeed">清空</AppButton>
+    </AppCard>
+
+    <AppCard title="时间同步" :index="3">
+      <p class="muted small">{{ ntpText }}</p>
+      <p class="clock">{{ clock }}</p>
       <AppButton
-        variant="warn"
-        size="sm"
-        icon="warn"
-        :loading="rebootBusy"
-        @click="onReboot"
+        block
+        :icon="online ? 'clock' : 'warn'"
+        :disabled="!online"
+        :loading="ntpBusy"
+        @click="onNtp"
       >
-        重启设备
+        立即校正时间
       </AppButton>
-    </template>
-    <StatGrid :items="statItems" />
-  </AppCard>
+      <p class="muted small">设备需已联网;校正结果会在此处与实时事件中提示。</p>
+    </AppCard>
 
-  <AppCard title="网络配置" :index="1">
-    <NetworkCard
-      :info="device.network"
-      :pending="netBusy"
-      @apply="onApplyNetwork"
-      @refresh="refreshNetwork"
-    />
-  </AppCard>
-
-  <AppCard title="实时门禁事件" :index="2" :badge="events.status === 'open' ? 'LIVE' : ''">
-    <EventFeed :items="events.items" />
-    <AppButton variant="ghost" size="sm" icon="close" @click="clearFeed">清空</AppButton>
-  </AppCard>
-
-  <AppCard title="时间同步" :index="3">
-    <p class="muted small">{{ ntpText }}</p>
-    <p class="clock">{{ clock }}</p>
-    <AppButton
-      block
-      :icon="online ? 'clock' : 'warn'"
-      :disabled="!online"
-      :loading="ntpBusy"
-      @click="onNtp"
-    >
-      立即校正时间
-    </AppButton>
-    <p class="muted small">设备需已联网;校正结果会在此处与实时事件中提示。</p>
-  </AppCard>
+  </div>
 </template>
 
 <style scoped>
@@ -148,5 +152,11 @@ async function onReboot() {
   letter-spacing: 2px;
   color: var(--primary-dark);
   font-variant-numeric: tabular-nums;
+}
+.page-grid {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  align-content: start;
 }
 </style>

@@ -305,103 +305,107 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <AppCard v-if="!form" title="用户管理" :index="0">
-    <div class="bar">
-      <span class="muted small">共 {{ total }} 人;人脸可编辑页上传,IC 卡编辑页直输卡号或设备端刷卡录入,指纹在设备端录入</span>
-      <AppButton icon="check" size="sm" @click="openAdd">添加用户</AppButton>
-    </div>
-    <DataTable :columns="COLUMNS" :rows="rows" row-key="uid" :loading="loading">
-      <template #cell-faceText="{ row }">
-        <span :class="{ dim: !row.has_face }">{{ row.faceText }}</span>
-      </template>
-      <template #cell-icText="{ row }">
-        <span :class="{ dim: !row.ic_mask }">{{ row.icText }}</span>
-      </template>
-      <template #cell-ops="{ row }">
-        <span class="cell-ops">
-          <AppButton size="sm" variant="ghost" @click="openEdit(row)">编辑</AppButton>
-          <AppButton size="sm" variant="ghost" @click="onResetPwd(row)">改密</AppButton>
-          <AppButton size="sm" variant="ghost" @click="onClearFace(row)">清人脸</AppButton>
-          <AppButton size="sm" variant="warn" @click="onDelete(row)">删除</AppButton>
-        </span>
-      </template>
-    </DataTable>
-    <AppPager :page="page" :pages="pages" :total="total" @change="load" />
-  </AppCard>
+  <div class="page-grid">
 
-  <AppCard v-else :title="form.mode === 'add' ? '添加用户' : `编辑用户 ${form.uid}`" :index="0">
-    <div class="form">
-      <AppField
-        v-if="form.mode === 'add'"
-        v-model="f.uid"
-        label="用户 ID"
-        size="sm"
-        :hint="UID_HINT"
-      />
-      <AppField v-else label="用户 ID" :model-value="form.uid" size="sm" disabled />
-      <AppField v-model="f.name" label="姓名" size="sm" :hint="NAME_HINT" />
-      <AppField v-model="f.pwd" label="初始密码" type="password" size="sm" :hint="PWD_HINT" />
-      <AppField v-model="f.role" label="权限" size="sm" :options="ROLES" />
-      <div class="flags">
-        <span class="small muted">验证方式</span>
-        <label
-          v-for="a in AUTH_FLAGS"
-          :key="a.bit"
-          class="flags__item"
-          :class="{ disabled: !bitEnabled(a.bit) }"
-        >
-          <input
-            v-model="f.flags"
-            type="checkbox"
-            :value="a.bit"
-            :disabled="!bitEnabled(a.bit)"
-          />
-          <span>{{ a.label }}<template v-if="!bitEnabled(a.bit)">(未录入)</template></span>
-        </label>
+    <AppCard v-if="!form" title="用户管理" :index="0">
+      <div class="bar">
+        <span class="muted small">共 {{ total }} 人;人脸可编辑页上传,IC 卡编辑页直输卡号或设备端刷卡录入,指纹在设备端录入</span>
+        <AppButton icon="check" size="sm" @click="openAdd">添加用户</AppButton>
       </div>
-      <div v-if="form.mode === 'edit'" class="face-upload">
-        <span class="small muted">人脸照片({{ form.creds.has_face ? '重录将覆盖已录人脸' : '尚未录入' }})</span>
-        <div class="face-upload__row">
-          <img v-if="previewUrl" :src="previewUrl" class="face-upload__preview" alt="预览" />
-          <input
-            ref="fileInput"
-            type="file"
-            accept="image/*"
-            style="display: none"
-            @change="onPickFile"
-          />
-          <AppButton
-            size="sm"
-            variant="ghost"
-            :loading="uploading"
-            @click="fileInput && fileInput.click()"
+      <DataTable :columns="COLUMNS" :rows="rows" row-key="uid" :loading="loading">
+        <template #cell-faceText="{ row }">
+          <span :class="{ dim: !row.has_face }">{{ row.faceText }}</span>
+        </template>
+        <template #cell-icText="{ row }">
+          <span :class="{ dim: !row.ic_mask }">{{ row.icText }}</span>
+        </template>
+        <template #cell-ops="{ row }">
+          <span class="cell-ops">
+            <AppButton size="sm" variant="ghost" @click="openEdit(row)">编辑</AppButton>
+            <AppButton size="sm" variant="ghost" @click="onResetPwd(row)">改密</AppButton>
+            <AppButton size="sm" variant="ghost" @click="onClearFace(row)">清人脸</AppButton>
+            <AppButton size="sm" variant="warn" @click="onDelete(row)">删除</AppButton>
+          </span>
+        </template>
+      </DataTable>
+      <AppPager :page="page" :pages="pages" :total="total" @change="load" />
+    </AppCard>
+
+    <AppCard v-else :title="form.mode === 'add' ? '添加用户' : `编辑用户 ${form.uid}`" :index="0">
+      <div class="form">
+        <AppField
+          v-if="form.mode === 'add'"
+          v-model="f.uid"
+          label="用户 ID"
+          size="sm"
+          :hint="UID_HINT"
+        />
+        <AppField v-else label="用户 ID" :model-value="form.uid" size="sm" disabled />
+        <AppField v-model="f.name" label="姓名" size="sm" :hint="NAME_HINT" />
+        <AppField v-model="f.pwd" label="初始密码" type="password" size="sm" :hint="PWD_HINT" />
+        <AppField v-model="f.role" label="权限" size="sm" :options="ROLES" />
+        <div class="flags">
+          <span class="small muted">验证方式</span>
+          <label
+            v-for="a in AUTH_FLAGS"
+            :key="a.bit"
+            class="flags__item"
+            :class="{ disabled: !bitEnabled(a.bit) }"
           >
-            {{ form.creds.has_face ? '重录人脸' : '上传人脸' }}
-          </AppButton>
+            <input
+              v-model="f.flags"
+              type="checkbox"
+              :value="a.bit"
+              :disabled="!bitEnabled(a.bit)"
+            />
+            <span>{{ a.label }}<template v-if="!bitEnabled(a.bit)">(未录入)</template></span>
+          </label>
         </div>
-        <span class="small muted">选图后自动降采样(最长边 1024)上传;提取在设备端后台进行,完成后提示结果</span>
-      </div>
-      <div v-if="form.mode === 'edit'" class="ic-bind">
-        <span class="small muted">
-          IC 卡({{ form.creds.ic_mask ? `已绑定 ${form.creds.ic_mask}` : '尚未绑定' }})
-        </span>
-        <div class="face-upload__row">
-          <AppButton size="sm" variant="ghost" @click="onBindIc">
-            {{ form.creds.ic_mask ? '重绑 IC 卡' : '录入 IC 卡' }}
-          </AppButton>
-          <AppButton v-if="form.creds.ic_mask" size="sm" variant="ghost" @click="onUnbindIc">
-            解绑
-          </AppButton>
+        <div v-if="form.mode === 'edit'" class="face-upload">
+          <span class="small muted">人脸照片({{ form.creds.has_face ? '重录将覆盖已录人脸' : '尚未录入' }})</span>
+          <div class="face-upload__row">
+            <img v-if="previewUrl" :src="previewUrl" class="face-upload__preview" alt="预览" />
+            <input
+              ref="fileInput"
+              type="file"
+              accept="image/*"
+              style="display: none"
+              @change="onPickFile"
+            />
+            <AppButton
+              size="sm"
+              variant="ghost"
+              :loading="uploading"
+              @click="fileInput && fileInput.click()"
+            >
+              {{ form.creds.has_face ? '重录人脸' : '上传人脸' }}
+            </AppButton>
+          </div>
+          <span class="small muted">选图后自动降采样(最长边 1024)上传;提取在设备端后台进行,完成后提示结果</span>
         </div>
-        <span class="small muted">卡号直输(设备端录入页读出或卡面印刷);也可在设备端编辑页刷卡录入</span>
+        <div v-if="form.mode === 'edit'" class="ic-bind">
+          <span class="small muted">
+            IC 卡({{ form.creds.ic_mask ? `已绑定 ${form.creds.ic_mask}` : '尚未绑定' }})
+          </span>
+          <div class="face-upload__row">
+            <AppButton size="sm" variant="ghost" @click="onBindIc">
+              {{ form.creds.ic_mask ? '重绑 IC 卡' : '录入 IC 卡' }}
+            </AppButton>
+            <AppButton v-if="form.creds.ic_mask" size="sm" variant="ghost" @click="onUnbindIc">
+              解绑
+            </AppButton>
+          </div>
+          <span class="small muted">卡号直输(设备端录入页读出或卡面印刷);也可在设备端编辑页刷卡录入</span>
+        </div>
       </div>
-    </div>
-    <div class="ops">
-      <AppButton icon="check" :loading="busy" @click="onSave">保存</AppButton>
-      <AppButton variant="ghost" @click="closeForm">取消</AppButton>
-    </div>
-    <p class="muted small">新用户必须设密码;未录入的方式不能勾选(人脸可本页上传、IC 卡本页直输卡号,指纹在设备端录入)。</p>
-  </AppCard>
+      <div class="ops">
+        <AppButton icon="check" :loading="busy" @click="onSave">保存</AppButton>
+        <AppButton variant="ghost" @click="closeForm">取消</AppButton>
+      </div>
+      <p class="muted small">新用户必须设密码;未录入的方式不能勾选(人脸可本页上传、IC 卡本页直输卡号,指纹在设备端录入)。</p>
+    </AppCard>
+
+  </div>
 </template>
 
 <style scoped>
@@ -467,5 +471,11 @@ onUnmounted(() => {
   display: flex;
   gap: 8px;
   margin-bottom: 10px;
+}
+.page-grid {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  align-content: start;
 }
 </style>
