@@ -15,10 +15,6 @@ ck() { # ck <描述> <期望子串> <实际响应>
 }
 jq_get() { python3 -c "import sys,json;d=json.load(sys.stdin);print(d$1)" 2>/dev/null; }
 
-# 未授权 → 401
-R=$(curl -s -m 3 $B/api/users)
-ck "未授权列表被拒" "未登录" "$R"
-
 # 登录
 TOK=$(curl -s -m 3 -X POST $B/api/login -H "Content-Type: application/json" \
   -d '{"user":"admin","pwd":"admin"}' | jq_get "['token']")
@@ -241,6 +237,61 @@ curl -s -m 3 -X POST $B/api/access_set -H "$A" -H "Content-Type: application/jso
 curl -s -m 3 -X POST $B/api/users/delete -H "$A" -H "Content-Type: application/json" \
   -d '{"uid":"webtest6"}' > /dev/null
 sleep 1
+
+# ---- 固件升级包槽(.ota 全量包;2026-10-05) ----
+# 构造最小合法 .ota(96B 头 + 4B 载荷;摘要随包计算)。用独立脚本文件而非
+# 内联 heredoc:转义经多层(shell→python)极易失真,NUL 混入会让 git 把
+# 本脚本当二进制(实测坑)。
+cat > /tmp/mk_ota.py <<'PYPKG'
+import hashlib, struct
+payload = bytes([0xAA, 0xBB, 0xCC, 0xDD])
+sha = hashlib.sha256(payload).digest()
+hdr = bytearray(96)
+hdr[0:8] = b'DGOTA1' + bytes(2)
+struct.pack_into('>I', hdr, 8, 96)
+struct.pack_into('>I', hdr, 12, len(payload))
+hdr[16:21] = b'0.0.1'
+hdr[64:96] = sha
+open('/tmp/apitest.ota', 'wb').write(bytes(hdr) + payload)
+PYPKG
+python3 /tmp/mk_ota.py
+
+# 未授权 → 401
+R=$(curl -s -m 3 $B/api/users)
+ck "未授权列表被拒" "未登录" "$R"
+
+# 升级包:未授权上传被拒
+R=$(curl -s -m 5 -X POST $B/api/ota/fw/upload -H "X-OTA-Size: 100" --data-binary @/tmp/apitest.ota)
+ck "升级包未授权上传被拒" "未登录" "$R"
+
+# 升级包:缺 X-OTA-Size 被拒
+R=$(curl -s -m 5 -X POST $B/api/ota/fw/upload -H "$A" --data-binary @/tmp/apitest.ota)
+ck "升级包缺 Size 头被拒" "缺少 X-OTA-Size" "$R"
+
+# 升级包:好包入槽
+R=$(curl -s -m 10 -X POST $B/api/ota/fw/upload -H "$A" \
+    -H "X-OTA-Size: $(stat -c %s /tmp/apitest.ota)" --data-binary @/tmp/apitest.ota)
+ck "升级包入槽" '"version":"0.0.1"' "$R"
+
+# 升级包:状态可见
+R=$(curl -s -m 3 -H "$A" $B/api/ota/fw)
+ck "升级包状态含版本" '"version":"0.0.1"' "$R"
+ck "升级包状态含暂存标志" '"staged":' "$R"
+
+# 升级包:坏包(截断)→ 422
+head -c 60 /tmp/apitest.ota > /tmp/apitest_bad.ota
+R=$(curl -s -m 5 -X POST $B/api/ota/fw/upload -H "$A" \
+    -H "X-OTA-Size: $(stat -c %s /tmp/apitest_bad.ota)" --data-binary @/tmp/apitest_bad.ota)
+ck "坏包 422 拒收" "包校验失败" "$R"
+
+# 升级包:空槽 apply → 409(真升级板上人工验收,不进自动化)
+curl -s -m 3 -X DELETE $B/api/ota/fw -H "$A" >/dev/null
+R=$(curl -s -m 3 -X POST $B/api/ota/fw/apply -H "$A")
+ck "空槽 apply 被拒" "槽内没有升级包" "$R"
+
+# 升级包:删除后再查为空
+R=$(curl -s -m 3 -H "$A" $B/api/ota/fw)
+ck "删除后槽为空" '"present":false' "$R"
 
 echo "=============================="
 echo "PASS=$PASS FAIL=$FAIL"
