@@ -90,7 +90,7 @@ static void t_no_valid(void)
 
 static void t_mask(void)
 {
-    printf("[P3] 展示掩码(********+末4)\n");
+    printf("[P4] 展示掩码(********+末4)\n");
     char out[16];
     iccard_mask("04A3B2C1", out, sizeof(out));
     DG_CHECK(strcmp(out, "********B2C1") == 0);
@@ -104,7 +104,7 @@ static void t_mask(void)
 
 static void t_sim_pipe(void)
 {
-    printf("[P4] sim 后端 pipe 语义(open/inject/poll/read/flush)\n");
+    printf("[P5] sim 后端 pipe 语义(open/inject/poll/read/flush)\n");
     int fd = iccard_hal_open("sim");
     DG_CHECK(fd >= 0);
 

@@ -1355,6 +1355,13 @@ static void handle_users_update(struct mg_connection *c, struct mg_http_message 
         rec.role = role;
     if (has_flags)
         rec.auth_flags = flags;
+    /* IC 位显式预检:storage 语义"空 ic_card=解绑"会把无卡用户的 IC 位
+     * 静默剥掉(解绑自动清位的双保险,test_storage S11 断言),API 直调
+     * 会误以为开成功——这里先回显式错误,与 face/finger 拒收口径一致 */
+    if (has_flags && (flags & (uint32_t)DG_AUTH_IC) && !rec.ic_card[0]) {
+        json_msg(c, 400, user_err_text(DG_ERR_AUTH_NO_CRED));
+        return;
+    }
     rc = db_user_update(&rec);
     if (rc != DG_OK) {
         reply_user_err(c, rc);
