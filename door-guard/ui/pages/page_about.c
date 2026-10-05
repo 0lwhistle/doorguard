@@ -230,14 +230,17 @@ void page_about_create(lv_obj_t *parent)
 
     /* ---- 升级区 ---- */
     lv_coord_t y = 400;
+    char t[64];
     s_lb_new_ver = lv_label_create(parent);
-    lv_label_set_text(s_lb_new_ver, _("最新版本: -"));
+    snprintf(t, sizeof(t), "%s: -", _("最新版本"));
+    lv_label_set_text(s_lb_new_ver, t);
     lv_obj_set_style_text_font(s_lb_new_ver, DG_FONT_CN, 0);
     lv_obj_set_style_text_color(s_lb_new_ver, DG_COL_TEXT(), 0);
     lv_obj_align(s_lb_new_ver, LV_ALIGN_TOP_LEFT, DG_PAD + 8, y);
 
     s_lb_new_date = lv_label_create(parent);
-    lv_label_set_text(s_lb_new_date, _("发布日期: -"));
+    snprintf(t, sizeof(t), "%s: -", _("发布日期"));
+    lv_label_set_text(s_lb_new_date, t);
     lv_obj_set_style_text_font(s_lb_new_date, DG_FONT_SUB, 0);
     lv_obj_set_style_text_color(s_lb_new_date, DG_COL_TEXT(), 0);
     lv_obj_align(s_lb_new_date, LV_ALIGN_TOP_LEFT, DG_PAD + 8, y + 52);

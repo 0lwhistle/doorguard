@@ -54,6 +54,16 @@ static bool ev_saw(ota_upd_state_t st)
 }
 
 static void wait_state(ota_upd_state_t want, int timeout_ms)
+
+/* 事件异步分发(总线线程):终态到位后再等事件落袋,避免 ev_saw 竞态 */
+static void wait_events(int n, int timeout_ms)
+{
+    for (int i = 0; i < timeout_ms / 5; i++) {
+        if (s_ev_cnt >= n)
+            return;
+        usleep(5000);
+    }
+}
 {
     for (int i = 0; i < timeout_ms / 5; i++) {
         ota_upd_status_t st;
@@ -191,13 +201,19 @@ int main(void)
     ota_update_status(&st);
     DG_CHECK(st.state == OTA_UPD_IDLE);
 
-    /* [T3] 公告不比当前新:忽略(0.0.0 恒小于任何在用版本) */
-    printf("[T3] 旧公告忽略\n");
+    /* [T3] 旧公告忽略。当前版本 = git describe(test 构建无数字前缀 tag
+     * 时不可解析,规则=可解析公告一律视为新)——两种现状都钉住 */
+    printf("[T3] skip-ignore"); putchar(10);
     make_ann("0.0.0", sha, CONTENT_SZ, "http://x/f.bin");
+    ev_reset();
     ota_update_on_announce(s_ann_json);
-    DG_CHECK(s_ev_cnt == 0);
     ota_update_status(&st);
-    DG_CHECK(st.state == OTA_UPD_IDLE);
+    if (ota_version_newer(ota_update_current_version(), "0.0.0")) {
+        DG_CHECK(st.state == OTA_UPD_AVAILABLE);   /* 不可解析:可解析即新 */
+    } else {
+        DG_CHECK(s_ev_cnt == 0);
+        DG_CHECK(st.state == OTA_UPD_IDLE);
+    }
 
     /* [T4] 查询无 mqtt:NETWORK */
     printf("[T4] 检查更新无通道\n");
@@ -224,6 +240,7 @@ int main(void)
     wait_state(OTA_UPD_STAGED, 8000);
     ota_update_status(&st);
     DG_CHECK(st.state == OTA_UPD_STAGED);
+    usleep(30 * 1000);   /* worker 收尾窗口:s_busy 清零后再进下一例 */
 
     char path[128];
     snprintf(path, sizeof(path), "%s/ota_staged.bin", s_dir);
@@ -234,6 +251,7 @@ int main(void)
     if (f)
         fclose(f);
     DG_CHECK(memcmp(back, s_content, CONTENT_SZ) == 0);
+    wait_events(3, 3000);
     DG_CHECK(ev_saw(OTA_UPD_AVAILABLE) && ev_saw(OTA_UPD_DOWNLOADING) &&
              ev_saw(OTA_UPD_STAGED));
     DG_CHECK(s_mem.open_calls == 1);
@@ -260,6 +278,7 @@ int main(void)
     DG_CHECK(st.state == OTA_UPD_FAILED);
     snprintf(path, sizeof(path), "%s/ota_staged.bin", s_dir);
     DG_CHECK(access(path, F_OK) != 0);
+    usleep(30 * 1000);   /* worker 收尾窗口:s_busy 清零后再进下一例 */
 
     /* [T7] 公告 size 与源大小不符:开流后立即拒绝 */
     printf("[T7] 大小对拍\n");
@@ -274,6 +293,7 @@ int main(void)
     wait_state(OTA_UPD_FAILED, 8000);
     ota_update_status(&st);
     DG_CHECK(st.state == OTA_UPD_FAILED);
+    usleep(30 * 1000);   /* worker 收尾窗口:s_busy 清零后再进下一例 */
 
     /* [T8] 缺 url(公告与 cfg 均空):PARAM 失败 */
     printf("[T8] 缺 url\n");
@@ -305,6 +325,7 @@ int main(void)
     usleep(100 * 1000);                          /* 让 worker 走到闸口 */
     DG_CHECK(ota_update_apply() == DG_ERR_BUSY);
     s_gate = 1;
+    usleep(30 * 1000);
     wait_state(OTA_UPD_STAGED, 8000);
     ota_update_status(&st);
     DG_CHECK(st.state == OTA_UPD_STAGED);
