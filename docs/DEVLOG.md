@@ -59,6 +59,17 @@
    26 新键双表。引 dg_ui 的三个测试补链 dg_net(page_about 调 ota 符号)。
 8. **平台侧待办**(部署时):broker 订阅 ota/query 重发 retain 公告;固件
    包放定长直链(http);用户云服务器 HA 部署方案待定。
+9. **板上验收(WSL mosquitto+http.server 模拟平台,2026-10-05 晚全通)**:
+   推板 A→B 槽 md5 一致;板 mqtt.enabled=1 连上 192.168.137.1:1883,订阅
+   ota/version;retain 公告 9.9.9 → 自动关=只 AVAILABLE 不下载;自动开=
+   自动下载(进度 ota/state 950→1000‰)→ sha 校验 → staged → S60 装非
+   活动槽+原子切换+重启 → retain 公告自动重触发再升一轮(测试包=同一
+   构建版本恒"新"所致,真包版本追平即停,行为正确)→ 撤 retain 后稳定。
+   终态:slot=A、md5 一致、ota_auto_update=0 恢复出厂、status retain
+   online。坑:python http.server 随 wsl.exe 会话退出被杀(下载第一次
+   失败的真因,勿赖防火墙)——用 systemd-run --unit=dg-http 持久化;
+   板 cur_config.json 是手工 C 风格 JSON,合并走 WSL python 后回传。
+   留给真人走查:关于设备页观感/检查更新按钮/立即更新按钮/自动更新开关。
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 ---
