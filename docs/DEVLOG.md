@@ -22,6 +22,51 @@
    四项验收:真卡开门/按住只开一次/重复卡录入被拒/拔模块降级提示。
 
 ---
+## 2026-10-05(夜)web 切页白屏真因修复 + web 固件升级三段式(.ota 全量包)——板上全流程验收通过
+
+1. **切页白屏(用户报告,浏览器实测复现+修复)**:根因=DashboardView(4 根)
+   /UsersView(2 根)多根视图撞上 AppShell 的 `<transition mode="out-in">`——
+   fragment 离开动画等不到 afterLeave,out-in 的后续 enter 永久阻塞,表现为
+   「URL/标题已变但内容区只剩注释节点,F5 后又好」。修=两页包单根 .page-grid
+   (布局参数与 .content 同参,a8d4cae);另把路由改静态导入(单 bundle 下
+   懒加载无收益,消除异步组件失败维度,d939177;其头注曾错误归因,已在
+   a8d4cae 修正)。真机+本地桩六页连切全渲染。**调试方法论沉淀**:dev 模式
+   构建前端 bundle(NODE_ENV=development 传给 vite,看 Vue warn)是抓这类
+   静默渲染问题的最快路径;板端恒 no-store 无缓存问题,本地 python http.server
+   桩会启发式缓存出假象(测新版务必换端口或加 no-store)。
+2. **web 固件升级三段式(.ota 全量包)**:
+   - 包格式(ota_package.h 契约):96B 头(magic DGOTA1/载荷大小/版本/日期/
+     sha256 原始 32B)+ 载荷(=app ELF);打包工具 env/bin/dg-ota-pack
+     (WSL 里须 `python3 env/bin/dg-ota-pack`——shebang 的 env 会经互操作
+     PATH 解析到 Windows python 直接卡死,实测坑)。
+   - 板端:ota_package.c 解析/提取(流式 EVP,复核后 rename 落位,坏包不留
+     半成品);ota_service 增槽位模式(begin_slot/finish_slot,与暂存模式共用
+     单会话流水线互斥 BUSY,收口不做声明摘要比对改回报实算摘要);web 四端点
+     GET/DELETE /api/ota/fw、POST /api/ota/fw/upload(X-OTA-Size/-Offset
+     续传,can_accept 限流)、POST /api/ota/fw/apply(提取线程,apply_err
+     回读)。
+   - 交接面不变:apply 提取载荷 → ota_staged.bin+sidecar(版本 sidecar 命名
+     对齐 ota_staged.ver——首版写成 .bin.ver 致 S60 装槽日志 v= 空读,板上
+     实测抓出)→ S60 装非活动槽+原子切换+秒退回滚,与裸包/MQTT OTA 同出口。
+   - 前端 FirmwareView 重做:三卡片(固件信息/上传与校验/升级重启);前端
+     预检(parseOtaHeader,http 非安全上下文无 crypto.subtle,只做结构级);
+     client.js 增 uploadWithProgress(XHR,fetch 无上传进度);上传进度条+
+     升级阶段流动条;断点续传(刷新后按 partial.received 恢复);删除/重传;
+     升级轮询(apply_err 可见;完成判定=版本前进或「失联过又回来且 staged
+     已消费」——staged 窗口只有 ~2s,2s 轮询会错过)。
+3. **验收**:宿主 49/49(新增 test_ota_package 10 例+test_ota[O6] 槽位互斥);
+   交叉零告警;板上 curl 全流:坏包 422/好包 200 入槽/状态/删除/重传/apply
+   202→提取→S60 装槽(日志 OTA 安装 dg_app.A v=9.9.9-webtest)→重启→md5
+   一致→staged 消费;api_test 板上 64/2(固件段 8/8;两失败=测试用户残留态
+   +有意屏蔽的真重启用例)。**api_test 板上跑必须屏蔽已授权 reboot 用例**
+   (sim 假重启、板上真重启→内存会话全失→后续全 401,两个晚上各踩一次)。
+4. **板状态**:活动槽 dg_app.B=3fc11e5(零告警),升级包槽已清空,自动更新
+   关;WSL 侧遗留:mosquitto(1883 匿名,自启)+ systemd-run dg-http(8081
+   静态源,供 MQTT OTA 模拟平台,可随时复用)。
+5. 下一步:MQTT OTA 平台侧部署契约落地(用户云服务器 HA);真人走查固件页
+   上传按钮(浏览器 file chooser 无法自动化,已用 curl 覆盖全部 API 路径);
+   api_test 的板上残留态用例(人脸位)待清理策略。
+
 ## 2026-10-05(日)MQTT OTA 框架 + 远程报警出口 + 关于设备页——IC 链路核查完毕
 
 1. **IC 卡模块核查(用户前置任务)**:应用层全链在且完整——drv/iccard HAL

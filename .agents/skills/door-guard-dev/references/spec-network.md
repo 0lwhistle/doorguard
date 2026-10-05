@@ -83,6 +83,12 @@
   → 提交:校验闭环到暂存文件为止,**不写真实分区**(分区写入与 uboot env
     方案见 docs/tech/OTA_PLAN.md:boot_app=b、upgrade_ok、bootcount 回滚约定)
 升级包:单文件流(镜像/固件包本体),manifest 信息由请求头携带
+- web 升级包槽(2026-10-05):.ota 全量包走 /api/ota/fw/upload(收整个
+  包文件,X-OTA-Size/-Offset)→ /api/ota/fw(状态)→ DELETE(弃包)→
+  /api/ota/fw/apply(提取交装);格式契约 services/ota/ota_package.h,
+  打包 env/bin/dg-ota-pack。真升级重启只能板上人工验收——api_test 里
+  只做「空槽 apply→409」,并且全脚本在板上跑必须屏蔽已授权 reboot 用例
+  (sim 是假重启,板上真重启,内存会话全失,后续用例全 401,实测坑)
 ```
 
 - 监听在 door-guard 应用内(不是独立守护)。`ota_port` 独立端口方案已废弃

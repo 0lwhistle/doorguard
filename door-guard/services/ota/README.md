@@ -5,6 +5,23 @@
 > 暂存文件;装槽/切换/回滚由板端 S60 `ota_watch` 统一消费
 > (docs/tech/OTA_PLAN.md)。
 
+## .ota 全量升级包(2026-10-05,web 上位机路径)
+
+`env/bin/dg-ota-pack <app二进制> <输出.ota> [--version V] [--date D]` 打包
+(WSL 里用 `python3 env/bin/dg-ota-pack` 显式调用——shebang 的 env python3
+在 WSL 互操作 PATH 下会解析到 Windows python 直接卡死)。包格式与解析契约
+见 services/ota/ota_package.h(96B 头:magic/载荷大小/版本/日期/sha256)。
+
+web 固件升级页三段式:
+- **上传与校验**:前端结构预检(浏览器 http 非安全上下文算不了 sha256,
+  只做 magic/版本/总长一致性)→ 流式上传(/api/ota/fw/upload,进度条,
+  X-OTA-Offset 断点续传)→ 板端收完 ota_package_parse_file 复核载荷摘要
+  → 入槽 fw_slot.ota(+meta json)。板上有且只有一个升级包槽,重传即覆盖,
+  可删除(/api/ota/fw DELETE)。
+- **升级重启**:/api/ota/fw/apply 提取线程复核后把载荷落到 ota_staged.bin
+  → 与裸包上传同一交接面,S60 装非活动槽+原子切换+秒退回滚。
+- 版本注意:包内版本即展示用;发版递增 tag,见上文「版本比较」。
+
 ## 两条升级入口,一个交接面
 
 | 入口 | 触发 | 传输 | 说明 |

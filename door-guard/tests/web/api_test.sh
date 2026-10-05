@@ -279,7 +279,7 @@ ck "升级包状态含版本" '"version":"0.0.1"' "$R"
 ck "升级包状态含暂存标志" '"staged":' "$R"
 
 # 升级包:坏包(截断)→ 422
-head -c 60 /tmp/apitest.ota > /tmp/apitest_bad.ota
+head -c 98 /tmp/apitest.ota > /tmp/apitest_bad.ota   # 96B<98<100:过前置大小检、砸中「总长与头不符」
 R=$(curl -s -m 5 -X POST $B/api/ota/fw/upload -H "$A" \
     -H "X-OTA-Size: $(stat -c %s /tmp/apitest_bad.ota)" --data-binary @/tmp/apitest_bad.ota)
 ck "坏包 422 拒收" "包校验失败" "$R"
