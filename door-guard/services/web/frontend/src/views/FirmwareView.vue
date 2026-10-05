@@ -159,45 +159,57 @@ async function doApply() {
     go.err = err.message || '触发失败'
     return
   }
-  /* 轮询:提取(applying)→ 交装(staged)→ 设备失联(重启中)→
-   * 回来且版本变化(完成);6 分钟兜底超时 */
+  /* 轮询:提取失败可见(apply_err)→ 交装/装槽窗口很短且可能被错过,
+   * 所以「neither applying nor staged」按进入重启处理;完成判定 =
+   * 版本前进,或「失联过又回来且 staged 已被安装器消费」(同版本包);
+   * 6 分钟兜底超时 */
   const startVer = curVersion.value
   const t0 = Date.now()
+  let sawDown = false
   rebootPoll = setInterval(async () => {
+    let d = null
     try {
-      const d = await getFwSlot()
-      slot.staged = !!d.staged
-      slot.applying = !!d.applying
-      if (d.applying) return                       /* 还在提取 */
-      if (go.phase === 'extracting') {
-        if (!d.staged) {
-          go.phase = 'fail'
-          go.err = '提取校验未通过(详见设备日志);槽内包保留,可重试或删除'
-          clearInterval(rebootPoll)
-          rebootPoll = null
-          return
-        }
-        go.phase = 'rebooting'
-        go.newVersion = slot.version
-        return
-      }
-    } catch { /* 设备重启中:请求失败是预期 */ }
-    if (go.phase !== 'rebooting') return
-    try {
-      const v = curVersion.value
-      if (v && v !== '—' && v !== startVer) {
-        go.phase = 'done'
-        clearInterval(rebootPoll)
-        rebootPoll = null
-        refreshSlot()
-      } else if (Date.now() - t0 > 6 * 60 * 1000) {
+      d = await getFwSlot()
+    } catch {
+      sawDown = true                       /* 设备重启中:失联是预期 */
+      if (go.phase === 'rebooting' && Date.now() - t0 > 6 * 60 * 1000) {
         go.phase = 'fail'
         go.err = '等待设备重启超时,请确认设备状态后刷新本页'
         clearInterval(rebootPoll)
         rebootPoll = null
       }
-    } catch { /* 仍失联 */ }
-  }, 2000)
+      return
+    }
+    slot.staged = !!d.staged
+    slot.applying = !!d.applying
+    if (d.applying) return                 /* 还在提取 */
+    if (d.apply_err) {
+      go.phase = 'fail'
+      go.err = '提取校验未通过(错误码 ' + d.apply_err + ');槽内包保留,可重试或删除'
+      clearInterval(rebootPoll)
+      rebootPoll = null
+      return
+    }
+    if (go.phase === 'extracting') {
+      go.phase = 'rebooting'               /* staged 可能已被 S60 消费,直接进重启态 */
+      go.newVersion = slot.version
+      return
+    }
+    if (go.phase !== 'rebooting') return
+    const v = curVersion.value
+    const verChanged = v && v !== '—' && v !== startVer
+    if (verChanged || (sawDown && !d.staged)) {
+      go.phase = 'done'
+      clearInterval(rebootPoll)
+      rebootPoll = null
+      refreshSlot()
+    } else if (Date.now() - t0 > 6 * 60 * 1000) {
+      go.phase = 'fail'
+      go.err = '等待设备重启超时,请确认设备状态后刷新本页'
+      clearInterval(rebootPoll)
+      rebootPoll = null
+    }
+  }, 1500)
 }
 
 async function doDelete() {

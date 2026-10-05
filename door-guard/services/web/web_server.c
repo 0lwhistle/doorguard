@@ -1037,6 +1037,7 @@ static void ota_start(struct mg_connection *c, struct mg_http_message *hm)
 static struct mg_connection *s_fw_c = NULL;    /* 槽位上传连接(loop 私有) */
 static int64_t s_fw_remain = 0;
 static atomic_bool s_fw_applying = false;      /* 提取线程在途 */
+static atomic_int  s_fw_apply_err = false;     /* 最近一次提取结果(0=成功) */
 
 /* meta sidecar 路径(与 fw_slot.ota 同目录) */
 static void fw_meta_path(char *path, size_t cap)
@@ -1197,6 +1198,7 @@ static void handle_ota_fw_get(struct mg_connection *c, struct mg_http_message *h
     cJSON_AddBoolToObject(root, "staged", ota_staged_present());
     cJSON_AddBoolToObject(root, "applying", atomic_load(&s_fw_applying));
     cJSON_AddBoolToObject(root, "uploading", s_fw_c != NULL);
+    cJSON_AddNumberToObject(root, "apply_err", atomic_load(&s_fw_apply_err));
 
     char slot[192];
     ota_slot_path(slot, sizeof(slot));
@@ -1276,6 +1278,7 @@ static void *fw_apply_thread(void *arg)
     int rc = ota_package_parse_file(slot, &m);
     if (rc == DG_OK)
         rc = ota_package_extract(slot, dir, version, sizeof(version));
+    atomic_store(&s_fw_apply_err, rc == DG_OK ? 0 : rc);
     atomic_store(&s_fw_applying, false);
     if (rc != DG_OK) {
         DG_LOGE(TAG, "升级包提取失败(%d)", rc);
@@ -1320,6 +1323,7 @@ static void handle_ota_fw_apply(struct mg_connection *c, struct mg_http_message 
         return;
     }
     pthread_detach(tid);
+    atomic_store(&s_fw_apply_err, 0);
     DG_LOGI(TAG, "升级包提取启动(上位机触发)");
     json_msg(c, 202, "校验提取中,完成后设备将自动升级重启");
 }
