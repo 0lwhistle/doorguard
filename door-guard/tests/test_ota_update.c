@@ -169,6 +169,7 @@ int main(void)
     char sha[65];
     make_sha(sha, sizeof(sha), s_content, CONTENT_SZ);
 
+    DG_CHECK(event_bus_init() == EVENT_BUS_OK);   /* 起 bus 分发线程 */
     event_bus_subscribe(EV_NET_OTA_UPDATE, on_ota_update, NULL);
     ota_update_transport_set(&MEM_TP, &s_mem);
     ota_update_start();
