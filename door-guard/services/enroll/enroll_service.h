@@ -120,6 +120,24 @@ int enroll_service_clear_face(const char *user_id);
 int enroll_service_finger_pages(const char *user_id, int32_t *pages,
                                 uint32_t cap, uint32_t *out_n);
 
+/* ---- IC 卡绑定/解绑(2026-10-05;设备事件路径与 web 直调共用) ----
+ * 设备端:EV_IC_CARD 在录入态到达时消费;web:POST /api/users/ic_set
+ * 直调(登记例外,同 face_upload)。两条路径走同一实现,查重/置位
+ * 语义不会被写岔。 */
+
+/** 绑定卡号(同步落库):格式校验(ICCARD_PROTOCOL §5,8~30 大写 HEX)
+ *  → 查重排除自身(同卡本人 = 幂等成功,他人卡 = DG_ERR_DUP_IC)
+ *  → 写 ic_card + 置 IC 方式位(录入路径写位,spec-auth §4.2)。
+ *  重绑不同卡 = 覆盖(同人脸重录语义)。
+ *  @return DG_OK / DG_ERR_PARAM(参数或卡号格式)/ DG_ERR_DUP_IC /
+ *          DG_ERR_NOT_FOUND / DB 错误透传 */
+int enroll_service_ic_set(const char *user_id, const char *card_no);
+
+/** 解绑(清 ic_card + 回收 IC 位;人脸位等其他方式位不动)。
+ *  未绑卡 = 幂等成功。DG_ENROLL_IC_CLEAR 事件与 web ic_clear 同走此实现。
+ *  @return DG_OK / DG_ERR_NOT_FOUND / DB 错误透传 */
+int enroll_service_ic_clear(const char *user_id);
+
 #ifdef __cplusplus
 }
 #endif

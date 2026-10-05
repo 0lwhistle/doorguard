@@ -94,10 +94,10 @@ typedef struct {
 #define EV_NET_CFG_SET       EV_DEF(DG_MODULE_ID_NET, 0x000A)    /**< UI→net:应用网络配置(设备端屏幕设置) */
 #define EV_NET_CFG_RESULT    EV_DEF(DG_MODULE_ID_NET, 0x000B)    /**< net→UI:网络配置应用结果 */
 
-/* HAL:硬件事件(HAL → 服务;指纹/IC/门磁驱动未接,事件两端皆死,
- * 契约保留待硬件接入——2026-09-27 硬件接入方案的对接面) */
+/* HAL:硬件事件(HAL → 服务)。IC 已激活(2026-10-01 card_provider 落地);
+ * 指纹状态/门磁链路尚未接入,契约保留待硬件接入 */
 #define EV_FINGER_STATUS     EV_DEF(DG_MODULE_ID_HAL, 0x0001)    /**< [死契约·待硬件] 指纹按压/释放/错误(fp_provider 落地后激活) */
-#define EV_IC_CARD           EV_DEF(DG_MODULE_ID_HAL, 0x0002)    /**< [死契约·待硬件] 读到卡号 */
+#define EV_IC_CARD           EV_DEF(DG_MODULE_ID_HAL, 0x0002)    /**< 读到卡号(已激活:card_provider 发布,access/enroll 按 FSM 状态分流) */
 #define EV_DOOR_STATE        EV_DEF(DG_MODULE_ID_HAL, 0x0003)    /**< [死契约·待硬件] 门磁/门控反馈 */
 /* 指纹验证结果(FINGERPRINT_AS608.md §4;2026-09-30 新增)。
  * 载荷与 vision 同构,复用 ev_match_t:matched/user_id/role/score_permille,

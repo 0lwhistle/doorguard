@@ -20,6 +20,8 @@ export const PATHS = {
   usersDelete: '/api/users/delete',
   usersFaceClear: '/api/users/face_clear',
   usersFaceSet: '/api/users/face_set',
+  usersIcSet: '/api/users/ic_set',
+  usersIcClear: '/api/users/ic_clear',
   accessSet: '/api/access_set',
   systemReboot: '/api/system/reboot',
   ws: '/api/ws',

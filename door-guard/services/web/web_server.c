@@ -54,6 +54,7 @@
 #include "cfg.h"
 #include "storage.h"
 #include "enroll/enroll_service.h"
+#include "iccard_hal.h"
 #include "valid.h"
 
 #include <cJSON.h>
@@ -1213,6 +1214,13 @@ static void handle_users_list(struct mg_connection *c, struct mg_http_message *h
             fp_cnt = 0;
         cJSON_AddBoolToObject(o, "has_finger", fp_cnt > 0);
         cJSON_AddBoolToObject(o, "has_ic", rec.ic_card[0] != '\0');
+        if (rec.ic_card[0]) {             /* 掩码展示(协议 §5),原卡号不出设备 */
+            char m[13];
+            iccard_mask(rec.ic_card, m, sizeof(m));
+            cJSON_AddStringToObject(o, "ic_mask", m);
+        } else {
+            cJSON_AddStringToObject(o, "ic_mask", "");
+        }
         cJSON_AddNumberToObject(o, "created_at", (double)rec.created_at);
         cJSON_AddNumberToObject(o, "updated_at", (double)rec.updated_at);
         cJSON_AddItemToArray(arr, o);
@@ -1528,6 +1536,80 @@ static void handle_users_face_set(struct mg_connection *c, struct mg_http_messag
     }
 }
 
+/* web IC 卡绑定/解绑(2026-10-05):上位机无读卡硬件,卡号由管理员直输
+ * (来源:设备端录入页读出的卡号或卡面印刷),经 enroll_service_ic_set
+ * 同步落库——查重排除自身/置方式位与设备端刷卡路径同一实现。与人脸
+ * 受理制的差异:IC 无提取链路,纯 DB 动作就地返回结果。卡号全链路口径
+ * 恒为大写 HEX(协议 §5),小写输入在此归一 */
+static void handle_users_ic_set(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    cJSON *body = body_json(hm);
+    if (!body) {
+        json_msg(c, 400, "坏请求体");
+        return;
+    }
+    char uid[DG_UID_LEN], card[DG_IC_LEN];
+    bool ok = jstr(body, "uid", uid, sizeof(uid)) &&
+              jstr(body, "card_no", card, sizeof(card));
+    cJSON_Delete(body);
+    if (!ok) {
+        json_msg(c, 400, "需要 uid 与 card_no");
+        return;
+    }
+    for (char *p = card; *p; p++) {
+        if (*p >= 'a' && *p <= 'f')
+            *p = (char)(*p - 'a' + 'A');
+    }
+    if (!iccard_no_valid(card)) {
+        json_msg(c, 400, "卡号需 8~30 位十六进制(4~15 字节 UID)");
+        return;
+    }
+    const int rc = enroll_service_ic_set(uid, card);
+    if (rc != DG_OK) {
+        reply_user_err(c, rc);
+        return;
+    }
+    cJSON *root = cJSON_CreateObject();
+    char m[13];
+    iccard_mask(card, m, sizeof(m));
+    cJSON_AddStringToObject(root, "msg", "IC 卡已绑定");
+    cJSON_AddStringToObject(root, "ic_mask", m);
+    json_reply(c, 200, root);
+    cJSON_Delete(root);
+    DG_LOGI(TAG, "web 绑卡 %s <- %s", uid, m);
+}
+
+static void handle_users_ic_clear(struct mg_connection *c, struct mg_http_message *hm)
+{
+    if (!check_token(hm)) {
+        reply_unauthorized(c);
+        return;
+    }
+    cJSON *body = body_json(hm);
+    if (!body) {
+        json_msg(c, 400, "坏请求体");
+        return;
+    }
+    char uid[DG_UID_LEN];
+    bool ok = jstr(body, "uid", uid, sizeof(uid));
+    cJSON_Delete(body);
+    if (!ok) {
+        json_msg(c, 400, "需要 uid");
+        return;
+    }
+    const int rc = enroll_service_ic_clear(uid);
+    if (rc == DG_OK) {
+        json_msg(c, 200, "IC 卡已解绑");
+        DG_LOGI(TAG, "web 解绑 IC %s", uid);
+    } else {
+        reply_user_err(c, rc);
+    }
+}
+
 /* 远程重启:与设备端「重启设备」同一入口(EV_SYS_REBOOT → sysctl 服务)。
  * 延迟 1s 发布执行,让本 202 回执先落到客户端再断连 */
 static void handle_system_reboot(struct mg_connection *c, struct mg_http_message *hm)
@@ -1724,6 +1806,8 @@ static const route_t s_routes[] = {
     { "POST", "/api/users/delete",     "删除用户只接受 POST",   handle_users_delete },
     { "POST", "/api/users/face_clear", "清除人脸只接受 POST",   handle_users_face_clear },
     { "POST", "/api/users/face_set",   "人脸录入只接受 POST",   handle_users_face_set },
+    { "POST", "/api/users/ic_set",     "IC 卡绑定只接受 POST",  handle_users_ic_set },
+    { "POST", "/api/users/ic_clear",   "IC 卡解绑只接受 POST",  handle_users_ic_clear },
     { "GET",  "/api/access_set",       "门禁设置只接受 GET",    handle_access_set_get },
     { "POST", "/api/access_set",       "门禁设置只接受 POST",   handle_access_set_post },
     { "POST", "/api/system/reboot",    "重启接口只接受 POST",   handle_system_reboot },

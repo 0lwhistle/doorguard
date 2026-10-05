@@ -138,6 +138,21 @@ int iccard_uid_to_hex(const uint8_t *uid, uint8_t uid_len, char *out)
     return DG_OK;
 }
 
+bool iccard_no_valid(const char *card_no)
+{
+    if (!card_no)
+        return false;
+    size_t n = strlen(card_no);
+    if (n < 8 || n % 2 != 0 || n > (size_t)DG_IC_LEN - 1)
+        return false;                     /* 最短 4B UID;32 字符放不下(含 NUL) */
+    for (size_t i = 0; i < n; i++) {
+        const char c = card_no[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')))
+            return false;                 /* 小写由入口归一,这里只认大写 */
+    }
+    return true;
+}
+
 void iccard_mask(const char *card_no, char *out, size_t cap)
 {
     if (!out || cap < 10) {

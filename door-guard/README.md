@@ -38,7 +38,7 @@ tests/web/web_test.sh        # web 上位机功能验收
 | `services/enroll/` | 录入编排(请求→抓取→查重→入库→回执) | — |
 | `services/capture/` | 取流状态服务(EV_CAPTURE_STATE) | — |
 | `services/liveness/` | 活体占位(接口预留;认证管线强制阶段) | — |
-| `services/verify/` | auth_provider 统一认证抽象 + face/fingerprint/ic provider(B10b) | services/verify/auth_provider.h |
+| `services/verify/` | 各验证方式 provider:face(vision)/ fingerprint(fp_provider)/ ic(card_provider);认证判定经事件总线走 FSM,无统一 provider 抽象(v2 草案 auth_provider.h 已废) | services/verify/ic/README.md |
 | `services/web/` | web 上位机(mongoose 统一事件循环 + Vue 前端 `frontend/`,产物内嵌) | services/web/README.md |
 | `services/ota/` | OTA(流式+sha256,方案 docs/tech/OTA_PLAN.md) | — |
 | `services/ntp/` `services/mdns/` | 时间同步 / mDNS 服务通告 | — |

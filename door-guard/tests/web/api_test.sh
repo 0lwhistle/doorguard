@@ -118,6 +118,61 @@ R=$(curl -s -m 3 -H "$A" "$B/api/users?page=1&page_size=50")
 ck "清脸后 has_face=false" '"has_face":false' "$R"
 rm -f "$FACE_JPG"
 
+# ---- IC 卡绑定/解绑(卡号直输同步落库;2026-10-05)----
+# 未录 IC 时方式位不变式拦 IC 位(密码|IC = 4|8 = 12)
+R=$(curl -s -m 3 -X POST $B/api/users/update -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest1","auth_flags":12}')
+ck "未绑卡开 IC 位被拒" "该验证方式未录入" "$R"
+
+# 缺字段/格式非法
+R=$(curl -s -m 3 -X POST $B/api/users/ic_set -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest1"}')
+ck "绑卡缺 card_no 被拒" "需要 uid 与 card_no" "$R"
+R=$(curl -s -m 3 -X POST $B/api/users/ic_set -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest1","card_no":"04a3b2"}')
+ck "卡号 3 字节被拒" "8~30 位十六进制" "$R"
+R=$(curl -s -m 3 -X POST $B/api/users/ic_set -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest1","card_no":"04A3B2G1"}')
+ck "卡号非 HEX 被拒" "8~30 位十六进制" "$R"
+R=$(curl -s -m 3 -X POST $B/api/users/ic_set -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"nouser99","card_no":"04A3B2C1"}')
+ck "给不存在用户绑卡回 404 文案" "用户不存在" "$R"
+
+# 小写归一 + 绑定成功,列表回掩码(原卡号不出设备)
+R=$(curl -s -m 3 -X POST $B/api/users/ic_set -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest1","card_no":"04a3b2c1"}')
+ck "绑卡成功(小写归一)" "IC 卡已绑定" "$R"
+ck "绑卡回执带掩码" '"ic_mask":"********B2C1"' "$R"
+R=$(curl -s -m 3 -H "$A" "$B/api/users?page=1&page_size=50")
+ck "列表 has_ic=true" '"has_ic":true' "$R"
+ck "列表掩码展示" '"ic_mask":"********B2C1"' "$R"
+
+# 方式位不变式:已绑卡后 IC 位可开
+R=$(curl -s -m 3 -X POST $B/api/users/update -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest1","auth_flags":12}')
+ck "已绑卡开 IC 位通过" "已保存" "$R"
+
+# 重复绑卡:第二用户绑同卡被拒
+R=$(curl -s -m 3 -X POST $B/api/users/add -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest6","name":"六号","pwd":"test1234","role":0,"auth_flags":4}')
+ck "添加第二个用户" "已添加" "$R"
+R=$(curl -s -m 3 -X POST $B/api/users/ic_set -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest6","card_no":"04A3B2C1"}')
+ck "同卡绑第二人被拒" "该卡已绑定其他用户" "$R"
+
+# 解绑:清卡 + 方式位回收
+R=$(curl -s -m 3 -X POST $B/api/users/ic_clear -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest1"}')
+ck "解绑成功" "IC 卡已解绑" "$R"
+R=$(curl -s -m 3 -H "$A" "$B/api/users?page=1&page_size=50")
+ck "解绑后 has_ic=false" '"has_ic":false' "$R"
+R=$(curl -s -m 3 -X POST $B/api/users/ic_clear -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest1"}')
+ck "重复解绑幂等" "IC 卡已解绑" "$R"
+R=$(curl -s -m 3 -X POST $B/api/users/ic_clear -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"nouser99"}')
+ck "解绑不存在用户回 404 文案" "用户不存在" "$R"
+
 # 改密
 R=$(curl -s -m 3 -X POST $B/api/users/pwd -H "$A" -H "Content-Type: application/json" \
   -d '{"uid":"webtest1","pwd":"newpass99"}')
@@ -181,6 +236,11 @@ ck "未知项拒绝" "未知设置项" "$R"
 # 恢复默认值
 curl -s -m 3 -X POST $B/api/access_set -H "$A" -H "Content-Type: application/json" \
   -d '{"door_open_ms":3000,"face_match_threshold":0.42}' > /dev/null
+
+# 清理 IC 段创建的第二个用户(重跑脚本不因残留 uid 挂掉)
+curl -s -m 3 -X POST $B/api/users/delete -H "$A" -H "Content-Type: application/json" \
+  -d '{"uid":"webtest6"}' > /dev/null
+sleep 1
 
 echo "=============================="
 echo "PASS=$PASS FAIL=$FAIL"

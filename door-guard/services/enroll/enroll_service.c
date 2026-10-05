@@ -19,6 +19,7 @@
 #include "dg_log.h"
 #include "event_bus.h"
 #include "events.h"
+#include "iccard_hal.h"
 #include "storage.h"
 #include "vision_service.h"
 
@@ -551,6 +552,56 @@ static int ic_bind(const char *uid, const char *card_no)
     return db_user_update(&rec);
 }
 
+/* 日志一律掩码(ICCARD_PROTOCOL §5);掩码串 "********"+末4+NUL = 13B */
+static inline void ic_mask_of(const char *card_no, char out[13])
+{
+    iccard_mask(card_no, out, 13);
+}
+
+int enroll_service_ic_set(const char *user_id, const char *card_no)
+{
+    if (!user_id || !user_id[0] || !card_no || !iccard_no_valid(card_no))
+        return DG_ERR_PARAM;
+
+    user_rec_t hit;
+    int rc = db_find_by_ic(card_no, &hit);
+    if (rc == DG_OK) {
+        /* 重绑同一张卡 = 幂等成功;他人卡 = 重复(排除自身语义同指纹) */
+        rc = (strcmp(hit.user_id, user_id) == 0) ? DG_OK : DG_ERR_DUP_IC;
+    } else if (rc == DG_ERR_NOT_FOUND) {
+        rc = ic_bind(user_id, card_no);
+    }
+    char m[13];
+    ic_mask_of(card_no, m);
+    if (rc == DG_OK)
+        DG_LOGI(TAG, "绑卡 %s <- %s", user_id, m);
+    else
+        DG_LOGW(TAG, "绑卡失败 %s <- %s (rc=%d)", user_id, m, rc);
+    return rc;
+}
+
+int enroll_service_ic_clear(const char *user_id)
+{
+    if (!user_id || !user_id[0])
+        return DG_ERR_PARAM;
+    user_rec_t rec;
+    int rc = db_user_get(user_id, &rec);
+    if (rc != DG_OK)
+        return rc;
+    char m[13];
+    ic_mask_of(rec.ic_card, m);           /* 掩码先取,清空后就没了 */
+    if (rec.ic_card[0]) {                 /* 未绑卡 = 幂等成功,不空转写库 */
+        rec.ic_card[0] = '\0';            /* 覆盖语义:空 = 解绑 */
+        rec.auth_flags &= ~(uint32_t)DG_AUTH_IC;
+        rc = db_user_update(&rec);
+    }
+    if (rc == DG_OK)
+        DG_LOGI(TAG, "解绑 %s(原卡 %s)", user_id, m);
+    else
+        DG_LOGW(TAG, "解绑失败 %s (rc=%d)", user_id, rc);
+    return rc;
+}
+
 /* IC 卡事件:录入态消费绑定;其余状态忽略(FSM 分支归 access_service) */
 static int on_ic_card(const event_t *e, void *ud)
 {
@@ -565,18 +616,8 @@ static int on_ic_card(const event_t *e, void *ud)
     ic_state_clear();
     ic_flush_req();                       /* 会话结束清缓冲(协议 §4) */
 
-    user_rec_t hit;
-    int rc = db_find_by_ic(c->card_no, &hit);
-    if (rc == DG_OK) {
-        /* 重绑同一张卡 = 幂等成功;他人卡 = 重复(排除自身语义同指纹) */
-        rc = (strcmp(hit.user_id, uid) == 0) ? DG_OK : DG_ERR_DUP_IC;
-    } else if (rc == DG_ERR_NOT_FOUND) {
-        rc = ic_bind(uid, c->card_no);
-    }
-    if (rc == DG_OK)
-        DG_LOGI(TAG, "绑卡成功 %s <- %s", uid, c->card_no);
-    else
-        DG_LOGW(TAG, "绑卡失败 %s <- %s (rc=%d)", uid, c->card_no, rc);
+    /* 查重排除自身 + 落库(web ic_set 同一实现,日志掩码在其内) */
+    int rc = enroll_service_ic_set(uid, c->card_no);
     publish_result(uid, DG_ENROLL_IC, seq, rc);
     return 0;
 }
@@ -660,13 +701,7 @@ static int on_request(const event_t *e, void *ud)
         return 0;
     }
     if (r->kind == DG_ENROLL_IC_CLEAR) {
-        user_rec_t rec;
-        int rc = db_user_get(r->user_id, &rec);
-        if (rc == DG_OK && rec.ic_card[0]) {
-            rec.ic_card[0] = '\0';        /* 覆盖语义:空 = 解绑 */
-            rec.auth_flags &= ~(uint32_t)DG_AUTH_IC;
-            rc = db_user_update(&rec);
-        }
+        int rc = enroll_service_ic_clear(r->user_id);   /* web ic_clear 同实现 */
         publish_result(r->user_id, r->kind, r->seq, rc);
         return 0;
     }

@@ -278,7 +278,7 @@ target_link_libraries(dg_rknn_face PUBLIC m)
 # enroll:录入编排
 add_library(dg_enroll STATIC services/enroll/enroll_service.c)
 target_include_directories(dg_enroll PUBLIC ${CMAKE_SOURCE_DIR}/services/enroll)
-target_link_libraries(dg_enroll PUBLIC dg_proto dg_storage dg_vision)
+target_link_libraries(dg_enroll PUBLIC dg_proto dg_storage dg_vision dg_iccard)
 
 # capture:取流状态服务
 add_library(dg_capture STATIC services/capture/capture_service.c)
@@ -375,7 +375,8 @@ target_include_directories(dg_net PUBLIC ${CMAKE_SOURCE_DIR}/services
                                          ${CMAKE_SOURCE_DIR}/modules)
 target_link_libraries(dg_net PUBLIC dg_net_info)
 # crypto:web_auth(PBKDF2)/web_session(RAND)依赖;mongoose 自带 SHA1 无需 shim
-target_link_libraries(dg_net PUBLIC dg_access dg_storage mongoose crypto dg_timeutil)
+target_link_libraries(dg_net PUBLIC dg_access dg_storage mongoose crypto dg_timeutil
+                                    dg_iccard)
 
 # 固件版本号:git describe 注入(上位机"设备概览"与 /api/device 显示)。
 # 无 git / 无 tag 时退化为 unknown——不能因为版本号取不到就让编译失败。

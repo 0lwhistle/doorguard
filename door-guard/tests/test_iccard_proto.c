@@ -2,8 +2,9 @@
  * test_iccard_proto.c — IC 卡帧契约与卡号字符串化单测(ICCARD_PROTOCOL §3/§5)
  *
  * 覆盖:帧校验(magic 错/uid_len 越界)、HEX 转换(4B/15B/越界拒收)、
- * 展示掩码(末 4 恒有/短串全掩)。sim 后端 pipe 语义一并冒烟
- * (open→inject→poll→read→flush,真实 fd 路径零改动)。
+ * 卡号合法性(8~30 大写偶长 HEX)、展示掩码(末 4 恒有/短串全掩)。
+ * sim 后端 pipe 语义一并冒烟(open→inject→poll→read→flush,真实 fd
+ * 路径零改动)。
  */
 #include "dg_test.h"
 #include "iccard_hal.h"
@@ -68,6 +69,25 @@ static void t_hex(void)
     DG_CHECK(iccard_uid_to_hex(NULL, 4, no) == DG_ERR_PARAM);
 }
 
+static void t_no_valid(void)
+{
+    printf("[P3] 卡号合法性(8~30 偶长大写 HEX,iccard_no_valid)\n");
+    DG_CHECK(iccard_no_valid("04A3B2C1"));            /* 4B UID 最短 */
+    DG_CHECK(iccard_no_valid("01020304050607"));      /* 7B UID */
+    char max31[31];                                   /* 30 字符 = 15B UID 上限 */
+    memset(max31, 'A', 30);
+    max31[30] = '\0';
+    DG_CHECK(iccard_no_valid(max31));
+
+    DG_CHECK(!iccard_no_valid("04A3B2C"));            /* 7 字符:奇长且 <8 */
+    DG_CHECK(!iccard_no_valid("04A3B2"));             /* 6 字符:不足 4B */
+    DG_CHECK(!iccard_no_valid("04a3b2c1"));           /* 小写:入口须先归一 */
+    DG_CHECK(!iccard_no_valid("04A3B2C1 "));          /* 尾随空格 */
+    DG_CHECK(!iccard_no_valid("04A3B2G1"));           /* 非 HEX 字符 */
+    DG_CHECK(!iccard_no_valid(""));                   /* 空 */
+    DG_CHECK(!iccard_no_valid(NULL));
+}
+
 static void t_mask(void)
 {
     printf("[P3] 展示掩码(********+末4)\n");
@@ -119,6 +139,7 @@ int main(void)
 {
     t_frame_valid();
     t_hex();
+    t_no_valid();
     t_mask();
     t_sim_pipe();
     DG_TEST_EXIT();

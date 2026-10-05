@@ -5,7 +5,8 @@
  *       → card_provider 发 EV_IC_CARD → enroll 查重/落库/写方式位
  *       → EV_ENROLL_RESULT。
  * 覆盖:绑定成功(ic_card+auth_flags)、他人卡 DUP_IC、同卡重绑幂等、
- * 录入态取消+换会话 FLUSH(旧帧不串)、解绑清位。
+ * 录入态取消+换会话 FLUSH(旧帧不串)、解绑清位;P7/P8 直调
+ * enroll_service_ic_set/ic_clear(web ic_set|ic_clear 同实现)。
  */
 #include "dg_test.h"
 #include "card_provider.h"
@@ -190,6 +191,27 @@ int main(void)
     DG_CHECK(a.ic_card[0] == '\0');
     DG_CHECK(!(a.auth_flags & DG_AUTH_IC));
     DG_CHECK(a.auth_flags & DG_AUTH_FACE);          /* 别误清其他位 */
+
+    printf("[P7] 直调 ic_set(web 路径):格式/查重/幂等\n");
+    DG_CHECK(enroll_service_ic_set("20001", "04a3b2c1") == DG_ERR_PARAM);  /* 小写拒收 */
+    DG_CHECK(enroll_service_ic_set("20001", "04A3B2") == DG_ERR_PARAM);    /* 3B 不足 */
+    DG_CHECK(enroll_service_ic_set("20001", "") == DG_ERR_PARAM);
+    DG_CHECK(enroll_service_ic_set("nobody", "04A3B2C1") == DG_ERR_NOT_FOUND);
+    DG_CHECK(enroll_service_ic_set("20001", "99887766") == DG_OK);
+    DG_CHECK(enroll_service_ic_set("20001", "99887766") == DG_OK);         /* 幂等 */
+    DG_CHECK(enroll_service_ic_set("20002", "99887766") == DG_ERR_DUP_IC);
+    user_rec_t c = get_user("20001");
+    DG_CHECK(strcmp(c.ic_card, "99887766") == 0);
+    DG_CHECK(c.auth_flags & DG_AUTH_IC);
+
+    printf("[P8] 直调 ic_clear:解绑/幂等/不存在用户\n");
+    DG_CHECK(enroll_service_ic_clear("20002") == DG_OK);   /* 有卡(11223344) */
+    b = get_user("20002");
+    DG_CHECK(b.ic_card[0] == '\0');
+    DG_CHECK(!(b.auth_flags & DG_AUTH_IC));
+    DG_CHECK(b.auth_flags & DG_AUTH_FACE);                 /* 别误清其他位 */
+    DG_CHECK(enroll_service_ic_clear("20002") == DG_OK);   /* 未绑卡幂等 */
+    DG_CHECK(enroll_service_ic_clear("nobody") == DG_ERR_NOT_FOUND);
 
     card_provider_stop();
     enroll_service_stop();

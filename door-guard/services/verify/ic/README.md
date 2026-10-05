@@ -1,6 +1,7 @@
 # services/verify/ic — IC 读卡业务层
 
-> 2026-10-01 应用层落地。契约唯一事实源:`docs/tech/ICCARD_PROTOCOL.md`
+> 2026-10-01 应用层落地;2026-10-05 补齐 web 直输卡号绑定/解绑与全链日志掩码。
+> 契约唯一事实源:`docs/tech/ICCARD_PROTOCOL.md`
 > (驱动作者与应用层的双向接口,改任何一侧先改文档)。
 > 硬件状态:驱动 .ko 与 DTS 未上线——provider 停在降级态退避重试
 > (`/dev/dg_iccard0` open 失败),整机不受影响(协议 §10 失败隔离)。
@@ -33,6 +34,16 @@ provider **不做业务分流**:每帧原样发布;普通开门分支的防重�
   经 `FSM_EV_VERIFY_RESULT` 进统一结果处理。
 - 其余状态(弹窗非 v_ic/菜单/编辑页):忽略,不落日志。
 
+## 录入(设备端刷卡 + web 卡号直输,同一实现)
+
+- 设备端:编辑页 `DG_ENROLL_IC` → 录入态收下一张 `EV_IC_CARD` →
+  `enroll_service_ic_set`(查重排除自身→落库+置位);取消/退出发
+  `DG_ENROLL_IC_CANCEL` + FLUSH。
+- web:`POST /api/users/ic_set {uid, card_no}` / `ic_clear {uid}` 直调
+  `enroll_service_ic_set/ic_clear`(同步落库,登记例外同 face_upload);
+  卡号 8~30 位 HEX,小写归一;`GET /api/users` 行内 `ic_mask` 掩码展示。
+- 日志一律掩码 `********+末4`(协议 §5;card_provider/enroll/web 同口径)。
+
 ## 使用示例
 
 ```c
@@ -44,14 +55,20 @@ bridge_enroll_request(uid, DG_ENROLL_IC);
 bridge_enroll_request(uid, DG_ENROLL_IC_CLEAR);   /* 解绑 */
 /* 页面退出时 */ bridge_enroll_request(uid, DG_ENROLL_IC_CANCEL);
 
+/* web/直调路径(与刷卡路径同一查重/置位语义) */
+enroll_service_ic_set(uid, "04A3B2C1");
+enroll_service_ic_clear(uid);
+
 /* 宿主测试:sim 后端注入(drv/iccard/iccard_hal_sim.c,iccard.dev_path="sim") */
 iccard_sim_inject((uint8_t *)"\x04\xA3\xB2\xC1", 4);
 ```
 
 ## 测试
 
-- `test_iccard_proto`:帧校验/HEX/掩码 + sim pipe 语义。
+- `test_iccard_proto`:帧校验/HEX/卡号合法性/掩码 + sim pipe 语义。
 - `test_card_dedup`:防重窗三则(窗内忽略/窗外放行/异卡不互斥)。
 - `test_fsm_ic`:§7.2 表逐行 + reason=9 门禁。
-- `test_enroll_ic`:绑卡端到端(成功/他人卡/幂等重绑/取消+FLUSH/解绑)。
+- `test_enroll_ic`:绑卡端到端(成功/他人卡/幂等重绑/取消+FLUSH/解绑)
+  + 直调 ic_set/ic_clear(格式/幂等/404)。
+- `tests/web/api_test.sh`:ic_set/ic_clear 端点 + 掩码展示 + 不变式兜底。
 - 板上验收(驱动就绪后):真卡开门、按住只开一次、重复卡录入被拒、拔模块降级提示。

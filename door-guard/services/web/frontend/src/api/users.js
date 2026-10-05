@@ -44,6 +44,18 @@ export function validPwd(v) {
   return /^[\x21-\x7e]{4,31}$/.test(v)
 }
 
+/* IC 卡号(ICCARD_PROTOCOL §5):8~30 位十六进制 = 4~15B UID。
+ * 全链路口径恒为大写 HEX,小写输入归一后再校验 */
+export function normalizeCardNo(v) {
+  return (v || '').trim().toUpperCase()
+}
+
+export function validCardNo(v) {
+  return /^[0-9A-F]{8,30}$/.test(normalizeCardNo(v))
+}
+
+export const CARD_NO_HINT = '卡号 8~30 位十六进制(4~15 字节 UID),例:04A3B2C1'
+
 export const UID_HINT = 'ID 需 3~31 位字母/数字/\'-\'/\'_\',且以字母或数字开头'
 export const NAME_HINT = '姓名 1~63 字节,不能为空/前后带空格/含控制字符'
 export const PWD_HINT = '密码 4~31 位可见字符(不含空格)'
@@ -96,6 +108,19 @@ export function setUserFace({ uid, blob }) {
     rawBody: blob,
     rawType: 'image/jpeg',
   })
+}
+
+/** 绑定 IC 卡(同步落库;查重/置位在服务端,重绑覆盖)。卡号小写自动归一 */
+export function setUserIc({ uid, cardNo }) {
+  return request(PATHS.usersIcSet, {
+    method: 'POST',
+    body: { uid, card_no: normalizeCardNo(cardNo) },
+  })
+}
+
+/** 解绑 IC 卡(同步;未绑卡幂等成功) */
+export function clearUserIc({ uid }) {
+  return request(PATHS.usersIcClear, { method: 'POST', body: { uid } })
 }
 
 /**

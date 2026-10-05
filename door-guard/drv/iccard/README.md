@@ -23,6 +23,7 @@ void iccard_hal_close(int fd);
 
 bool iccard_frame_valid(const dg_iccard_frame_t *f);    /* magic/uid_len */
 int  iccard_uid_to_hex(const uint8_t *uid, uint8_t len, char out[DG_IC_LEN]);
+bool iccard_no_valid(const char *card_no);   /* 8~30 偶长大写 HEX(§5) */
 void iccard_mask(const char *card_no, char *out, size_t cap); /* ********+末4 */
 ```
 

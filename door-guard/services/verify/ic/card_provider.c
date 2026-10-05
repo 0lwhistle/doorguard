@@ -138,8 +138,11 @@ static void *provider_thread(void *arg)
 
         /* 防重窗不在这里做:协议 §7.1 明确它是"普通开门分支专用",而
          * provider 不知道 FSM 状态——每帧原样发布,由 access_service 按
-         * FSM 状态分流时执行窗检查(v_ic/录入分支天然单发,不需要窗) */
-        DG_LOGI(TAG, "读到卡 %s(type=%u seq=%u)", no, f.card_type, f.seq);
+         * FSM 状态分流时执行窗检查(v_ic/录入分支天然单发,不需要窗)。
+         * 日志掩码:协议 §5 界面与日志一律掩码 */
+        char m[13];
+        iccard_mask(no, m, sizeof(m));
+        DG_LOGI(TAG, "读到卡 %s(type=%u seq=%u)", m, f.card_type, f.seq);
 
         ev_ic_card_t ev;
         memset(&ev, 0, sizeof(ev));

@@ -1,13 +1,10 @@
 # IC 卡读卡器 驱动-应用层协议设计(SPI 读头接入)
 
-> 状态:**应用侧已落地(2026-10-01)**——drv/iccard + card_provider + FSM 分支 +
-> 录入/UI 全链按本文实现(`services/verify/ic/README.md`);驱动 .ko 与 DTS 待用户交付,
-> 交付前 provider 停降级态,整机不受影响(§10)。
+> 状态:**应用侧已落地并补齐(2026-10-05)**——drv/iccard + card_provider + FSM 分支 +
+> 录入/UI/web 全链按本文实现(设备端 `services/verify/ic/README.md`,web `/api/users/ic_set|ic_clear`);
+> 驱动 .ko 与 DTS 待用户交付,交付前 provider 停降级态,整机不受影响(§10)。
 > 面向:**驱动作者**(SPI 读卡器 Linux 驱动)与**应用层实现者**(door-guard 卡服务/FSM/UI)。
-> 状态:**应用侧已落地(2026-10-01)**——drv/iccard + card_provider + FSM 分支 +
-> 录入/UI 全链按本文实现(services/verify/ic/README.md);驱动 .ko 与 DTS 待交付,
-> 交付前 provider 停降级态,整机不受影响(§10 失败隔离)。
-> 本文是双方的**接口契约**:驱动按 §2~§5 实现,应用层按 §2~§7 消费;任何一侧要改协议,
+> 本文是双方的**接口契约**:驱动按 §2~§6 实现,应用层按 §2~§7 消费;任何一侧要改协议,
 > 必须先改本文并双向确认,禁止单方面变更。
 > 总体方案评审结论见会话记录(2026-09-27);业务细则以 `spec-auth-business.md`、
 > `spec-database.md` 为权威,本文与其冲突时以 references 为准并回改本文。
@@ -89,10 +86,17 @@ struct dg_iccard_stats {
 ## 5. 卡号字符串化规则(DB/事件/日志/web 全链路口径,定后难改)
 
 - **格式**:uid 按字节顺序逐字节**大写 HEX、无分隔符**。例:4B `04 A3 B2 C1` → `"04A3B2C1"`。
-- 最短 8 字符(4B UID),最长 32 字符(16B UID),恰为 `DG_IC_LEN=32` 上限内。
+- **有效域 8~30 字符(4~15B UID)**:`DG_IC_LEN=32` 含 `'\0'`,16B UID 的 32 字符
+  HEX 放不下(`iccard_uid_to_hex` 对 uid_len>15 返回 `DG_ERR_PARAM`,provider 按坏帧
+  丢弃并 WARN)——**驱动侧帧格式仍须支持 uid_len≤16(§3 不变),但 16B UID 卡
+  (极罕见,DESFire/NTag424 16B 模式)不会被业务收录**;扩上限须先动
+  `proto/types.h`(DB/事件/用户记录三处口径)。
 - 转换只发生在 card_provider 一处(驱动吐原始字节,其余全链路只见字符串)。
 - **显示掩码**(spec-database §3):`********` + 末 4 字符,如 `********B2C1`
-  (HEX 卡号最短 8 字符,末 4 恒有;界面与日志一律掩码)。
+  (HEX 卡号最短 8 字符,末 4 恒有;**界面与日志一律掩码**,2026-10-05 起全链
+  日志已改掩码输出)。
+- **输入侧校验**(web 绑定/设备录入共用 `iccard_no_valid`):8~30 字符、偶数长、
+  全大写 HEX;web 接受小写输入归一为大写后校验。
 
 ## 6. 错误语义(驱动 → 应用)
 
@@ -137,12 +141,20 @@ struct dg_iccard_stats {
 → UI 红字「卡号重复,录入失败」;成功:落库 → RESULT 带卡号 → UI 按掩码显示。
 页面退出/取消 → 撤销录卡态 + `FLUSH`。
 
-### 7.4 auth_provider.h 修订(接入前待办)
+**web 上位机(2026-10-05 补齐)**:上位机无读卡硬件,走**卡号直输同步落库**——
+`POST /api/users/ic_set {uid, card_no}`(格式校验→查重排除自身→落库+置位,小写归一)
+与 `POST /api/users/ic_clear {uid}`(解绑+回收方式位),均经 `enroll_service_ic_set/ic_clear`
+与设备端刷卡路径共用同一实现;`GET /api/users` 行内增 `ic_mask`(掩码,原卡号不出设备)。
+前端 UsersView 编辑页提供录入/重绑/解绑。方式位不变式由 storage 层兜底
+(开 IC 位而无卡号 → `DG_ERR_AUTH_NO_CRED`)。
 
-该头文件是 v2 前草案:`user_id` 为 `uint32_t`,与现行 `proto/types.h` 字符串口径不一致;
-其 `verify(timeout_ms)` 阻塞语义与 IC 的事件驱动模型不符(IC 实际编排走事件流,同人脸的
-`EV_VISION_VERIFY_11` 模式)。实现 `auth_card_provider()` 前先按现行契约修订此头,
-IC 的 provider 仅作登记与生命周期管理,认证判定走 §7.2 事件分支。
+### 7.4 auth_provider.h 处置(2026-10-05 定案)
+
+v2 前草案 `services/verify/auth_provider.h`(统一 provider 抽象,`user_id` 为
+uint32_t)已**删除**:IC(与指纹)的实际落地走"provider 生命周期管理 + 事件总线
+业务分流"模型——卡服务的登记与生命周期在 `card_provider`,认证判定全部在
+access_service 的 §7.2 事件分支,阻塞式 `verify()` 抽象与事件驱动模型天然不符。
+本节留档防止回退:再有人提议统一 provider 抽象,先推翻本决策再动。
 
 ## 8. 配置项
 
@@ -198,3 +210,5 @@ IC 的 provider 仅作登记与生命周期管理,认证判定走 §7.2 事件�
 2. `card_type` 取值按实际支持的卡型确认(仅诊断,不阻塞)。
 3. ~~有无 IRQ 线~~ **已关闭(2026-09-27)**:模块引脚含 `RQ` 中断脚,中断路线定案(§10)。
 4. 同卡持续在场的上报周期(RQ 触发寻卡的节奏),供板上验收对照防重窗。
+5. 16B UID 卡是否需要支持收录(§5 现行卡号串口径放不下 16B/32 字符;默认不支持,
+   驱动照常上报、应用丢弃)。

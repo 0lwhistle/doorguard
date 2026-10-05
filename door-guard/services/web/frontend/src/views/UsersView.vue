@@ -1,11 +1,12 @@
 <!--
-  UsersView.vue — 用户管理(列表 / 添加 / 编辑 / 删除 / 改密 / 人脸录入与清除)
+  UsersView.vue — 用户管理(列表 / 添加 / 编辑 / 删除 / 改密 / 人脸与 IC 卡录入)
 
   与设备端同一套业务规则:字段校验 JS 版先反馈,服务端(storage 层权威)
   兜底,错误文案直接呈现服务端 msg。删除/清人脸/人脸录入是受理制(经
   enroll 服务与视觉后端,DB+特征库+头像一起动),结果经 WS enroll 消息
-  (seq 配对)回推后刷新确认。验证方式勾选受「方式位 ⇒ 已录凭据」约束:
-  未录入的方式在服务端会被拒,前端直接禁用并标注。
+  (seq 配对)回推后刷新确认;IC 卡绑定是同步落库(卡号直输,无提取链路)。
+  验证方式勾选受「方式位 ⇒ 已录凭据」约束:未录入的方式在服务端会被拒,
+  前端直接禁用并标注。
 -->
 <script setup>
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
@@ -17,9 +18,10 @@ import DataTable from '../components/DataTable.vue'
 import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '../api/logs'
 import { onEnrollResult } from '../stores/events'
 import {
-  AUTH_FLAGS, NAME_HINT, PWD_HINT, ROLE_TEXT, ROLES, UID_HINT,
-  addUser, clearUserFace, deleteUser, downscaleJpeg, listUsers, setUserFace,
-  setUserPwd, updateUser, validName, validPwd, validUid,
+  AUTH_FLAGS, CARD_NO_HINT, NAME_HINT, PWD_HINT, ROLE_TEXT, ROLES, UID_HINT,
+  addUser, clearUserFace, clearUserIc, deleteUser, downscaleJpeg, listUsers,
+  normalizeCardNo, setUserFace, setUserIc, setUserPwd, updateUser,
+  validCardNo, validName, validPwd, validUid,
 } from '../api/users'
 import { toast } from '../stores/toast'
 
@@ -29,7 +31,8 @@ const COLUMNS = [
   { key: 'roleText', label: '权限', width: '10%' },
   { key: 'authText', label: '验证方式' },
   { key: 'faceText', label: '人脸', width: '9%' },
-  { key: 'ops', label: '操作', width: '30%' },
+  { key: 'icText', label: 'IC 卡', width: '12%' },
+  { key: 'ops', label: '操作', width: '24%' },
 ]
 
 const rows = ref([])
@@ -75,6 +78,7 @@ function decorate(row) {
     roleText: ROLE_TEXT[row.role] || '?',
     authText: authText(row),
     faceText: row.has_face ? '已录入' : '无',
+    icText: row.ic_mask || '无',
   }
 }
 
@@ -107,7 +111,10 @@ function openEdit(row) {
   form.value = {
     mode: 'edit',
     uid: row.uid,
-    creds: { has_face: row.has_face, has_finger: row.has_finger, has_ic: row.has_ic },
+    creds: {
+      has_face: row.has_face, has_finger: row.has_finger, has_ic: row.has_ic,
+      ic_mask: row.ic_mask || '',
+    },
   }
   f.uid = row.uid
   f.name = row.name
@@ -208,6 +215,43 @@ const unsubEnroll = onEnrollResult((msg) => {
   }
 })
 
+/* ---- IC 卡绑定/解绑(同步落库;卡号直输,与设备端刷卡同一服务端实现) ---- */
+
+async function onBindIc() {
+  const raw = window.prompt(
+    `为用户 ${form.value.uid} 绑定 IC 卡\n输入卡号(8~30 位十六进制,设备端录入页可读出):`,
+  )
+  if (raw === null) return
+  const no = normalizeCardNo(raw)
+  if (!no) return
+  if (!validCardNo(no)) {
+    toast.err(CARD_NO_HINT)
+    return
+  }
+  try {
+    const res = await setUserIc({ uid: form.value.uid, cardNo: no })
+    toast.ok(res.msg || 'IC 卡已绑定')
+    form.value.creds.has_ic = true
+    form.value.creds.ic_mask = res.ic_mask || '********'
+    load(page.value)
+  } catch (err) {
+    toast.err(err.message)
+  }
+}
+
+async function onUnbindIc() {
+  if (!window.confirm(`确认解绑 ${form.value.uid} 的 IC 卡?解绑后刷卡验证立即失效。`)) return
+  try {
+    await clearUserIc({ uid: form.value.uid })
+    toast.ok('IC 卡已解绑')
+    form.value.creds.has_ic = false
+    form.value.creds.ic_mask = ''
+    load(page.value)
+  } catch (err) {
+    toast.err(err.message)
+  }
+}
+
 async function onResetPwd(row) {
   const pwd = window.prompt(`为用户 ${row.uid}(${row.name})设置新密码,4~31 位可见字符、不含空格:`)
   if (pwd === null) return
@@ -263,12 +307,15 @@ onUnmounted(() => {
 <template>
   <AppCard v-if="!form" title="用户管理" :index="0">
     <div class="bar">
-      <span class="muted small">共 {{ total }} 人;人脸可在编辑页上传录入,指纹/IC 在设备端录入</span>
+      <span class="muted small">共 {{ total }} 人;人脸可编辑页上传,IC 卡编辑页直输卡号或设备端刷卡录入,指纹在设备端录入</span>
       <AppButton icon="check" size="sm" @click="openAdd">添加用户</AppButton>
     </div>
     <DataTable :columns="COLUMNS" :rows="rows" row-key="uid" :loading="loading">
       <template #cell-faceText="{ row }">
         <span :class="{ dim: !row.has_face }">{{ row.faceText }}</span>
+      </template>
+      <template #cell-icText="{ row }">
+        <span :class="{ dim: !row.ic_mask }">{{ row.icText }}</span>
       </template>
       <template #cell-ops="{ row }">
         <span class="cell-ops">
@@ -334,12 +381,26 @@ onUnmounted(() => {
         </div>
         <span class="small muted">选图后自动降采样(最长边 1024)上传;提取在设备端后台进行,完成后提示结果</span>
       </div>
+      <div v-if="form.mode === 'edit'" class="ic-bind">
+        <span class="small muted">
+          IC 卡({{ form.creds.ic_mask ? `已绑定 ${form.creds.ic_mask}` : '尚未绑定' }})
+        </span>
+        <div class="face-upload__row">
+          <AppButton size="sm" variant="ghost" @click="onBindIc">
+            {{ form.creds.ic_mask ? '重绑 IC 卡' : '录入 IC 卡' }}
+          </AppButton>
+          <AppButton v-if="form.creds.ic_mask" size="sm" variant="ghost" @click="onUnbindIc">
+            解绑
+          </AppButton>
+        </div>
+        <span class="small muted">卡号直输(设备端录入页读出或卡面印刷);也可在设备端编辑页刷卡录入</span>
+      </div>
     </div>
     <div class="ops">
       <AppButton icon="check" :loading="busy" @click="onSave">保存</AppButton>
       <AppButton variant="ghost" @click="closeForm">取消</AppButton>
     </div>
-    <p class="muted small">新用户必须设密码;未录入的方式不能勾选(人脸可在本页上传,指纹/IC 卡在设备端录入)。</p>
+    <p class="muted small">新用户必须设密码;未录入的方式不能勾选(人脸可本页上传、IC 卡本页直输卡号,指纹在设备端录入)。</p>
   </AppCard>
 </template>
 
@@ -381,6 +442,11 @@ onUnmounted(() => {
   opacity: 0.5;
 }
 .face-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ic-bind {
   display: flex;
   flex-direction: column;
   gap: 6px;

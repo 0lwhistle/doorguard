@@ -98,6 +98,12 @@ bool iccard_frame_valid(const dg_iccard_frame_t *f);
 /** uid → 卡号字符串;out 须 ≥DG_IC_LEN;uid_len 非法返回 DG_ERR_PARAM */
 int iccard_uid_to_hex(const uint8_t *uid, uint8_t uid_len, char *out);
 
+/** 卡号字符串合法性(ICCARD_PROTOCOL §5,录入/web 绑定入口共用):
+ *  8~30 字符、偶数长、全大写 HEX(4~15B UID)。16B UID 超 DG_IC_LEN
+ *  承载力(见 iccard_uid_to_hex),不在合法域内——输入侧一律先归一
+ *  大写再校验,本函数不做归一 */
+bool iccard_no_valid(const char *card_no);
+
 /** 卡号 → 展示掩码("********"+末4);out 须 ≥10 字节 */
 void iccard_mask(const char *card_no, char *out, size_t cap);
 
