@@ -78,6 +78,9 @@ typedef struct {
 
 void ota_update_transport_set(const ota_transport_t *t, void *ud);
 
+/** 当前固件版本(= DG_FW_VERSION,git describe;测试与展示用) */
+const char *ota_update_current_version(void);
+
 /* ---- 纯函数(宿主单测) ---- */
 
 /** 版本比较:cand 是否比 cur 新。规则见头注;cur 为空(unknown)且 cand

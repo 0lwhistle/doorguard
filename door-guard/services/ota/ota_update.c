@@ -330,6 +330,7 @@ static void *download_thread(void *arg)
         DG_LOGE(TAG, "ota_begin 失败(%d):升级会话被占用?", rc);
         goto close_src;
     }
+    session_open = true;
 
     for (;;) {
         if (atomic_load(&s_abort_req)) {
@@ -372,14 +373,6 @@ static void *download_thread(void *arg)
             mqtt_state_report("staged", 1000, DG_OK);
         }
     }
-    if (rc != DG_OK && !atomic_load(&s_abort_req)) {
-        ota_abort();
-        DG_LOGE(TAG, "下载/校验失败(%d)", rc);
-        state_set(OTA_UPD_FAILED, rc, permille);
-        mqtt_state_report("failed", permille, rc);
-    } else if (rc != DG_OK) {
-        ota_abort();                        /* stop 路径:静默清理 */
-    }
 
 close_src:
     if (tp && tp->close)
@@ -390,6 +383,17 @@ free_src:
     if (!tp)
         ota_http_src_free(src);
 done:
+    /* 所有失败路径(含 goto 跳过下载循环的:缺 url/大小对拍/会话占用)
+     * 统一在此收敛 FAILED——不收敛会让状态永久卡在 DOWNLOADING。
+     * abort 幂等:未开会话/已 finish 后调用都是 no-op */
+    ota_abort();
+    if (rc != DG_OK && !atomic_load(&s_abort_req)) {
+        DG_LOGE(TAG, "下载/校验失败(%d)", rc);
+        state_set(OTA_UPD_FAILED, rc, permille);
+        mqtt_state_report("failed", permille, rc);
+    } else if (rc != DG_OK) {
+        DG_LOGI(TAG, "下载中止(stop),静默清理");
+    }
     atomic_store(&s_busy, false);
     return NULL;
 }
@@ -419,6 +423,11 @@ int ota_update_apply(void)
     s_thread_alive = true;
     pthread_detach(s_thread);
     return DG_OK;
+}
+
+const char *ota_update_current_version(void)
+{
+    return DG_FW_VERSION;
 }
 
 /* ---- 手动检查更新 ---- */
