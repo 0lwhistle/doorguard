@@ -1,6 +1,30 @@
 # 开发日志(DEVLOG)
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
+
+## 2026-10-06 IC 卡 M0 验线全通(板上实测 0x92)+ 驱动开发环境交付——应用侧零改动
+
+1. **M0 当场通过**:rc522_m0 板上实测 VersionReg(0x37)=0x92(MFRC522 v2.0)连读
+   一致——用户已接线,板上现镜像本就带 /dev/spidev4.0,刷机不是 M0 的前置条件。
+2. **工具入库** `door-guard/tools/rc522_m0/`(单文件 C,零 door-guard 依赖;宿主/
+   交叉双编译零告警,-static;二进制已推板 /root,WSL ~/k7-deliverables 同存)。
+   接线表/判读表在 README;M0 阶段 RST 跳线 3V3,M2 起改接 14 脚由驱动 reset-gpios 控制。
+3. **K7 SDK 侧(WSL 树,不进本仓库)**:`drivers/misc/k7_rc522` 接线(Kconfig/Makefile
+   + drivers/misc 两行,CONFIG 未启用,构建保持绿,38s 增量);`~/k7-tools/sync-driver.sh`
+   升级(.config 自动开 =m + .ko 顺手 scp 推板);`~/k7-tools/build-rc522-v2.sh` 备好
+   (DTS §5.3 节点 + defconfig =m,幂等,M1 骨架过了才跑);**HANDOFF §5.3 修真 bug:
+   interrupts 7→31**(GPIO2_D7 = bank 内 31,原 7 = M2_A7,M3 中断将永不触发)。
+4. **v1 镜像交付**:`C:\Users\86151\Desktop\doorguard\flash_images\boot-m0-spidev-20261006.img`
+   44MB,md5 4095233c4f8922ead80ad55d37f92aa3(WSL 双读+Windows 拷贝三读一致)。
+   刷不刷均可;建议刷——后续 .ko 与内核同源(无 MODVERSIONS,树/板对齐最稳)。
+5. 下一步:用户手写 `k7_rc522.c`(契约 `docs/tech/ICCARD_PROTOCOL.md` §2~§6,节点
+   /dev/dg_iccard0,compatible 必须写 `k7,rc522` 与 v2 DTS 对齐;源码放
+   `Desktop\doorguard\kernal_driver\k7_rc522\`,sync-driver.sh 迭代)→ M1 probe 读版本
+   (骨架先别硬性要 IRQ,参考实现 probe 硬性要求 IRQ 勿照抄)→ 跑 build-rc522-v2.sh
+   刷 v2 → M2~M4 纯 .ko 迭代 → 板上四项验收(真卡开门/防重窗/重复卡拒/拔模块降级)。
+
+---
+
 ## 2026-10-05(一)IC 卡业务补齐:web 直输卡号绑定/解绑+日志掩码+web 预检——46/46、web 67/67、api 58/58、交叉零告警
 
 1. **审计先行**:IC 应用层(HAL→card_provider→FSM 三分支→enroll→UI→配置→4 测试)
