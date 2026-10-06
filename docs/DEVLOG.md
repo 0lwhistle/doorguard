@@ -22,6 +22,13 @@
    `Desktop\doorguard\kernal_driver\k7_rc522\`,sync-driver.sh 迭代)→ M1 probe 读版本
    (骨架先别硬性要 IRQ,参考实现 probe 硬性要求 IRQ 勿照抄)→ 跑 build-rc522-v2.sh
    刷 v2 → M2~M4 纯 .ko 迭代 → 板上四项验收(真卡开门/防重窗/重复卡拒/拔模块降级)。
+6. **驱动开发包交付**(仓库外 `kernal_driver/k7_rc522/`,不入 git):build.sh(Git Bash)/
+   build.bat(双击)一键走 sync-driver.sh 全链;`PROTOCOL.md` 两层协议手册(§1 驱动↔应用
+   契约速览+逐字节常量清单;§2 RC522 芯片级 SPI 速查:寄存器访问格式/初始化序列/PCD 命令/
+   Transceive 节奏/CRC-A 低字节在前/REQA 7bit 短帧/级联 CT 剥除/RQ 中断 0xA0)。编译链
+   实测走通(自动开 =m → 同步 → 编译拦截按预期)。用户已开写 rc522.c——**主文件须改名
+   k7_rc522.c**(树内 Makefile 编 k7_rc522.o),sync 脚本已加自动提醒;另修 sync 脚本
+   清「is not set」注释行,消 kconfig override 告警。
 
 ---
 
