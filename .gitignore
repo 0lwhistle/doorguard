@@ -46,6 +46,7 @@ docs/tech/OTA_PLAN.md
 docs/img/
 deliverables/firmware/20260917-B4/
 deliverables/lvgl9-c2-walkthrough/
+deliverables/lvgl9-c3-board-walkthrough/
 
 # 官方 PDF 体量大且公开可取,不随仓库分发(本地保留)
 sdk-guide/docs/

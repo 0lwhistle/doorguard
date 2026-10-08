@@ -5,15 +5,19 @@ KickPi K7(RK3576,6 TOPS NPU)+ 5 寸 MIPI 屏(F050008M01,720×1280)+ IMX415 摄�
 (检测 + 识别 + 反欺骗活体)、LVGL9 无桌面 UI、SQLite 业务存储、Vue3 Web 上位机、
 OTA A/B 升级与 MQTT 接入,单仓打通固件 → 驱动 → 算法 → 应用 → 上位机全栈。
 
-## 板上实拍
+## 界面实拍
 
-| 主页 | 功能菜单 |
+720×1280,LVGL9 UI,模拟器截图(与板端同构,注入触摸逐页走查)。
+
+| 主页(1:N 人脸检测) | 验证成功弹窗 |
 |---|---|
-| ![主页](deliverables/lvgl9-c3-board-walkthrough/01_home.png) | ![菜单](deliverables/lvgl9-c3-board-walkthrough/50_menu.png) |
-| **用户编辑** | **开门日志** |
-| ![用户编辑](deliverables/lvgl9-c3-board-walkthrough/52_user_edit.png) | ![开门日志](deliverables/lvgl9-c3-board-walkthrough/54_logs.png) |
+| ![主页](deliverables/ui-walkthrough/01_home.png) | ![验证成功](deliverables/ui-walkthrough/02_verify_ok.png) |
+| **功能菜单** | **用户管理** |
+| ![菜单](deliverables/ui-walkthrough/03_menu.png) | ![用户管理](deliverables/ui-walkthrough/04_users.png) |
+| **用户编辑(人脸已录入)** | **记录查询(开门日志)** |
+| ![用户编辑](deliverables/ui-walkthrough/05_user_edit.png) | ![记录查询](deliverables/ui-walkthrough/07_access_logs.png) |
 
-更多走查截图见 `deliverables/lvgl9-c3-board-walkthrough/`(真机注入触摸逐页取证)。
+更多截图见 `deliverables/ui-walkthrough/`(含多因子验证方式选择弹窗)。
 
 ## 仓库内容
 
@@ -26,8 +30,8 @@ OTA A/B 升级与 MQTT 接入,单仓打通固件 → 驱动 → 算法 → 应�
 ├── board/                   板端 rootfs 定制(S60 开机服务脚本)
 ├── env/                     WSL 编译/部署/OTA/测试脚本(source env/env.sh 后 dg-* 直接可用)
 ├── door-guard/              门禁应用源码(LVGL9 UI / 业务服务 / 内嵌 Web 上位机)
-├── deliverables/            产物:板上 UI 走查截图 + 固件/工具链包元数据
-│                            (镜像等大二进制不进 git,仅 README/md5 文本入库)
+├── deliverables/            产物:UI 走查截图(deliverables/ui-walkthrough/)
+│                            + 固件/工具链包元数据(大二进制不进 git)
 ├── sdk-guide/               官方 SDK 开发资源指南(阅读地图)
 ├── sdk-patches/             对官方 SDK 的全部修改,以 git patch 管理
 └── tools/                   板上走查/性能取证工具与活体模型转换脚本
