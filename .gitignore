@@ -27,3 +27,29 @@ __pycache__/
 
 # 走查取证临时输出(DG_WALK_DUMP_DIR 截屏 bmp,见 display 后端)
 tmp_walk/
+
+# 内部工作流文档与简历材料(公开仓库不展示,本地保留,历史可取回)
+PROJECT_PLAN.md
+docs/RESUME_PROJECT.md
+docs/prompts/
+docs/superpowers/
+docs/PENDING_DECISIONS.md
+docs/architecture-v2-proposal.md
+docs/lvgl9-migration-LOG.md
+docs/tech/B7_FACE_HANDOFF.md
+docs/tech/CAPTURE_AVATAR_HANDOFF.md
+docs/tech/HW_BRINGUP_VM_TASK.md
+docs/tech/OTA_PLAN.md
+.agents/
+
+# 过时阶段产物留档(本地保留)
+docs/img/
+deliverables/firmware/20260917-B4/
+deliverables/lvgl9-c2-walkthrough/
+
+# 官方 PDF 体量大且公开可取,不随仓库分发(本地保留)
+sdk-guide/docs/
+
+# 本地一次性脚本与前端开发构建产物
+stage_cmake_hunk.py
+door-guard/services/web/frontend/dist-dev/

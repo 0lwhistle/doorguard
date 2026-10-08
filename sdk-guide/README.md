@@ -2,7 +2,7 @@
 
 > 适用:KickPi K7(RK3576)+ 官方 Linux 6.1 SDK。
 > SDK 本体(19GB)只在编译 VM:`~/Linux/rk3576/Rk3576-SDK/rk3576_data/rk3576-linux-2026091008`,
-> 本指南所有路径均相对该目录。`docs/` 子目录里是已拷贝进本仓库的官方 PDF,可直接下载阅读。
+> 本指南所有路径均相对该目录。文中提到的官方 PDF 不随本仓库分发,按文件名向官方 SDK 文档目录(`docs/cn/`、`docs/en/`)或 Rockchip 资料页索取。
 
 ## 0. 一页速查:我要做 X,用哪个?
 
@@ -58,7 +58,7 @@
 封装成的简单 C 接口库,内部已是 V4L2+DRM 零拷贝管线。**门禁的预览+显示直接基于它,
 不要自己从 V4L2 裸写。**
 
-**位置**:`app/rkadk`,含 `include/`(API 头文件)、`examples/`(15 个可跑样例)、`docs/`(中英开发指南 PDF,已拷贝进本仓库)。
+**位置**:`app/rkadk`,含 `include/`(API 头文件)、`examples/`(15 个可跑样例)、`docs/`(中英开发指南 PDF)。
 
 **关键 example**:
 
@@ -111,7 +111,7 @@ IMX415 是 RAW 传感器,**没有它画面就是不正常的**。
 
 - 板型适配:`librockiva/rockiva-rk3576-Linux`(预编译库)+ `models/rockiva_data_rk3576`
 - API 头文件:`librockiva/rockiva-rk3576-Linux/include/rockiva_face_api.h`
-- 开发指南:`Rockchip_Developer_Guide_ROCKIVA_SDK_CN.pdf`(已拷入本仓库 `sdk-guide/docs/`)
+- 开发指南:`Rockchip_Developer_Guide_ROCKIVA_SDK_CN.pdf`(官方文档)
 - Buildroot:`BR2_PACKAGE_IVA=y` + `BR2_PACKAGE_IVA_RK3576=y`(doorGuard 配置已启用,staging 可直接链接)
 
 **NPU 工具链(备选/自定义模型时用)**:
@@ -146,7 +146,7 @@ examples(`external/rknpu2/examples/`):`rknn_api_demo`(基础流程)、`rknn_yolo
 
 ## 8. 官方文档地图
 
-**已拷贝进本仓库 `sdk-guide/docs/`(直接下载看)**:
+**优先阅读(官方文档,按文件名索取)**:
 
 | 文件 | 内容 | 优先级 |
 |---|---|---|

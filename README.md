@@ -1,20 +1,34 @@
-# k7_rk3576 — RK3576 K7 人脸识别门禁项目仓库
+# RK3576 K7 人脸识别门禁 — 全栈自研
 
- KickPi K7(RK3576)+ 5寸MIPI屏(F050008M01)+ IMX415 摄像头,LVGL + NPU 人脸识别门禁。
+KickPi K7(RK3576,6 TOPS NPU)+ 5 寸 MIPI 屏(F050008M01,720×1280)+ IMX415 摄像头。
+从 Buildroot 固件裁剪、DTS 屏幕触摸使能、交叉编译工具链,到 NPU 人脸识别链路
+(检测 + 识别 + 反欺骗活体)、LVGL9 无桌面 UI、SQLite 业务存储、Vue3 Web 上位机、
+OTA A/B 升级与 MQTT 接入,单仓打通固件 → 驱动 → 算法 → 应用 → 上位机全栈。
+
+## 板上实拍
+
+| 主页 | 功能菜单 |
+|---|---|
+| ![主页](deliverables/lvgl9-c3-board-walkthrough/01_home.png) | ![菜单](deliverables/lvgl9-c3-board-walkthrough/50_menu.png) |
+| **用户编辑** | **开门日志** |
+| ![用户编辑](deliverables/lvgl9-c3-board-walkthrough/52_user_edit.png) | ![开门日志](deliverables/lvgl9-c3-board-walkthrough/54_logs.png) |
+
+更多走查截图见 `deliverables/lvgl9-c3-board-walkthrough/`(真机注入触摸逐页取证)。
 
 ## 仓库内容
 
 ```
-├── PROJECT_PLAN.md          项目方案与执行手册(唯一事实来源,每阶段更新)
 ├── docs/                    开发文档
 │   ├── DEV_HANDBOOK.md      软件开发手册(硬件事实/编译环境/踩坑索引)
 │   ├── DEVLOG.md            开发日志(过程与坑,按日追加)
-│   ├── prompts/             会话开工提示词(NEXT_SESSION / IDLE_TASK)
-│   └── tech/                技术文档(FLASHING 烧录 / TOOLCHAIN 交叉编译)
-├── env/                     WSL 环境与脚本(source env/env.sh 后 dg-* 直接可用)
-├── door-guard/              门禁应用源码(WSL 编码编译 / VM 兜底)
-├── deliverables/            产物:固件包(firmware/)+ WSL 工具链包(wsl-toolchain/)
-│                            (仅 README/md5 等文本进 git;镜像/工具链 tar 本地保留)
-├── sdk-guide/               官方 SDK 开发资源指南(必读) + 9 份精选官方文档 PDF
-└── sdk-patches/             对官方 SDK 的全部修改,以 git patch 管理
+│   └── tech/                技术文档(FLASHING 烧录 / TOOLCHAIN 交叉编译 /
+│                            FINGERPRINT、ICCARD 硬件协议 / MODULE_DEV_GUIDE)
+├── board/                   板端 rootfs 定制(S60 开机服务脚本)
+├── env/                     WSL 编译/部署/OTA/测试脚本(source env/env.sh 后 dg-* 直接可用)
+├── door-guard/              门禁应用源码(LVGL9 UI / 业务服务 / 内嵌 Web 上位机)
+├── deliverables/            产物:板上 UI 走查截图 + 固件/工具链包元数据
+│                            (镜像等大二进制不进 git,仅 README/md5 文本入库)
+├── sdk-guide/               官方 SDK 开发资源指南(阅读地图)
+├── sdk-patches/             对官方 SDK 的全部修改,以 git patch 管理
+└── tools/                   板上走查/性能取证工具与活体模型转换脚本
 ```
