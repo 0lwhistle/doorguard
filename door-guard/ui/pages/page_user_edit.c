@@ -283,7 +283,7 @@ static void refresh(void)
     }
 
     /* 人脸行三态草稿显示:服务内草稿(已拍未保存)> 清除标志(待清除)>
-     * DB 现值。按钮文案按"点下去做什么"给:已录(含未保存草稿)→ 修改,
+     * DB 现值。按钮文案按「点下去做什么」给:已录(含未保存草稿)→ 修改,
      * 未录 → 录入;弹窗内仍提供 重录/清除 */
     const bool face_draft = enroll_service_draft_active(s_uid);
     if (face_draft)
