@@ -312,6 +312,12 @@ target_link_libraries(dg_uart PUBLIC dg_log)
 # 宿主没有 rknn 头/驱动,只在交叉编译里编(与 vision_rockiva.c 同一条守卫);
 # 全仓只有 drv/npu/npu_model.c include <rknn_api.h>,上层只认 npu_model.h。
 if(NOT DG_SIM AND NOT DG_BUILD_TESTS)
+    # AS608 协议级探针(板上跑,不进 door-guard 主程序):应用独占 uart,
+    # 未冻结的帧式(UpChar/DownChar 数据包+结束包、LoadChar 打空页的确认码)
+    # 必须脱离业务序列才测得干净。停 S60doorguard 后直接用。
+    add_executable(fp_probe tools/fp_probe.c)
+    target_link_libraries(fp_probe PRIVATE dg_fp_as608 dg_uart dg_log)
+
     add_library(dg_npu STATIC drv/npu/npu_model.c drv/npu/npu_pre.c)
     target_include_directories(dg_npu PUBLIC ${CMAKE_SOURCE_DIR}/drv/npu
                                              ${CMAKE_SOURCE_DIR}/proto)

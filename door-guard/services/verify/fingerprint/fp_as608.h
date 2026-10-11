@@ -58,6 +58,17 @@ const char *fp_as608_confirm_name(uint16_t code);
 size_t fp_as608_build_cmd(uint8_t *out, size_t cap, uint8_t cmd,
                           const uint8_t *params, size_t nparams);
 
+/**
+ * 数据包(0x02):`包头 + 02 <数据长+2> <数据> 校验和 2B`(字面长度,同指令包)。
+ * UpChar 应答的数据包与 DownChar 下行用的是同一种帧(协议文档 §3)。
+ * @return 帧总字节数;缓冲不足返回 0
+ */
+size_t fp_as608_build_data(uint8_t *out, size_t cap,
+                           const uint8_t *data, size_t len);
+
+/** 结束包(0x08):常量帧 `EF01 FFFFFFFF 08 0003 000B`。DownChar 收尾必发 */
+size_t fp_as608_build_end(uint8_t *out, size_t cap);
+
 /* 逐指令便捷封装(参数式见协议文档 §2;返回同 build_cmd,0=容量不足) */
 size_t fp_as608_get_image(uint8_t *out, size_t cap);
 size_t fp_as608_img2tz(uint8_t *out, size_t cap, uint8_t buf_id);
@@ -67,6 +78,8 @@ size_t fp_as608_search(uint8_t *out, size_t cap, uint8_t buf_id,
 size_t fp_as608_reg_model(uint8_t *out, size_t cap);
 size_t fp_as608_store(uint8_t *out, size_t cap, uint8_t buf_id, uint16_t page_id);
 size_t fp_as608_load_char(uint8_t *out, size_t cap, uint8_t buf_id, uint16_t page_id);
+/** DownChar 指令头(0x09 + BufferID):应答后须再发数据包(build_data)+结束包(build_end) */
+size_t fp_as608_down_char(uint8_t *out, size_t cap, uint8_t buf_id);
 size_t fp_as608_delet_char(uint8_t *out, size_t cap, uint16_t page_id, uint16_t count);
 size_t fp_as608_empty(uint8_t *out, size_t cap);
 size_t fp_as608_valid_num(uint8_t *out, size_t cap);

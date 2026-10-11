@@ -52,12 +52,47 @@ size_t fp_as608_build_cmd(uint8_t *out, size_t cap, uint8_t cmd,
     return total;
 }
 
+/* 数据包(0x02):与指令包同构,只换标识码与语义(载荷即特征数据) */
+size_t fp_as608_build_data(uint8_t *out, size_t cap,
+                           const uint8_t *data, size_t len)
+{
+    if (len > FP_A608_PAYLOAD_MAX)
+        return 0;
+    /* 帧长字段 = 数据 + 校验和 2B */
+    size_t len_field = len + 2;
+    size_t total = FP_A608_HDR_LEN + 1 + 2 + len_field;
+    if (!out || cap < total || (len > 0 && !data))
+        return 0;
+
+    memcpy(out, FP_HDR, FP_A608_HDR_LEN);
+    out[FP_A608_HDR_LEN] = FP_A608_TYPE_DATA;
+    put_be16(out + FP_A608_HDR_LEN + 1, (uint16_t)len_field);
+    if (len)
+        memcpy(out + FP_A608_HDR_LEN + 3, data, len);
+    uint16_t sum = checksum_of(out + FP_A608_HDR_LEN, 3 + len);
+    put_be16(out + total - 2, sum);
+    return total;
+}
+
+/* 结束包(0x08):常量帧,校验和自洽(08+00+03=0x000B) */
+size_t fp_as608_build_end(uint8_t *out, size_t cap)
+{
+    static const uint8_t end_pkt[9] = {
+        0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF,
+        FP_A608_TYPE_END, 0x00, 0x03
+    };
+    if (!out || cap < sizeof(end_pkt) + 2)
+        return 0;
+    memcpy(out, end_pkt, sizeof(end_pkt));
+    put_be16(out + sizeof(end_pkt), 0x000B);
+    return sizeof(end_pkt) + 2;
+}
+
 /* 逐指令封装:统一走 build_cmd,单参数指令在此拼参数 */
 size_t fp_as608_get_image(uint8_t *out, size_t cap)
 {
     return fp_as608_build_cmd(out, cap, 0x01, NULL, 0);
 }
-
 size_t fp_as608_img2tz(uint8_t *out, size_t cap, uint8_t buf_id)
 {
     return fp_as608_build_cmd(out, cap, 0x02, &buf_id, 1);
@@ -94,6 +129,11 @@ size_t fp_as608_load_char(uint8_t *out, size_t cap, uint8_t buf_id, uint16_t pag
     uint8_t p[3] = { buf_id, 0, 0 };
     put_be16(p + 1, page_id);
     return fp_as608_build_cmd(out, cap, 0x07, p, sizeof(p));
+}
+
+size_t fp_as608_down_char(uint8_t *out, size_t cap, uint8_t buf_id)
+{
+    return fp_as608_build_cmd(out, cap, 0x09, &buf_id, 1);
 }
 
 size_t fp_as608_delet_char(uint8_t *out, size_t cap, uint16_t page_id, uint16_t count)
