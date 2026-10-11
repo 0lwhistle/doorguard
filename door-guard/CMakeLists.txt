@@ -241,9 +241,9 @@ target_include_directories(dg_ui PUBLIC ${CMAKE_SOURCE_DIR}/ui ${CMAKE_SOURCE_DI
                                         ${CMAKE_SOURCE_DIR}/services/access
                                         ${CMAKE_SOURCE_DIR}/services/enroll
                                         ${CMAKE_SOURCE_DIR}/services/capture)
+# dg_fp_sync:开机一致性检查的待告知(fp_sync.h),桥层拉取式弹窗
 target_link_libraries(dg_ui PUBLIC lvgl dg_config dg_access dg_storage dg_jpeg
-                                   dg_net_info dg_capture
-                                   dg_fp_sync)   /* 开机一致性检查的待告知(桥层拉取) */
+                                   dg_net_info dg_capture dg_fp_sync)
 
 # access:验证状态机 + 认证融合服务(FSM 持有者,日志/开门唯一出口)
 add_library(dg_access STATIC
