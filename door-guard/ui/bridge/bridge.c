@@ -9,6 +9,7 @@
  */
 #include "bridge.h"
 #include "event_bus.h"
+#include "fp_sync.h"
 #include "modules/display/display.h"
 #include "dg_log.h"
 
@@ -304,6 +305,7 @@ void bridge_init(void)
     event_bus_subscribe(EV_SYS_SERVICE_STATE, on_service_state, NULL);
     event_bus_subscribe(EV_NET_OTA_UPDATE, on_ota_update, NULL);
     event_bus_subscribe(EV_MQTT_STATE, on_mqtt_state, NULL);
+    event_bus_subscribe(EV_SYS_DATA_OP_RESULT, on_data_op_result, NULL);
     DG_LOGI("[BRIDGE]", "事件桥就绪(23 订阅)");
 }
 
@@ -395,6 +397,30 @@ void bridge_net_cfg_set(bool is_static, const char *ip, const char *mask,
     snprintf(ev.mask, sizeof(ev.mask), "%s", mask ? mask : "");
     snprintf(ev.gw, sizeof(ev.gw), "%s", gw ? gw : "");
     EVENT_BUS_PUBLISH(EV_NET_CFG_SET, &ev);
+}
+
+/* ---- 设备数据维护(2026-10-11) ---- */
+
+static int on_data_op_result(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_DATA_OP_RESULT;
+    evt.data_op = *(const ev_sys_data_op_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
+void bridge_data_op(int32_t op)
+{
+    ev_sys_data_op_t req = { .op = op, .err = 0 };
+    EVENT_BUS_PUBLISH(EV_SYS_DATA_OP, &req);
+}
+
+bool bridge_fp_notice_take(int32_t *out)
+{
+    return fp_sync_take_notice(out);
 }
 
 uint32_t bridge_enroll_request(const char *uid, int32_t kind)

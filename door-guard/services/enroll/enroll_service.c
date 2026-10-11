@@ -20,6 +20,7 @@
 #include "event_bus.h"
 #include "events.h"
 #include "iccard_hal.h"
+#include "cfg.h"
 #include "storage.h"
 #include "vision_service.h"
 
@@ -30,7 +31,7 @@
 
 static const char *TAG = "[ENROLL]";
 
-static event_subscription_t *s_subs[4];
+static event_subscription_t *s_subs[5];   /* 4 条业务 + EV_SYS_DATA_OP */
 static int s_sub_cnt = 0;
 
 /* ---- IC 录入态(enroll 独有;ICCARD_PROTOCOL §7.3) ----
@@ -708,6 +709,69 @@ static int on_request(const event_t *e, void *ud)
     return 0;
 }
 
+/* ---- 设备数据维护(设备管理 → 关于设备 → 设备数据;2026-10-11) ----
+ * 四个 op 里 FINGER_CLEAR 归 fp_provider(它独占串口),其余三个在此编排。
+ * 四个都要 UI 二次确认——数据不可逆。 */
+
+/** 清所有用户:人脸内存库清 → 删全部用户行,模组清空异步下发。
+ *  顺序要紧:vision_service_library_clear 按 DB 用户列表逐个删,必须早于
+ *  db_user_del_all——删完 DB 就再也拿不到 ID 列表,内存库会留残留
+ *  (残留本身是 fail-closed=命中后回查 DB 拒绝,但没必要留)。 */
+static int data_op_clear_users(void)
+{
+    /* 挂起的录入态一律作废:整库清空后草稿/绑卡态没有任何意义 */
+    ic_state_clear();
+    enroll_service_discard_draft(NULL);
+
+    /* 模组侧清空:异步下发(provider 在自己线程做 Empty + 清指纹表)。
+     * 失败不回滚本操作——DB 行已删,下次开机一致性检查看到
+     * 「模组>0 板端=0」会把孤儿模板清掉,自愈。 */
+    ev_finger_mode_t mev;
+    memset(&mev, 0, sizeof(mev));
+    mev.mode = DG_FMODE_CLEAR_ALL;
+    EVENT_BUS_PUBLISH(EV_FINGER_SET_MODE, &mev);
+
+    int vrc = vision_service_library_clear();
+    if (vrc != DG_OK && vrc != DG_ERR_NOT_INIT)
+        DG_LOGW(TAG, "清所有用户:内存特征库清空异常(%d),继续删 DB", vrc);
+
+    uint32_t n = 0;
+    int rc = db_user_del_all(&n);
+    if (rc != DG_OK) {
+        DG_LOGE(TAG, "清所有用户:删 DB 失败(%d)", rc);
+        return rc;
+    }
+    DG_LOGI(TAG, "清所有用户完成:%u 个", n);
+    return DG_OK;
+}
+
+static int on_data_op(const event_t *e, void *ud)
+{
+    (void)ud;
+    const ev_sys_data_op_t *req = (const ev_sys_data_op_t *)e->data;
+    int err;
+    switch (req->op) {
+    case DG_DATA_OP_USER_CLEAR:
+        err = data_op_clear_users();
+        break;
+    case DG_DATA_OP_ALL_CLEAR:
+        /* 用户拍板定义:清所有数据 = 清所有用户 + 恢复默认配置 */
+        err = data_op_clear_users();
+        if (err == DG_OK)
+            err = cfg_reset_all();
+        break;
+    case DG_DATA_OP_CFG_RESET:
+        err = cfg_reset_all();
+        break;
+    default:
+        return 0;              /* FINGER_CLEAR:订阅在 fp_provider,别重复处理 */
+    }
+    DG_LOGI(TAG, "设备数据操作 op=%d → err=%d", req->op, err);
+    ev_sys_data_op_t res = { .op = req->op, .err = err };
+    EVENT_BUS_PUBLISH(EV_SYS_DATA_OP_RESULT, &res);
+    return 0;
+}
+
 int enroll_service_start(void)
 {
     if (s_sub_cnt)
@@ -716,6 +780,7 @@ int enroll_service_start(void)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_FEATURE, on_feature, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_VISION_STILL_FAIL, on_still_fail, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_IC_CARD, on_ic_card, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_SYS_DATA_OP, on_data_op, NULL);
     DG_LOGI(TAG, "enroll 服务启动");
     return DG_OK;
 }

@@ -12,6 +12,7 @@
 #include "ui.h"
 #include "cfg.h"
 #include "modules/display/display.h"
+#include "fp_sync.h"
 #include "i18n.h"
 #include "lvgl.h"
 #include "navigator/navigator.h"
@@ -39,8 +40,35 @@ extern void presenter_net_set_register(void);
 extern void presenter_face_set_register(void);
 extern void presenter_finger_set_register(void);
 extern void presenter_about_register(void);
+extern void presenter_device_data_register(void);
 
 static lv_obj_t *s_page_root = NULL;
+
+/* 开机指纹数量一致性检查的告知(fp_sync,2026-10-11):检查在 provider 线程
+ * 里跑完,可能早于 UI 就绪;event_bus 不回放,所以这里拉取式补弹——
+ * 取走即清,一次检查只弹一次。 */
+static void fp_notice_poll(void)
+{
+    int32_t n = 0;
+    if (!bridge_fp_notice_take(&n))
+        return;
+    switch (n) {
+    case FP_NOTICE_MISMATCH:
+        dg_popup_fail(_("指纹数量出错,建议清除所有指纹"), 5000, NULL, NULL);
+        break;
+    case FP_NOTICE_CLEARED_MODULE:
+        dg_popup_success(_("指纹数量不一致,已清除模组内指纹"), 4000, NULL, NULL);
+        break;
+    case FP_NOTICE_CLEARED_DB:
+        dg_popup_fail(_("指纹数量不一致,已清除设备端指纹记录"), 4000, NULL, NULL);
+        break;
+    case FP_NOTICE_READ_FAIL:
+        dg_popup_fail(_("指纹模块读取异常,未校验指纹数量"), 4000, NULL, NULL);
+        break;
+    default:
+        break;
+    }
+}
 
 /* 全局事件泵:必须活在页面生命周期之外——
  * 原实现泵在 page_home 的定时器里,进待机 → home 销毁 → 泵停 →
@@ -68,6 +96,7 @@ static void ui_evt_pump_cb(lv_timer_t *t)
             navigator_dispatch_evt(&evt);    /* 内容事件给当前页渲染 */
         }
     }
+    fp_notice_poll();                        /* 开机一致性检查的补弹(拉取式) */
 }
 
 int ui_init(const dg_ui_args_t *args)
@@ -107,6 +136,7 @@ int ui_init(const dg_ui_args_t *args)
     presenter_face_set_register();
     presenter_finger_set_register();
     presenter_about_register();
+    presenter_device_data_register();
 
     bridge_init();
     /* 触摸按下沿 → EV_UI_TOUCH:任何页面的触摸都算「有操作」

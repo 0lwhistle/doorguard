@@ -56,6 +56,16 @@ uint32_t bridge_enroll_request(const char *uid, int32_t kind);
  *  @return 本次请求 seq(进度/结果事件原样带回,UI 据此丢弃陈旧回执) */
 uint32_t bridge_enroll_request_arg(const char *uid, int32_t kind, int32_t arg);
 
+/** 设备数据维护(设备管理 → 关于设备 → 设备数据;2026-10-11)。四个破坏性
+ *  op(op 见 dg_data_op_t),调用方**必须先二次确认**;回执经
+ *  UI_EVT_DATA_OP_RESULT 回流(按 op 配对)。 */
+void bridge_data_op(int32_t op);
+
+/** 指纹两侧数量检查的待告知(fp_sync)——开机检查可能早于 UI 就绪,而
+ *  event_bus 不回放,所以这条通知走"拉":UI 泵里轮询,取走即清。
+ *  @return true = *out 有效(fp_sync_notice_t 之一) */
+bool bridge_fp_notice_take(int32_t *out);
+
 /* Web 管理页:状态查询 + 账号/口令修改。
  * 凭据只由 net 模块读写(UI 不碰存储),动作走事件、结果经
  * UI_EVT_WEB_STATE / UI_EVT_WEB_SET_RESULT 回来。 */

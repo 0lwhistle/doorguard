@@ -786,6 +786,73 @@ static void test_finger(void)
     DG_CHECK(db_finger_alloc_page(&page) == DG_OK && page == 0);
 }
 
+/* 设备数据维护的两个清空接口(2026-10-11「设备数据」页):
+ *  - db_finger_clear_all:清表**同时**回收方式位——否则清完不重启的话,
+ *    方式选择里「指纹」还亮着、选进去必然超时(启动不变式要等下次上电)。
+ *    只回收给定位,别的方式位不许动。
+ *  - db_user_del_all:users 与 fingerprints 一起清,并回报删除行数。 */
+static void test_clear_all(void)
+{
+    printf("[S11] db_finger_clear_all(回收方式位)/ db_user_del_all\n");
+    fresh_setup();
+
+    user_rec_t u1 = make_user("40001", "甲", "p1");
+    user_rec_t u2 = make_user("40002", "乙", "p2");
+    u1.auth_flags = DG_AUTH_PWD;          /* db_user_add 按不变式只收有凭据的位 */
+    u2.auth_flags = DG_AUTH_PWD;
+    DG_CHECK(db_user_add(&u1) == DG_OK);
+    DG_CHECK(db_user_add(&u2) == DG_OK);
+
+    uint8_t vec[DG_FEATURE_MAX];
+    for (int i = 0; i < (int)sizeof(vec); i++)
+        vec[i] = (uint8_t)i;
+    DG_CHECK(db_finger_add("40001", 0, vec, sizeof(vec)) == DG_OK);
+    DG_CHECK(db_finger_add("40001", 1, vec, sizeof(vec)) == DG_OK);
+    DG_CHECK(db_finger_add("40002", 2, vec, sizeof(vec)) == DG_OK);
+
+    /* 摆成「有指纹位」的样子:走 DB 直改(test_auth_flags_invariant 同手法) */
+    char db[128], key[128];
+    snprintf(db, sizeof(db), "%s/db.sqlite", s_dir);
+    snprintf(key, sizeof(key), "%s/dg.key", s_dir);
+    storage_deinit();
+    {
+        sqlite3 *raw = NULL;
+        char *err = NULL;
+        DG_CHECK(sqlite3_open(db, &raw) == SQLITE_OK);
+        DG_CHECK(sqlite3_exec(raw, "UPDATE users SET auth_flags = 15;",
+                              NULL, NULL, &err) == SQLITE_OK);
+        sqlite3_free(err);
+        sqlite3_close(raw);
+    }
+    DG_CHECK(storage_init(db, key) == DG_OK);
+
+    user_rec_t got;
+    DG_CHECK(db_user_get("40001", &got) == DG_OK);
+    /* 启动不变式:有指纹行 ⇒ 留指纹位;无卡/无脸 ⇒ 其余位被规范化掉 */
+    DG_CHECK(got.auth_flags == (DG_AUTH_FINGER | DG_AUTH_PWD));
+
+    uint32_t n = 0;
+    DG_CHECK(db_finger_count_all(&n) == DG_OK && n == 3);
+    DG_CHECK(db_finger_clear_all(0) == DG_ERR_PARAM);      /* 掩码 0 = 参数错 */
+    DG_CHECK(db_finger_clear_all(DG_AUTH_FINGER) == DG_OK);
+
+    DG_CHECK(db_finger_count_all(&n) == DG_OK && n == 0);
+    DG_CHECK(db_user_get("40001", &got) == DG_OK);
+    DG_CHECK(got.auth_flags == DG_AUTH_PWD);               /* 指纹位已回收 */
+    DG_CHECK(db_user_get("40002", &got) == DG_OK);
+    DG_CHECK(got.auth_flags == DG_AUTH_PWD);
+    DG_CHECK(db_user_count(&n) == DG_OK && n == 2);        /* 清指纹 ≠ 清用户 */
+    DG_CHECK(db_finger_clear_all(DG_AUTH_FINGER) == DG_OK);/* 空表再清:幂等 */
+
+    /* 清所有用户:users 与 fingerprints 一把清,回报行数 */
+    DG_CHECK(db_finger_add("40001", 0, vec, sizeof(vec)) == DG_OK);
+    uint32_t del = 99;
+    DG_CHECK(db_user_del_all(&del) == DG_OK && del == 2);
+    DG_CHECK(db_user_count(&n) == DG_OK && n == 0);
+    DG_CHECK(db_finger_count_all(&n) == DG_OK && n == 0);
+    DG_CHECK(db_user_del_all(&del) == DG_OK && del == 0);  /* 空库再清:幂等 */
+}
+
 /* 迁移(幂等):老库(users 带 finger_vec 数据、无 fingerprints 表)→
  * storage_init 自动搬入 fingerprints 并把 users 列置 NULL。
  * 新库(直接 storage_init)无迁移动作。2026-09-30 决策 B 落地配套 */
@@ -964,6 +1031,7 @@ int main(void)
     test_concurrency();
     test_avatar();
     test_finger();
+    test_clear_all();
     test_finger_migration();
     test_auth_flags_invariant();
 

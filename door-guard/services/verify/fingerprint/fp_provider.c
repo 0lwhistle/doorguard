@@ -12,8 +12,10 @@
 #include "event_bus.h"
 #include "events.h"
 #include "fp_as608.h"
+#include "fp_sync.h"
 #include "registry.h"
 #include "storage.h"
+#include "tasker.h"
 #include "timeutil.h"
 
 #include <pthread.h>
@@ -67,6 +69,21 @@ static bool s_cmd_pending;
 static int32_t s_stored_page = -1;
 
 static event_subscription_t *s_sub;
+static event_subscription_t *s_sync_sub;   /* EV_FINGER_SYNC_TICK(tasker 重试节拍) */
+static event_subscription_t *s_data_op_sub;/* EV_SYS_DATA_OP(仅认 FINGER_CLEAR) */
+
+/* ---- 开机一致性检查(fp_sync;规则与边界见 fp_sync.h) ----
+ * 只有"两侧数量都成功读到"才做判定;读失败绝不折算成 0——一次串口抖动
+ * 就会把全部门禁指纹抹掉。读失败按用户指定:交 tasker 排重试,连续
+ * FP_SYNC_MAX_RETRY 次读不到就强制健康检查(VerifyPSW)判断模组是否还在。 */
+#define FP_SYNC_MAX_RETRY  5
+#define FP_SYNC_RETRY_MS   2000           /* 每次重试间隔 */
+
+static bool s_sync_pending;               /* 有待做的一致性检查 */
+static int  s_sync_retries;               /* 本次检查已失败次数 */
+static bool s_clear_report;               /* CLEAR_ALL 是否要发设备数据回执
+                                             (设备数据页发起才发;「清所有用户」
+                                              级联触发的不发,免得回执串台) */
 
 static const fp_link_ops_t *s_link;       /* NULL = 板级 ops */
 extern const fp_link_ops_t fp_link_uart;  /* fp_link_uart.c */
@@ -138,6 +155,11 @@ static void recover(void)
         s_ready = true;
         DG_LOGI(TAG, "模组就绪(握手通过)");
         publish_state(false);
+        /* 模组刚上线:排队做一次两侧数量一致性检查(用户策略 2026-10-11)。
+         * 放这里而不是上电时——上电时 UART/模组往往还没就绪,读不到数就在
+         * 这里排队等于每次开机都白跑一遍重试链 */
+        s_sync_pending = true;
+        s_sync_retries = 0;
     } else {
         s_ready = true;
     }
@@ -767,8 +789,184 @@ static void seq_del_user_pages(void)
     s_mode = DG_FMODE_IDLE;
 }
 
-/* ---- 按压沿与释放 ---- */
+/* ---- 清空整库(设备数据页「清除所有指纹」/「清所有用户」级联) ----
+ * 先模组 Empty 后 DB 清表:方向与 seq_del_one 一致(宁可留 DB 也不留
+ * "以为清了")。模组失败则 DB 不动,回执带错误码;残留的孤儿模板由下次
+ * 开机一致性检查清掉(这正是该检查存在的意义)。 */
+static void seq_clear_all(void)
+{
+    uint8_t b[FP_A608_FRAME_MAX];
+    fp_frame_t ack;
+    uint16_t c = 0xFFFF;
+    size_t n = fp_as608_empty(b, sizeof(b));
+    int err;
+    if (cmd_xchg(b, n, &ack, &c, 5000) != DG_OK) {
+        err = DG_ERR_IO;
+    } else if (c != FP_ACK_OK) {
+        err = confirm_to_err(c);
+    } else {
+        err = db_finger_clear_all(DG_AUTH_FINGER);
+    }
+    DG_LOGI(TAG, "清空指纹库:err=%d(模组 confirm=%s)", err, fp_as608_confirm_name(c));
 
+    if (s_clear_report) {
+        s_clear_report = false;
+        ev_sys_data_op_t res = { .op = DG_DATA_OP_FINGER_CLEAR, .err = err };
+        EVENT_BUS_PUBLISH(EV_SYS_DATA_OP_RESULT, &res);
+    }
+    s_mode = DG_FMODE_IDLE;
+}
+
+/* ---- 一致性检查(tasker 重试节拍) ---- */
+
+static enum task_t sync_retry_task(void *ctx)
+{
+    (void)ctx;
+    EVENT_BUS_PUBLISH_EMPTY(EV_FINGER_SYNC_TICK);
+    return TASK_OK;
+}
+
+static void arm_sync_retry(void)
+{
+    struct task_node node;
+    /* run_cnt=1 + period=延时:tasker 的一次性延时任务(house pattern:
+     * 定时器只发事件,业务仍在 provider 线程里做,见 access_service 的
+     * arm_fsm_timer) */
+    if (tasker_task_init_li(&node, FP_SYNC_RETRY_MS, 1, "fp_sync_retry",
+                            sync_retry_task, NULL) != TASK_OK ||
+        tasker_enqueue(&node) != TASK_OK) {
+        /* 排不上重试(队列满/参数错):不要静默丢,下轮循环直接再试 */
+        DG_LOGW(TAG, "一致性检查重试排期失败,tasker 满");
+        s_sync_pending = true;
+    }
+}
+
+static int on_sync_tick(const event_t *e, void *ud)
+{
+    (void)e;
+    (void)ud;
+    s_sync_pending = true;
+    return 0;
+}
+
+/** 读模组模板数(ValidTempleteNum);0=成功,负=没读到(链路/协议错) */
+static int read_module_count(uint32_t *out)
+{
+    uint8_t b[FP_A608_FRAME_MAX];
+    fp_frame_t ack;
+    uint16_t c = 0xFFFF;
+    size_t n = fp_as608_valid_num(b, sizeof(b));
+    if (cmd_xchg(b, n, &ack, &c, 2000) != DG_OK)
+        return DG_ERR_IO;
+    if (c != FP_ACK_OK)
+        return confirm_to_err(c);
+    /* payload = [确认码 1B, 模板数 2B] */
+    *out = (uint32_t)(((uint16_t)ack.payload[1] << 8) | ack.payload[2]);
+    return DG_OK;
+}
+
+/** 强制健康检查:模组到底还在不在(VerifyPSW 探活) */
+static bool health_check(void)
+{
+    uint8_t b[FP_A608_FRAME_MAX];
+    fp_frame_t ack;
+    uint16_t c = 0xFFFF;
+    size_t n = fp_as608_verify_psw(b, sizeof(b), 0);
+    if (cmd_xchg(b, n, &ack, &c, 1500) != DG_OK || c != FP_ACK_OK) {
+        s_link->close();
+        return false;
+    }
+    return true;
+}
+
+/** 常规模式(可打断)才允许插入检查:录入/删除/验证序列进行中一律让位 */
+static bool sync_allowed(void)
+{
+    return s_mode == DG_FMODE_IDLE || s_mode == DG_FMODE_SCAN_1N;
+}
+
+static void run_sync_check(void)
+{
+    uint32_t n_mod = 0;
+    if (read_module_count(&n_mod) != DG_OK) {
+        if (++s_sync_retries < FP_SYNC_MAX_RETRY) {
+            arm_sync_retry();
+            return;                        /* 保持 pending,等节拍 */
+        }
+        /* 连续读不到:先判模组是否接入,再决定降级还是只报读数异常 */
+        bool alive = health_check();
+        DG_LOGW(TAG, "指纹数量读取连续 %d 次失败,健康检查:%s",
+                s_sync_retries, alive ? "链路在,读数异常" : "模组失联");
+        fp_sync_push_notice(FP_NOTICE_READ_FAIL);
+        s_sync_pending = false;
+        if (!alive)
+            degrade();
+        return;
+    }
+
+    uint32_t n_db = 0;
+    if (db_finger_count_all(&n_db) != DG_OK) {
+        DG_LOGW(TAG, "板端指纹行数读取失败,本次不做一致性判定");
+        fp_sync_push_notice(FP_NOTICE_READ_FAIL);
+        s_sync_pending = false;
+        return;
+    }
+
+    fp_sync_verdict_t v = fp_sync_decide(n_db, n_mod);
+    int err = DG_OK;
+    switch (v) {
+    case FP_SYNC_CLEAR_MODULE: {
+        uint8_t b[FP_A608_FRAME_MAX];
+        fp_frame_t ack;
+        uint16_t c = 0xFFFF;
+        size_t n = fp_as608_empty(b, sizeof(b));
+        if (cmd_xchg(b, n, &ack, &c, 5000) != DG_OK || c != FP_ACK_OK)
+            err = DG_ERR_IO;
+        DG_LOGW(TAG, "两侧不一致:模组 %u / 板端 %u → 清空模组(去孤儿) err=%d",
+                n_mod, n_db, err);
+        fp_sync_push_notice(FP_NOTICE_CLEARED_MODULE);
+        break;
+    }
+    case FP_SYNC_CLEAR_DB:
+        err = db_finger_clear_all(DG_AUTH_FINGER);
+        DG_LOGW(TAG, "两侧不一致:模组 %u / 板端 %u → 清空板端指纹记录 err=%d"
+                     "(回灌不可行:该模组 UpChar/UpImage 不吐数据,见 fp_sync.h)",
+                n_mod, n_db, err);
+        fp_sync_push_notice(FP_NOTICE_CLEARED_DB);
+        break;
+    case FP_SYNC_MISMATCH:
+        DG_LOGW(TAG, "指纹数量出错:模组 %u / 板端 %u,仅提示不动手", n_mod, n_db);
+        fp_sync_push_notice(FP_NOTICE_MISMATCH);
+        break;
+    default:
+        DG_LOGI(TAG, "指纹数量一致:模组 %u / 板端 %u", n_mod, n_db);
+        break;
+    }
+
+    fp_sync_publish(n_db, n_mod, (int32_t)v, err, now_mono_ms());
+    s_sync_retries = 0;
+    s_sync_pending = false;
+}
+
+/* ---- 设备数据维护(仅认 FINGER_CLEAR;其余三个 op 归 enroll_service) ---- */
+
+static int on_data_op(const event_t *e, void *ud)
+{
+    (void)ud;
+    const ev_sys_data_op_t *req = (const ev_sys_data_op_t *)e->data;
+    if (req->op != DG_DATA_OP_FINGER_CLEAR)
+        return 0;
+    /* 交给线程执行(本回调在事件总线线程,不能碰串口) */
+    pthread_mutex_lock(&s_cmd_mtx);
+    memset(&s_cmd, 0, sizeof(s_cmd));
+    s_cmd.mode = DG_FMODE_CLEAR_ALL;
+    s_cmd_pending = true;
+    pthread_mutex_unlock(&s_cmd_mtx);
+    s_clear_report = true;
+    return 0;
+}
+
+/* ---- 按压沿与释放 ---- */
 static bool debounce_press(int lvl)
 {
     usleep(30 * 1000);
@@ -858,9 +1056,9 @@ static void apply_cmd(void)
     s_cmd_pending = false;
     pthread_mutex_unlock(&s_cmd_mtx);
 
-    /* 忙于录入/删除序列时只认 IDLE(取消);其余等序列自然结束(事件注) */
+    /* 忙于录入/删除/整库清空序列时只认 IDLE(取消);其余等序列自然结束(事件注) */
     bool busy = (s_mode == DG_FMODE_ENROLL || s_mode == DG_FMODE_FINGER_DEL ||
-                 s_mode == DG_FMODE_DELETE_USER);
+                 s_mode == DG_FMODE_DELETE_USER || s_mode == DG_FMODE_CLEAR_ALL);
     if (busy && cmd.mode != DG_FMODE_IDLE) {
         DG_LOGD(TAG, "序列进行中,忽略模式 %d", cmd.mode);
         return;
@@ -930,6 +1128,11 @@ static void *provider_thread(void *arg)
         }
 
         int active = wak_active_level();
+
+        /* 开机一致性检查:只在常规模式(灭录入/删除/验证)里插入,一次性 */
+        if (s_sync_pending && sync_allowed())
+            run_sync_check();
+
         switch (s_mode) {
         case DG_FMODE_ENROLL:
             seq_enroll();
@@ -939,6 +1142,9 @@ static void *provider_thread(void *arg)
             break;
         case DG_FMODE_DELETE_USER:
             seq_del_user_pages();
+            break;
+        case DG_FMODE_CLEAR_ALL:
+            seq_clear_all();
             break;
         case DG_FMODE_VERIFY_11: {
             int press = wait_press_once(active);
@@ -996,6 +1202,8 @@ int fp_provider_start(void)
         s_link = &fp_link_uart;
     fp_as608_parser_init(&s_parser);
     s_sub = event_bus_subscribe(EV_FINGER_SET_MODE, on_set_mode, NULL);
+    s_sync_sub = event_bus_subscribe(EV_FINGER_SYNC_TICK, on_sync_tick, NULL);
+    s_data_op_sub = event_bus_subscribe(EV_SYS_DATA_OP, on_data_op, NULL);
     if (pthread_create(&s_tid, NULL, provider_thread, NULL) == 0) {
         s_tid_created = true;
         DG_LOGI(TAG, "fp_provider 启动(dev=%s baud=%d wak=%d)",
@@ -1005,6 +1213,10 @@ int fp_provider_start(void)
     s_running = false;
     event_bus_unsubscribe(s_sub);
     s_sub = NULL;
+    event_bus_unsubscribe(s_sync_sub);
+    s_sync_sub = NULL;
+    event_bus_unsubscribe(s_data_op_sub);
+    s_data_op_sub = NULL;
     DG_LOGE(TAG, "provider 线程创建失败");
     return DG_ERR_INTERNAL;
 }
@@ -1020,5 +1232,9 @@ void fp_provider_stop(void)
     }
     event_bus_unsubscribe(s_sub);
     s_sub = NULL;
+    event_bus_unsubscribe(s_sync_sub);
+    s_sync_sub = NULL;
+    event_bus_unsubscribe(s_data_op_sub);
+    s_data_op_sub = NULL;
     s_ready = false;
 }

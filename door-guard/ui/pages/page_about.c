@@ -163,6 +163,14 @@ static void on_apply(lv_event_t *e)
         dg_popup_fail(_("当前没有可安装的更新"), 1500, NULL, NULL);
 }
 
+/* 设备数据(设备管理 → 关于设备 → 设备数据;2026-10-11):四个破坏性
+ * 数据操作入口,本页只负责跳转,二次确认与回执都在那一页闭环 */
+static void on_device_data(lv_event_t *e)
+{
+    (void)e;
+    navigator_push("device_data");
+}
+
 static void on_auto_switch(lv_event_t *e)
 {
     lv_obj_t *sw = lv_event_get_target(e);
@@ -285,6 +293,13 @@ void page_about_create(lv_obj_t *parent)
     lv_obj_align(s_btn_apply, LV_ALIGN_TOP_MID, 0, y + 380 + DG_BTN_H + DG_PAD);
     lv_obj_add_event_cb(s_btn_apply, on_apply, LV_EVENT_CLICKED, NULL);
     lv_obj_add_flag(s_btn_apply, LV_OBJ_FLAG_HIDDEN);
+
+    /* 设备数据:末位常驻(不随立即更新显隐),破坏性操作在那一页二次确认 */
+    lv_obj_t *data_op = dg_btn_create(parent, LV_SYMBOL_LIST, _("设备数据"));
+    lv_obj_set_size(data_op, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
+    lv_obj_align(data_op, LV_ALIGN_TOP_MID, 0,
+                 y + 380 + 2 * (DG_BTN_H + DG_PAD));
+    lv_obj_add_event_cb(data_op, on_device_data, LV_EVENT_CLICKED, NULL);
 
     /* 初始渲染:状态快照(进页即见上次结果;MQTT 状态等事件) */
     ota_upd_status_t st;

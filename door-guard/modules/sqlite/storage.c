@@ -1082,6 +1082,37 @@ int db_user_del(const char *user_id)
     return rc;
 }
 
+/** 删除全部用户(设备数据维护「清除所有用户」)。users 与 fingerprints
+ *  一把清,再整表重载特征缓存(逐行 cache_del 在 n=上限时是 O(n²),整表
+ *  重载更快也更不容易漏)。 */
+int db_user_del_all(uint32_t *out_n)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+
+    pthread_mutex_lock(&s_mtx);
+    sqlite3_stmt *st;
+    uint32_t n = 0;
+    if (sqlite3_prepare_v2(s_db, "SELECT COUNT(*) FROM users", -1, &st, NULL)
+        == SQLITE_OK && sqlite3_step(st) == SQLITE_ROW)
+        n = (uint32_t)sqlite3_column_int(st, 0);
+    sqlite3_finalize(st);
+
+    int rc = DG_OK;
+    if (sqlite3_exec(s_db, "DELETE FROM fingerprints;", NULL, NULL, NULL)
+        != SQLITE_OK ||
+        sqlite3_exec(s_db, "DELETE FROM users;", NULL, NULL, NULL) != SQLITE_OK) {
+        DG_LOGE(TAG, "清空用户失败: %s", sqlite3_errmsg(s_db));
+        rc = DG_ERR_DB;
+    }
+    if (rc == DG_OK)
+        cache_recover_locked();       /* 内存特征库整表重载(= 清空) */
+    pthread_mutex_unlock(&s_mtx);
+    if (out_n)
+        *out_n = n;
+    return rc;
+}
+
 /* 头像上限:160×160 JPEG 约 8KB,给足余量;超限拒绝而非撑大库
  * (上限常量在 proto/types.h,vision 照片槽与 enroll 缓冲共用) */
 
@@ -1450,6 +1481,39 @@ int db_finger_del_all(void)
     pthread_mutex_lock(&s_mtx);
     int rc = sqlite3_exec(s_db, "DELETE FROM fingerprints;", NULL, NULL, NULL)
              == SQLITE_OK ? DG_OK : DG_ERR_DB;
+    pthread_mutex_unlock(&s_mtx);
+    return rc;
+}
+
+/** 清空指纹表 + 回收方式位(「清除所有指纹」用;见 storage.h 说明)。
+ *  两条 SQL 必须在同一把锁内完成——中间被打断会留下"无指纹行但位还亮着"
+ *  的不一致态(启动迁移能修,但要等到下次上电)。 */
+int db_finger_clear_all(uint32_t auth_mask)
+{
+    if (!s_db)
+        return DG_ERR_NOT_INIT;
+    if (auth_mask == 0)
+        return DG_ERR_PARAM;
+
+    pthread_mutex_lock(&s_mtx);
+    int rc = DG_OK;
+    if (sqlite3_exec(s_db, "DELETE FROM fingerprints;", NULL, NULL, NULL)
+        != SQLITE_OK) {
+        DG_LOGE(TAG, "清空指纹表失败: %s", sqlite3_errmsg(s_db));
+        rc = DG_ERR_DB;
+    }
+    if (rc == DG_OK) {
+        char sql[128];
+        snprintf(sql, sizeof(sql),
+                 "UPDATE users SET auth_flags = auth_flags & ~%u;",
+                 (unsigned)(~auth_mask));
+        if (sqlite3_exec(s_db, sql, NULL, NULL, NULL) != SQLITE_OK) {
+            DG_LOGE(TAG, "回收指纹方式位失败: %s", sqlite3_errmsg(s_db));
+            rc = DG_ERR_DB;
+        }
+    }
+    if (rc == DG_OK)
+        cache_recover_locked();   /* 缓存里也存 auth_flags:不刷新则方式选择仍亮指纹 */
     pthread_mutex_unlock(&s_mtx);
     return rc;
 }

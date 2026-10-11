@@ -58,6 +58,13 @@ int db_user_get_avatar(const char *user_id, uint8_t *out, size_t cap, size_t *ou
  *  清除,必须走本接口(2026-09-21 编辑页"清除人脸"落此坑) */
 int db_user_clear_face(const char *user_id);
 int db_user_del(const char *user_id);
+/**
+ * 删除全部用户(设备数据维护「清除所有用户」)。
+ * 级联删 fingerprints 行、刷新特征缓存——与 db_user_del 同样的收尾,
+ * 只是覆盖全体。调用方负责先清人脸内存库(需要用户 ID 列表,DB 删完就没了)。
+ * @param out_n 可空,返回删除的用户行数
+ */
+int db_user_del_all(uint32_t *out_n);
 int db_user_get(const char *user_id, user_rec_t *out);
 int db_user_count(uint32_t *n);
 /** 按 user_id 字典序列出全部用户 ID(用户管理列表数据源)。此前 UI 靠
@@ -85,6 +92,14 @@ int db_finger_add(const char *user_id, int32_t page_id,
 int db_finger_del(const char *user_id, int32_t page_id);
 /** 清空指纹表(恢复出厂,配对模组 Empty) */
 int db_finger_del_all(void);
+/**
+ * 清空指纹表 + 回收所有用户的指定方式位(一个事务语义)。
+ * 为什么必须一起做:方式位不变式(启动迁移会按"位 ⇒ 凭据"重算)只在上电跑,
+ * 清完指纹不重启的话,方式选择里"指纹"仍亮着、点进去必超时。auth_mask 由
+ * 调用方给(proto 的 DG_AUTH_FINGER),storage 不反向依赖 proto 常量。
+ * @return DG_OK / DG_ERR_NOT_INIT / DG_ERR_PARAM / DG_ERR_DB
+ */
+int db_finger_clear_all(uint32_t auth_mask);
 /** 单用户指纹数(录入前置检查,≥3 → DG_ERR_FINGER_LIMIT 由调用方判定) */
 int db_finger_count_user(const char *user_id, uint32_t *n);
 /** 全库指纹数(boot 对账:与模组 ValidTempleteNum 比对暴露孤儿) */

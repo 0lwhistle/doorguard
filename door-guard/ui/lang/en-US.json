@@ -259,5 +259,20 @@
   "当前没有可安装的更新": "No update available to install",
   "自动更新": "Auto Update",
   "检查更新": "Check Update",
-  "立即更新": "Install Update"
+  "立即更新": "Install Update",
+  "设备数据": "Device Data",
+  "清除所有指纹": "Clear All Fingerprints",
+  "清除所有用户": "Clear All Users",
+  "清除所有数据": "Clear All Data",
+  "恢复默认配置": "Reset Default Config",
+  "确认清除所有指纹?": "Clear all fingerprints?",
+  "确认清除所有用户?": "Clear all users?",
+  "确认清除所有数据?": "Clear all data?",
+  "确认恢复默认配置?": "Reset to default config?",
+  "清除后不可恢复": "Cleared data cannot be recovered",
+  "操作失败": "Operation failed",
+  "指纹数量出错,建议清除所有指纹": "Fingerprint count mismatch, clearing all fingerprints is advised",
+  "指纹数量不一致,已清除模组内指纹": "Fingerprint count mismatch; module templates cleared",
+  "指纹数量不一致,已清除设备端指纹记录": "Fingerprint count mismatch; device records cleared",
+  "指纹模块读取异常,未校验指纹数量": "Fingerprint module read error; count not verified"
 }

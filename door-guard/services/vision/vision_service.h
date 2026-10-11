@@ -61,6 +61,13 @@ int vision_service_library_add(const char *user_id, const uint8_t *feature,
                                uint16_t len);
 /** 用户删除后调用(后端 DELETE) */
 int vision_service_library_remove(const char *user_id);
+/**
+ * 清空整库(「清除所有用户 / 清除所有数据」用)。后端契约只有逐人 lib_del,
+ * 故按 DB 用户列表逐个删——**必须在 db_user_del_all() 之前调用**(ID 列表
+ * 一旦删库就没了)。不在库里的用户按成功计(后端可能返 NOT_FOUND)。
+ * @return DG_OK / DG_ERR_NOT_INIT(后端未起) / DG_ERR_DB / DG_ERR_NO_MEMORY
+ */
+int vision_service_library_clear(void);
 
 /** 注入特征库操作函数(测试替身用;NULL = 恢复后端原 ops)。
  *  装配层在后端 start 时接线;test_enroll_flow 用它模拟"库写失败"

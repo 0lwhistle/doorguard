@@ -336,6 +336,39 @@ int vision_service_library_remove(const char *user_id)
     return s_lib_del ? s_lib_del(user_id) : DG_ERR_NOT_INIT;
 }
 
+/* 清空整库:后端契约只有逐人 lib_del,故按 DB 用户列表逐个删。必须在
+ * db_user_del_all() 之前调用——删库后 ID 列表就没了(见 vision_service.h) */
+int vision_service_library_clear(void)
+{
+    if (!s_lib_del)
+        return DG_ERR_NOT_INIT;
+
+    uint32_t total = 0;
+    if (db_user_count(&total) != DG_OK)
+        return DG_ERR_DB;
+    if (total == 0)
+        return DG_OK;                      /* 库里本就没有用户 */
+
+    uint32_t cap = total < DG_USER_MAX ? total : DG_USER_MAX;
+    char (*ids)[DG_UID_LEN] = calloc(cap, DG_UID_LEN);
+    if (!ids)
+        return DG_ERR_NO_MEMORY;
+
+    uint32_t got = 0;
+    int rc = db_user_list_ids(ids, cap, &got);
+    if (rc == DG_OK) {
+        for (uint32_t i = 0; i < got; i++) {
+            int r = s_lib_del(ids[i]);
+            /* 不在库里不算失败:库与 DB 本就可能有出入,目的是"没有残留" */
+            if (r != DG_OK && r != DG_ERR_NOT_FOUND && rc == DG_OK)
+                rc = r;
+        }
+    }
+    free(ids);
+    DG_LOGI(TAG, "特征库清空:%u 个用户", got);
+    return rc;
+}
+
 /* ---- 后端选择与启动(契约见 vision_backend.h) ---- */
 
 static const char *env_or(const char *k, const char *dflt)

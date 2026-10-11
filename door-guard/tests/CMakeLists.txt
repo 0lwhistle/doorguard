@@ -50,6 +50,8 @@ set_tests_properties(test_enroll_ic PROPERTIES TIMEOUT 120)
 dg_add_test(test_fp_enroll dg_fp dg_enroll dg_storage dg_config dg_tasker
                             dg_event_bus dg_proto cjson)
 set_tests_properties(test_fp_enroll PROPERTIES TIMEOUT 120)
+# 指纹两侧数量一致性策略(纯判定边界 0/0、0/N、N/0、N/M + 告知优先级)
+dg_add_test(test_fp_sync dg_fp_sync)
 dg_add_test(test_rknn_face dg_rknn_face)
 dg_add_test(test_face_quality dg_rknn_face)
 # 反欺骗纯算法件(crop 几何/通道/中位数平滑,宿主可测)

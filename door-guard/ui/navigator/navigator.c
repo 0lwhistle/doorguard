@@ -82,8 +82,14 @@ nav_err_t navigator_register(const navigator_page_t *page)
         if (!strcmp(s_pages[i]->name, page->name))
             return NAV_ERR_STATE;          /* 重复注册 */
     }
-    if (s_page_cnt >= NAV_MAX_PAGES)
+    if (s_page_cnt >= NAV_MAX_PAGES) {
+        /* 2026-10-11:此前静默返回,NAV_MAX_PAGES 落后于 presenter 数量时
+         * 最后注册的页悄悄失效(about 页就这样坏了两周,点了没反应)。
+         * 宁可刷屏也不能再静默。 */
+        DG_LOGE("[PAGE]", "页面表已满(%d),%s 注册失败——请调大 NAV_MAX_PAGES",
+                NAV_MAX_PAGES, page->name);
         return NAV_ERR_FULL;
+    }
     s_pages[s_page_cnt++] = page;
     return NAV_OK;
 }

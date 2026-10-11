@@ -107,6 +107,11 @@ add_library(dg_fp_as608 STATIC services/verify/fingerprint/fp_as608.c)
 target_include_directories(dg_fp_as608 PUBLIC
     ${CMAKE_SOURCE_DIR}/services/verify/fingerprint)
 
+# 指纹两侧数量一致性策略(纯判定 + 状态/告知;零依赖,宿主单测独立链接)
+add_library(dg_fp_sync STATIC services/verify/fingerprint/fp_sync.c)
+target_include_directories(dg_fp_sync PUBLIC
+    ${CMAKE_SOURCE_DIR}/services/verify/fingerprint)
+
 # 指纹业务线程(WAK→采集序列→事件;链路 ops 可注入,板级 = uart_hal+gpio_hal)
 add_library(dg_fp STATIC
     services/verify/fingerprint/fp_provider.c
@@ -115,8 +120,10 @@ add_library(dg_fp STATIC
 target_include_directories(dg_fp PUBLIC
     ${CMAKE_SOURCE_DIR}/services/verify/fingerprint)
 # dg_registry(降级状态枚举/装配约定)与 dg_timeutil(线程循环心跳时基)
-target_link_libraries(dg_fp PUBLIC dg_fp_as608 dg_proto dg_uart dg_gpio dg_storage
-                                   dg_config dg_registry dg_timeutil)
+# dg_tasker:一致性检查的重试节拍(sync_retry_task 经 tasker 发 EV_FINGER_SYNC_TICK)
+target_link_libraries(dg_fp PUBLIC dg_fp_as608 dg_fp_sync dg_proto dg_uart dg_gpio
+                                   dg_storage dg_config dg_registry dg_tasker
+                                   dg_timeutil)
 
 # IC 读卡器 HAL(/dev/dg_iccard0 节点薄封装;sim 后端仅宿主,板上不进固件)
 add_library(dg_iccard STATIC drv/iccard/iccard_hal.c)
@@ -205,6 +212,7 @@ add_library(dg_ui STATIC
     ui/pages/page_finger_set.c
     ui/pages/page_display_set.c
     ui/pages/page_about.c
+    ui/pages/page_device_data.c
     ui/presenters/presenter_home.c
     ui/presenters/presenter_standby.c
     ui/presenters/presenter_menu.c
@@ -220,6 +228,7 @@ add_library(dg_ui STATIC
     ui/presenters/presenter_finger_set.c
     ui/presenters/presenter_display_set.c
     ui/presenters/presenter_about.c
+    ui/presenters/presenter_device_data.c
     ui/ui_events.c
     ui/font/dg_font_cn_16.c
     ui/font/dg_font_cn_26.c
@@ -281,7 +290,8 @@ target_link_libraries(dg_rknn_face PUBLIC m)
 # enroll:录入编排
 add_library(dg_enroll STATIC services/enroll/enroll_service.c)
 target_include_directories(dg_enroll PUBLIC ${CMAKE_SOURCE_DIR}/services/enroll)
-target_link_libraries(dg_enroll PUBLIC dg_proto dg_storage dg_vision dg_iccard)
+# dg_config:设备数据「恢复默认配置」经 cfg_reset_all(2026-10-11)
+target_link_libraries(dg_enroll PUBLIC dg_proto dg_storage dg_vision dg_iccard dg_config)
 
 # capture:取流状态服务
 add_library(dg_capture STATIC services/capture/capture_service.c)

@@ -47,6 +47,14 @@ extern "C" {
 /* SYSTEM:系统/装配层(看门狗 → UI/web 上位机) */
 #define EV_SYS_SERVICE_STATE EV_DEF(DG_MODULE_ID_SYSTEM, 0x0010) /**< 看门狗处置/存储巡检/relay 开门失败(2026-09-30 起有订阅:UI bridge 故障提示 + access FSM 人脸禁用) */
 #define EV_SYS_REBOOT        EV_DEF(DG_MODULE_ID_SYSTEM, 0x0011) /**< 设备重启请求(ev_sys_reboot_t) */
+/* 设备数据维护(设备管理 → 关于设备 → 设备数据;2026-10-11)。四个破坏性
+ * 操作,UI 侧一律二次确认。请求 EV_SYS_DATA_OP{op},回执 EV_SYS_DATA_OP_RESULT
+ * {op,err} 按 op 配对(UI 一次只发一个,天然单飞)。
+ * 编排归 enroll_service(它持有用户生命周期与指纹级联);其中「清除所有指纹」
+ * 的模组侧 Empty 由 fp_provider 在 DG_FMODE_CLEAR_ALL 下执行——非阻塞下发,
+ * 失败由开机一致性检查兜底(见 fp_sync)。 */
+#define EV_SYS_DATA_OP        EV_DEF(DG_MODULE_ID_SYSTEM, 0x0012) /**< 设备数据维护请求 */
+#define EV_SYS_DATA_OP_RESULT EV_DEF(DG_MODULE_ID_SYSTEM, 0x0013) /**< 设备数据维护回执 */
 
 /* CAPTURE:取流状态(capture → UI/服务) */
 #define EV_CAPTURE_STATE     EV_DEF(DG_MODULE_ID_CAPTURE, 0x0001) /**< [预留] 就绪/断流;待上位机/降级提示接入 */
@@ -112,6 +120,10 @@ typedef struct {
 /* 读卡器控制(enroll 编排 → card_provider):换模式时清驱动帧缓冲与防重窗,
  * 防半秒前的旧卡串进新会话(ICCARD_PROTOCOL §4 FLUSH 时点) */
 #define EV_ICCARD_CTRL       EV_DEF(DG_MODULE_ID_HAL, 0x0007)    /**< 读卡器控制命令 */
+/* 开机一致性检查的重试节拍(tasker 定时 → fp_provider;2026-10-11)。
+ * 空载荷:provider 只把它当成"到点了,再读一次模组模板数"。用事件而不是
+ * 线程内 sleep,是因为重试要跨 provider 的按压等待(见 fp_provider 头注释)。 */
+#define EV_FINGER_SYNC_TICK  EV_DEF(DG_MODULE_ID_HAL, 0x0008)    /**< 一致性检查重试节拍 */
 
 /* AUDIO:语音播报(modules/audio;MAX98357 I2S 功放 + 扬声器,硬件未接入前
  * 后端打不开自动降级为静默,业务不感知) */
@@ -266,6 +278,25 @@ typedef struct {
     uint32_t delay_ms;                    /**< 延迟执行:让 HTTP 回执/弹窗先落地 */
 } ev_sys_reboot_t;
 
+/** EV_SYS_DATA_OP / EV_SYS_DATA_OP_RESULT:设备数据维护(2026-10-11)。
+ *  四个 op 的语义(用户拍板):
+ *    FINGER_CLEAR 清所有指纹 = 模组 Empty + 清 fingerprints 表 + 回收指纹方式位
+ *    USER_CLEAR   清所有用户 = 上者 + 删所有用户行(含头像/人脸特征/IC 绑定)
+ *    ALL_CLEAR    清所有数据 = 清所有用户 + 恢复默认配置
+ *    CFG_RESET    恢复默认配置(仅配置;用户/指纹/日志不动)
+ *  日志(access_logs)三个操作都不清——审计留存(用户未要求,取保守解)。 */
+typedef enum {
+    DG_DATA_OP_FINGER_CLEAR = 0,
+    DG_DATA_OP_USER_CLEAR   = 1,
+    DG_DATA_OP_ALL_CLEAR    = 2,
+    DG_DATA_OP_CFG_RESET    = 3,
+} dg_data_op_t;
+
+typedef struct {
+    int32_t op;                           /**< dg_data_op_t */
+    int32_t err;                          /**< 回执:dg_err_t(请求侧填 0) */
+} ev_sys_data_op_t;
+
 /** EV_NET_NTP_RESULT */
 typedef struct {
     bool    ok;
@@ -381,6 +412,9 @@ typedef enum {
     DG_FMODE_ENROLL,                      /**< 录入(两次按压,进度/结果经 ENROLL 事件) */
     DG_FMODE_FINGER_DEL,                  /**< 删单枚模板(arg = page_id) */
     DG_FMODE_DELETE_USER,                 /**< 删用户全部模板(pages[] 生效) */
+    DG_FMODE_CLEAR_ALL,                   /**< 清空整库(模组 Empty + 清 fingerprints 表
+                                               + 回收指纹方式位;设备数据页与「清除所有
+                                               用户/数据」共用,2026-10-11) */
 } dg_finger_mode_t;
 
 #define DG_FINGER_PAGES_MAX 3             /**< 每用户指纹上限(FINGERPRINT_AS608 决策 B) */
@@ -543,6 +577,7 @@ _Static_assert(sizeof(ev_web_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_state
 _Static_assert(sizeof(ev_web_set_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_set_result_t 超限");
 _Static_assert(sizeof(ev_sys_service_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_sys_service_state_t 超限");
 _Static_assert(sizeof(ev_sys_reboot_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_sys_reboot_t 超限");
+_Static_assert(sizeof(ev_sys_data_op_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_sys_data_op_t 超限");
 _Static_assert(sizeof(ev_finger_status_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_finger_status_t 超限");
 _Static_assert(sizeof(ev_ic_card_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ic_card_t 超限");
 _Static_assert(sizeof(ev_finger_mode_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_finger_mode_t 超限");
