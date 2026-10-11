@@ -631,6 +631,15 @@ static bool save(void)
             dg_popup_fail(_("请先设置密码"), 1500, NULL, NULL);
             return false;
         }
+        /* 姓名同为硬性必填(业务规则:ID/姓名/密码三件套)。此前 ADD 不预检,
+         * 空姓名一路落到 storage 层被拒,只弹出兜底的「操作失败,请重试」,
+         * 用户根本看不出是没填姓名(2026-10-11 板上走查实测) */
+        if (dg_ui_valid_name(s_pending_name)) {
+            dg_popup_fail(s_pending_name[0] ? _("姓名不合法")
+                                            : _("请先设置姓名"),
+                          1500, NULL, NULL);
+            return false;
+        }
         /* 方式位草稿随建号落库(ADD 弹窗只放行密码位;越界位由 storage
          * 不变式拒收兜底) */
         int rc = enroll_service_user_save_ex(s_uid, s_pending_name,
