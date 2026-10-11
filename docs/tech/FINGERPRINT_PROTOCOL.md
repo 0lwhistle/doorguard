@@ -40,7 +40,8 @@
 | RegModel | `0x05` | 无 | 确认码 | Buffer1+2 合成模板 | 例程逐字节【已冻结】 |
 | Store | `0x06` | BufferID,PageID(2B) | 确认码 | 模板存 flash | 例程逐字节【已冻结】 |
 | LoadChar | `0x07` | BufferID,PageID(2B) | 确认码 | flash 模板读入 Buffer | 【标准推导】 |
-| UpChar | `0x08` | BufferID | 确认码+数据包+结束包 | 读出 512B 特征(DB 副本) | 【标准推导】 |
+| UpChar | `0x08` | BufferID | 确认码+数据包+结束包 | 读出 512B 特征(DB 副本) | **【板上实测:本模组空实现】** |
+| DownChar | `0x09` | BufferID(应答后再发数据包+结束包) | 确认码×3 | 模板写入 Buffer(回灌) | **【板上实测:本模组空实现】** |
 | DeletChar | `0x0C` | PageID(2B),AllowedCount(2B) | 确认码 | 删 flash 模板 | 【标准推导】 |
 | Empty | `0x0D` | 无 | 确认码 | 清空指纹库 | 例程逐字节【已冻结】 |
 | ValidTempleteNum | `0x1D` | 无 | 确认码+模板数(2B) | 库容量查询(录入前置检查) | 例程逐字节【已冻结】 |
@@ -105,6 +106,7 @@ fp_as608.c `after_len_of` 移除。校验和口径不受影响:恒为标识码 +
 | 0x05 | 合成失败(RegModel,两次差异大) | 同指校验兜底文案 |
 | 0x09 | 未搜索到(1:N 落空) | 陌生人失败 |
 | 0x0A | 模板已满 | DG_ERR_FINGER_FULL |
+| 0x0C | **模板为空/读库错(2026-10-11 板上实测)** | LoadChar 打空页返回此码 → 对账据此区分「空页」与「读库错」 |
 | 0x11 | 写 flash 错(Store/Delet) | 降级上报 |
 | 0x15 | 缓冲区无有效图(流程顺序错) | 内部错误,计数 |
 
@@ -135,6 +137,18 @@ fp_as608.c `after_len_of` 移除。校验和口径不受影响:恒为标识码 +
    (uart8 DTS 24MHz 修复生效,dmesg base_baud=1500000)
 2. ✅ ValidTempleteNum:空库应答 14B `...07 0005 00 0000 000C`(N=0,校验自洽)
 3. ✅ GetImage 无手指:应答 12B `...07 0003 02 000C`(确认码 0x02,帧口径定案依据)
-4. ⏳ Search 全序列实测耗时 + UpChar 数据/结束包实际帧长【待首次录入】
-5. ⏳ WAK 触摸相关性复测(GPIO2_D6=94):静息电平 0、静默期无自跳(旧"节拍器
+4. ✅ **UpChar / DownChar 实测(2026-10-11,`tools/fp_probe`)——本模组不支持上传/下载**。
+   停应用后直接打协议:LoadChar(B2,page0) 回 `07 0003 00 …`(确认码 0x00,缓冲区已装载)
+   后,UpChar(B1 与 B2 各一次)、UpImage(0x0A) 均**只回 ACK 0x00,8s 窗口内一个数据包
+   都不发**;DownChar(0x09) 指令头同样只回 ACK。即该克隆模组的特征上传/下载是**空实现**
+   (指令被识别、立即回成功,但不产生数据)。结论:
+   - **DB 的 `finger_vec` 副本永远只能落成 NULL**(无 UpChar 即无副本来源);
+   - **换模组回灌不可行**(没有可注入的数据,DownChar 也无从验证);
+   - 因此**「两侧数量不一致」的处置不设"回灌"分支**,见 FINGERPRINT_AS608.md §10。
+   复现:`/etc/init.d/S60doorguard stop && fp_probe dump 0 /tmp/t.bin`(永远拿不到数据包)。
+5. ✅ **LoadChar 打空页确认码 = 0x0C**(2026-10-11 实测,`fp_probe scan`)。协议文档此前
+   缺这一条;拿到它才能把「该页是空的」与「读库错(模组故障)」分开——这是逐页枚举
+   占用页的前提(见 FINGERPRINT_AS608.md §10).
+6. ⏳ Search 全序列实测耗时(1000 枚库)
+7. ⏳ WAK 触摸相关性复测(GPIO2_D6=94):静息电平 0、静默期无自跳(旧"节拍器
    假象"未复现);按压翻转与极性待人工触摸确认 → `finger.wak_active_level`
