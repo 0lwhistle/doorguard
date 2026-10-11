@@ -1504,8 +1504,11 @@ int db_finger_clear_all(uint32_t auth_mask)
     }
     if (rc == DG_OK) {
         char sql[128];
+        /* 清掉 auth_mask 里的位 = auth_flags & (~auth_mask)。
+         * 别再套一层 ~:写成 &~(auth_mask 的反) 会把语义反过来,变成
+         * "只保留指纹位"(2026-10-11 被 test_clear_all 抓出) */
         snprintf(sql, sizeof(sql),
-                 "UPDATE users SET auth_flags = auth_flags & ~%u;",
+                 "UPDATE users SET auth_flags = auth_flags & %u;",
                  (unsigned)(~auth_mask));
         if (sqlite3_exec(s_db, sql, NULL, NULL, NULL) != SQLITE_OK) {
             DG_LOGE(TAG, "回收指纹方式位失败: %s", sqlite3_errmsg(s_db));
