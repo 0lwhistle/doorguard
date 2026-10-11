@@ -1,5 +1,23 @@
 # board/ — 板端部署物(不入固件的运行期文件)
 
+`restore-app.sh` — **重刷 / 裸板后一键恢复应用层**(2026-10-11 新增,幂等):
+
+```bash
+# 在 WSL 侧运行(构建产物与检测模型都在 WSL)
+bash board/restore-app.sh [板IP]      # 缺省 192.168.137.100
+```
+
+应用层**不烘进固件**,所以重刷 rootfs 后板上只剩 SDK 基础镜像:没有 S60doorguard、
+没有槽位、没有 `/etc/door-guard`、没有 `/userdata/doorguard/{models,cur_config.json}`。
+此时 **`dg-deploy` 用不了**(它假定应用已装、只做已装应用的 A/B 换槽),必须先用本脚本
+种下首次安装;之后日常改代码再走 `dg-deploy`。脚本做五件事:推 S60 + 语言包 +
+`default.json` + 4 个模型 → 禁 `S00-lv_demo`(否则它占住屏幕)→ 把二进制装进**非活动槽**
+并原子切链(直写活动槽会 `Text file busy`)→ md5 核对 → stop/start 拉起。
+
+模型来源(二进制硬编码这四个名字):检测 `RetinaFace_rk3576_i8.rknn`、识别
+`w600k_r50.rknn`、反欺骗 `MiniFASNet ×2`。**`RetinaFace_rk3576_i8.rknn` 不在 git**,
+缺省从 WSL `/root/reinface/out/` 取(可用 `DG_DET_DIR` 等环境变量覆盖,见脚本头)。
+
 `rootfs-overlay/` — 将合并进 buildroot rootfs overlay 的文件(VM SDK 侧 overlay
 目录同步一份,下一版固件自带;当前经 dg-deploy 直接推板即时生效):
 

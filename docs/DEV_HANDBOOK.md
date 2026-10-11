@@ -68,8 +68,9 @@
 
 ## 4. 板端速查
 
-- **网络**:默认 IP **192.168.2.95**(DHCP;**reboot 后 ICS 网段 DHCP 可能重新分配——2026-09-25 实测 .130→.73,连不上先在板端 `ip addr` 查实际地址**;变了改 env/env.sh 的 DOORGUARD_IP)
-- **SSH**:`root` / 密码 `a231634904`(开发板局域网口令;WSL 公钥已装,`dg-deploy` 免密)
+- **网络**:固件里 `/etc/network/interfaces` 为 **eth0 静态 `192.168.137.100/24`(网关 .1,ICS 网段)**、eth1 DHCP——地址**重启不变**(2026-10-11 重刷后实测:静态配置随镜像在,reboot 后仍 .100)。若连不上:先板端 `ip a` 查实际地址,再核对 env/env.sh 的 DOORGUARD_IP
+- **SSH**:`root` / 密码 `a231634904`(开发板局域网口令;WSL 公钥已装,`dg-deploy` 免密)。注意 dropbear 主机钥**不持久化**,板子重启/重刷后 key 会变 → 开发机先 `ssh-keygen -R 192.168.137.100` 再连
+- **重刷/裸板后恢复应用层**:`bash board/restore-app.sh [板IP]`(WSL 侧跑)。应用层**不烘进固件**,重刷即归零,此时 `dg-deploy` 用不了(它只做已装应用的 A/B 换槽);首次安装走这个脚本(幂等),之后日常改码再用 `dg-deploy`
 - 串口 **1500000 8N1**(不是 115200);dropbear 拒绝空密码
 - **走查/取证工具**:仓库 `tools/board-walk/`(注入库/七页走查脚本/CPU 采样/导图,README 含坐标表与编译命令);LVGL 走查方法论与坑见该 README + `docs/superpowers/specs/2026-09-26-useredit-crash-debug.md` §8
 - **应用侧单帧导图**:`DG_WALK_DUMP_DIR=<dir>` 启动后 `touch /tmp/dg_shot` → `<dir>/dg_screen.raw`(720x1280×4B)
@@ -82,7 +83,9 @@ dmesg | grep -i rknpu         # NPU 驱动
 ip a; ps | grep dropbear      # 网络/SSH
 cat /sys/class/backlight/*/brightness   # 背光
 cat /proc/bus/input/devices | grep -iA3 'fts\|goodix'  # 触摸(看实际枚举出的 IC)
-/etc/init.d/S60doorguard {start|stop|restart}  # 应用自启服务;日志 /var/log/door-guard.log
+/etc/init.d/S60doorguard {start|stop}   # 应用自启服务;日志 /var/log/door-guard.log
+#   ⚠️ 不要用 restart(已坏,见 §8):stop 后另起 start
+bash board/restore-app.sh               # 重刷/裸板后恢复应用层(幂等,见 §4)
 grep -E "HOLDER|VISION" /var/log/door-guard.log | tail -30   # 模块状态表 + 视觉后端
 DG_IVA_LOG=3 /root/door-guard     # 前台跑并开 ROCKIVA 日志(看它找哪个模型文件)
 ls /usr/lib/*.data                # ROCKIVA 模型(缺人脸模型时 FACE_Init 返 -1)
@@ -281,3 +284,7 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 | 门控 GPIO:继电器引脚未确认(勿在未知引脚写 direction,已致板挂起一次) | 待硬件确认 | 引脚确认后 gpio_hal 对拍 |
 | /dev/fb0(rockchipdrmfb)mmap EBUSY | 已绕行 | 显示走 DRM dumb-buffer(lv_drivers) |
 | web 监听端口重启后 80/8080 不定(80 绑定失败即回退 8080,mongoose 启动竞态) | 待查 | 绑定重试或固定端口;web_test/文档端口以设备实际为准 |
+| 应用层不烘进固件(重刷 rootfs 即归零,dg-deploy 也救不回) | 有恢复路径(`board/restore-app.sh`,2026-10-11) | B10 把应用层收编进固件,重刷不再丢 |
+| `/etc/init.d/S60doorguard restart` **坏**:`stop` 末尾 `killall S60doorguard` 会连调用者父进程一起 TERM,`start` 永不执行 | 已确认(2026-10-11 实测:restart 后进程与 pidfile 全无) | 调用方一律 **stop/start 拆开**(dg-deploy 与 restore-app.sh 已如此);或给 restart 分支也加 `trap '' TERM` |
+| `[W][CFG] web_port=80 越界[1024,65535],回退 80`——校验区间排除 80 而回退值又是 80 | 自相矛盾(不阻塞,web 实跑 80) | 校验区间补 80,或默认改 8080 |
+| `RetinaFace_rk3576_i8.rknn`(检测模型)不在 git,唯一副本 WSL `/root/reinface/out/` | 单点脆弱 | 备份进 gitea(唯一收大文件的远程) |
