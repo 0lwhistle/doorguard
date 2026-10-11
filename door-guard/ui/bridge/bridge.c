@@ -280,6 +280,9 @@ static int on_brightness(const event_t *e, void *ud)
     return 0;
 }
 
+/* 前置:设备数据回执的 handler 与出站函数同段(排在 bridge_init 之后) */
+static int on_data_op_result(const event_t *e, void *ud);
+
 void bridge_init(void)
 {
     event_bus_subscribe(EV_VISION_FACE_BOX, on_face_box, NULL);
