@@ -316,7 +316,7 @@ if(NOT DG_SIM AND NOT DG_BUILD_TESTS)
     # 未冻结的帧式(UpChar/DownChar 数据包+结束包、LoadChar 打空页的确认码)
     # 必须脱离业务序列才测得干净。停 S60doorguard 后直接用。
     add_executable(fp_probe tools/fp_probe.c)
-    target_link_libraries(fp_probe PRIVATE dg_fp_as608 dg_uart dg_log)
+    target_link_libraries(fp_probe PRIVATE dg_fp_as608 dg_uart dg_timeutil dg_log)
 
     add_library(dg_npu STATIC drv/npu/npu_model.c drv/npu/npu_pre.c)
     target_include_directories(dg_npu PUBLIC ${CMAKE_SOURCE_DIR}/drv/npu
