@@ -7,6 +7,7 @@
 #include "dg_test.h"
 #include "types.h"
 #include "i18n.h"
+#include "valid_ui.h"
 #include "lvgl.h"
 #include "widgets/dg_btn.h"
 #include "widgets/dg_kbd.h"
@@ -336,6 +337,20 @@ int main(void)
     lv_obj_send_event(lv_obj_get_child(card2, 2), LV_EVENT_CLICKED, NULL);
     DG_CHECK(s_picked == 1);
     printf("[W] dg_popup choice: pick idx OK\n");
+
+    /* ---- 凭据行按钮文案决策(valid_ui 纯函数) ----
+     * 锁死 2026-10-11 用户反馈的口径:按钮说的是"点下去做什么",未录入
+     * 就该是「录入」,已录入才是「修改」(此前人脸恒「修改」、指纹恒
+     * 「管理」,与行内值「无」自相矛盾)。比对同一 `_()` 取值,故不依赖
+     * i18n 是否已载表——锁的是分支决策,不是译文 */
+    DG_CHECK(strcmp(dg_ui_face_btn_text(false), _("录入")) == 0);
+    DG_CHECK(strcmp(dg_ui_face_btn_text(true),  _("修改")) == 0);
+    DG_CHECK(strcmp(dg_ui_finger_btn_text(0),   _("录入")) == 0);
+    DG_CHECK(strcmp(dg_ui_finger_btn_text(1),   _("修改")) == 0);
+    DG_CHECK(strcmp(dg_ui_finger_btn_text(3),   _("修改")) == 0);
+    DG_CHECK(strcmp(dg_ui_ic_btn_text(false),   _("录入")) == 0);
+    DG_CHECK(strcmp(dg_ui_ic_btn_text(true),    _("修改")) == 0);
+    printf("[W] valid_ui 按钮文案:未录=录入 / 已录=修改 OK\n");
 
     /* ---- 刷新泵:渲染流程真跑过(flush 有次数) ---- */
     pump(100);

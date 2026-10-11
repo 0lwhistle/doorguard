@@ -59,6 +59,7 @@ static lv_obj_t *s_title;
 static lv_obj_t *s_val_name, *s_val_role, *s_val_pwd, *s_val_face,
                *s_val_finger, *s_val_ic, *s_val_auth;
 static lv_obj_t *s_img_face;                    /* 人脸行头像预览 */
+static lv_obj_t *s_btn_name, *s_btn_role;       /* 字段行按钮(ADD 改文案/隐藏) */
 static lv_obj_t *s_btn_pwd, *s_btn_face;
 static lv_obj_t *s_btn_finger, *s_btn_ic, *s_btn_auth;
 static lv_obj_t *s_row_del;                     /* 「删除用户」行(EDIT 才显示) */
@@ -240,14 +241,26 @@ static void refresh(void)
             flags_text(s_flags_draft, fv, sizeof(fv));
             val_set(s_val_auth, fv);
         }
+        /* 未保存 = 用户还不存在:凭据无处挂,人脸/指纹/IC 三个录入入口一律
+         * 不显示(行与值留着当信息);权限固定普通、验证方式在保存前只有
+         * 「密码」一种(且密码是硬性必填),两者都无可改,按钮同样不显示。
+         * 2026-10-11 用户反馈:添加页满屏「修改」,点「验证方式」还被告知
+         * 「请先设置密码」,而真正的密码入口是另一行的小按钮——看起来像
+         * 设不了密码、加不了用户。原则:做不到的事就不给按钮。 */
+        if (s_btn_name)
+            dg_btn_set_label(s_btn_name, _("设置"));
+        if (s_btn_role)
+            lv_obj_add_flag(s_btn_role, LV_OBJ_FLAG_HIDDEN);
+        if (s_btn_auth)
+            lv_obj_add_flag(s_btn_auth, LV_OBJ_FLAG_HIDDEN);
         if (s_btn_pwd)
             dg_btn_set_label(s_btn_pwd, s_pending_has_pwd ? _("修改") : _("设置"));
         if (s_btn_face)
             lv_obj_add_flag(s_btn_face, LV_OBJ_FLAG_HIDDEN);
         if (s_btn_finger)
-            dg_btn_set_label(s_btn_finger, _("管理"));
+            lv_obj_add_flag(s_btn_finger, LV_OBJ_FLAG_HIDDEN);
         if (s_btn_ic)
-            dg_btn_set_label(s_btn_ic, _("录入"));
+            lv_obj_add_flag(s_btn_ic, LV_OBJ_FLAG_HIDDEN);
         if (s_row_del)
             lv_obj_add_flag(s_row_del, LV_OBJ_FLAG_HIDDEN);
         return;
@@ -270,7 +283,8 @@ static void refresh(void)
     }
 
     /* 人脸行三态草稿显示:服务内草稿(已拍未保存)> 清除标志(待清除)>
-     * DB 现值。按钮一律「修改」;弹窗内提供 重录/清除 */
+     * DB 现值。按钮文案按"点下去做什么"给:已录(含未保存草稿)→ 修改,
+     * 未录 → 录入;弹窗内仍提供 重录/清除 */
     const bool face_draft = enroll_service_draft_active(s_uid);
     if (face_draft)
         val_set(s_val_face, _("已拍摄，未保存"));
@@ -278,12 +292,21 @@ static void refresh(void)
         val_set(s_val_face, _("待清除，未保存"));
     else
         val_set(s_val_face, rec.face_vec_len > 0 ? _("已录入") : _("无"));
-    dg_btn_set_label(s_btn_face, _("修改"));
-    /* ADD 存成用户后原地转 EDIT:人脸按钮在 ADD 分支被隐藏,这里必须
-     * 显式还原,否则保存成功后要退出再进才能录人脸(2026-10-03 用户实测);
-     * 指纹/IC 按钮常显不受影响 */
+    dg_btn_set_label(s_btn_face,
+                     dg_ui_face_btn_text(rec.face_vec_len > 0 || face_draft));
+    /* ADD 存成用户后原地转 EDIT:ADD 分支隐藏过的按钮必须逐个显式还原,
+     * 否则保存成功后要退出再进才能操作(2026-10-03 用户实测;2026-10-11
+     * 隐藏项由「人脸」扩到「人脸/指纹/IC/权限/验证方式」,还原同步扩) */
     if (s_btn_face)
         lv_obj_clear_flag(s_btn_face, LV_OBJ_FLAG_HIDDEN);
+    if (s_btn_finger)
+        lv_obj_clear_flag(s_btn_finger, LV_OBJ_FLAG_HIDDEN);
+    if (s_btn_ic)
+        lv_obj_clear_flag(s_btn_ic, LV_OBJ_FLAG_HIDDEN);
+    if (s_btn_role)
+        lv_obj_clear_flag(s_btn_role, LV_OBJ_FLAG_HIDDEN);
+    if (s_btn_auth)
+        lv_obj_clear_flag(s_btn_auth, LV_OBJ_FLAG_HIDDEN);
 
     /* 指纹行:已录 n/3(独立 fingerprints 表是唯一事实源;users.finger_vec
      * 废弃列不再读取)。录入/删除入口 = 指纹管理页 */
@@ -296,7 +319,7 @@ static void refresh(void)
         val_set(s_val_finger, fv);
     } else
         val_set(s_val_finger, _("无"));
-    dg_btn_set_label(s_btn_finger, _("管理"));
+    dg_btn_set_label(s_btn_finger, dg_ui_finger_btn_text(s_fp_cnt));
 
     /* IC 行:卡号展示一律掩码(spec-database §3) */
     if (s_ic_enrolling)
@@ -305,11 +328,9 @@ static void refresh(void)
         char masked[16];
         mask_card(rec.ic_card, masked, sizeof(masked));
         val_set(s_val_ic, masked);
-        dg_btn_set_label(s_btn_ic, _("修改"));
-    } else {
+    } else
         val_set(s_val_ic, _("无"));
-        dg_btn_set_label(s_btn_ic, _("录入"));
-    }
+    dg_btn_set_label(s_btn_ic, dg_ui_ic_btn_text(rec.ic_card[0] != '\0'));
 
     /* 头像预览:草稿期用内存图(dg_avatar_decode),已落库才走 DB 缓存。
      * 人脸行加高到 128,预览 96×96 */
@@ -330,6 +351,8 @@ static void refresh(void)
             lv_obj_add_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
         }
     }
+    if (s_btn_name)
+        dg_btn_set_label(s_btn_name, _("修改"));
     if (s_btn_pwd)
         dg_btn_set_label(s_btn_pwd, _("修改"));
     if (s_row_del)
@@ -828,10 +851,10 @@ void page_user_edit_create(lv_obj_t *parent)
     val_set(v, s_uid);
 
     row = row_create(col, _("姓名"), &s_val_name, NULL);
-    row_action_btn(row, on_name);
+    s_btn_name = row_action_btn(row, on_name);
 
     row = row_create(col, _("权限"), &s_val_role, NULL);
-    row_action_btn(row, on_role);
+    s_btn_role = row_action_btn(row, on_role);
 
     row = row_create(col, _("验证方式"), &s_val_auth, NULL);
     s_btn_auth = row_action_btn_label(row, _("修改"), on_auth);
@@ -875,6 +898,7 @@ void page_user_edit_destroy(void)
     s_title = s_val_name = s_val_role = s_val_pwd = NULL;
     s_val_face = s_val_finger = s_val_ic = s_val_auth = NULL;
     s_img_face = NULL;
+    s_btn_name = s_btn_role = NULL;
     s_btn_pwd = s_btn_face = NULL;
     s_btn_finger = s_btn_ic = s_btn_auth = NULL;
     s_row_del = NULL;

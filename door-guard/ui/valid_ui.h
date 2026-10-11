@@ -10,6 +10,9 @@
 #ifndef DG_UI_VALID_H
 #define DG_UI_VALID_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -26,6 +29,21 @@ const char *dg_ui_valid_pwd(const char *text);
 /** 录入/特征操作错误码 → 用户文案(UI 唯一映射点,2026-10-03 自编辑页
  *  收编共用:指纹管理页与用户编辑页同一套说法)。未知码给通用失败语 */
 const char *dg_ui_enroll_err_text(int rc);
+
+/* ---- 凭据行动作按钮文案(2026-10-11 用户反馈统一) ----
+ * 口径:按钮说的是"点下去做什么",所以**未录入 = 录入、已录入 = 修改**。
+ * 此前人脸恒「修改」、指纹恒「管理」,与行内值(「无」)自相矛盾,用户
+ * 在添加页看不懂哪个能点。放本层是为了可被宿主测试直接锁死(valid_ui
+ * 是 UI 文案的唯一映射点,与 dg_ui_enroll_err_text 同处)。 */
+
+/** 人脸行:已录(库内或未保存草稿)→ 修改;未录 → 录入 */
+const char *dg_ui_face_btn_text(bool enrolled);
+
+/** 指纹行:已录 ≥1 枚 → 修改;未录 → 录入 */
+const char *dg_ui_finger_btn_text(uint32_t count);
+
+/** IC 卡行:已绑卡 → 修改;未绑 → 录入 */
+const char *dg_ui_ic_btn_text(bool bound);
 
 #ifdef __cplusplus
 }

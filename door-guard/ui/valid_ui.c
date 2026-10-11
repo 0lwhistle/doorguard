@@ -48,3 +48,19 @@ const char *dg_ui_enroll_err_text(int rc)
     default:                  return _("操作失败,请重试");
     }
 }
+
+/* 凭据行按钮文案:未录 → 录入,已录 → 修改(见 valid_ui.h 头注) */
+const char *dg_ui_face_btn_text(bool enrolled)
+{
+    return enrolled ? _("修改") : _("录入");
+}
+
+const char *dg_ui_finger_btn_text(uint32_t count)
+{
+    return count > 0 ? _("修改") : _("录入");
+}
+
+const char *dg_ui_ic_btn_text(bool bound)
+{
+    return bound ? _("修改") : _("录入");
+}
