@@ -383,6 +383,52 @@ static int cmd_empty(void)
     return c == FP_ACK_OK ? 0 : 1;
 }
 
+/* raw <hex> [wait_ms] — 原字节诊断:发任意字节,然后把 wait_ms 内收到的
+ * 每一帧打出来(类型/长度/前若干字节)。用于 UpChar 这类"应答 OK 但不吐
+ * 数据包"的悬案:换缓冲区号、换指令码、拉长等待都靠它,不必改代码重编。 */
+static int cmd_raw(const char *hex, int wait_ms)
+{
+    uint8_t buf[FP_A608_FRAME_MAX];
+    size_t n = 0;
+    for (const char *p = hex; *p && n < sizeof(buf); ) {
+        while (*p == ' ' || *p == ':')
+            p++;
+        if (!*p)
+            break;
+        char two[3] = { p[0], p[1] ? p[1] : '0', 0 };
+        if (p[1])
+            p += 2;
+        else
+            p += 1;
+        buf[n++] = (uint8_t)strtoul(two, NULL, 16);
+    }
+    if (!n) {
+        printf("raw: 没有可发字节\n");
+        return 2;
+    }
+    dump_hex("raw 发送", buf, n);
+    if (uart_hal_send(buf, n) != DG_OK) {
+        printf("raw: 发送失败\n");
+        return 1;
+    }
+    int64_t deadline = now_mono_ms() + wait_ms;
+    int frames = 0;
+    while (now_mono_ms() < deadline) {
+        fp_frame_t f;
+        if (wait_frame(&f, (int)(deadline - now_mono_ms())) != DG_OK)
+            break;
+        frames++;
+        printf("raw 收帧 %d: type=0x%02X payload_len=%u", frames, f.type, f.payload_len);
+        for (int k = 0; k < f.payload_len && k < 8; k++)
+            printf(" %02X", f.payload[k]);
+        if (f.payload_len > 8)
+            printf(" ...");
+        printf("\n");
+    }
+    printf("raw: 共收到 %d 帧(%d ms 窗口)\n", frames, wait_ms);
+    return frames ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
     const char *dev = "/dev/ttyS8";
@@ -399,7 +445,7 @@ int main(int argc, char **argv)
         }
     }
     if (i >= argc) {
-        printf("用法: fp_probe [-d /dev/ttyS8] [-b 57600] <verify|count|scan|dump|put|del|empty>\n");
+        printf("用法: fp_probe [-d /dev/ttyS8] [-b 57600] <verify|count|scan|dump|put|del|empty|raw>\n");
         return 2;
     }
     const char *cmd = argv[i++];
@@ -435,6 +481,8 @@ int main(int argc, char **argv)
         rc = cmd_del((uint16_t)atoi(argv[i]), (i + 1 < argc) ? (uint16_t)atoi(argv[i + 1]) : 1);
     } else if (!strcmp(cmd, "empty")) {
         rc = cmd_empty();
+    } else if (!strcmp(cmd, "raw") && i < argc) {
+        rc = cmd_raw(argv[i], (i + 1 < argc) ? atoi(argv[i + 1]) : 3000);
     } else {
         printf("未知/缺参子命令 %s\n", cmd);
         rc = 2;
