@@ -796,8 +796,8 @@ static void test_clear_all(void)
     printf("[S11] db_finger_clear_all(回收方式位)/ db_user_del_all\n");
     fresh_setup();
 
-    user_rec_t u1 = make_user("40001", "甲", "p1");
-    user_rec_t u2 = make_user("40002", "乙", "p2");
+    user_rec_t u1 = make_user("40001", "甲", "pwd1");   /* 密码有长度下限,别用短串 */
+    user_rec_t u2 = make_user("40002", "乙", "pwd2");
     u1.auth_flags = DG_AUTH_PWD;          /* db_user_add 按不变式只收有凭据的位 */
     u2.auth_flags = DG_AUTH_PWD;
     DG_CHECK(db_user_add(&u1) == DG_OK);
