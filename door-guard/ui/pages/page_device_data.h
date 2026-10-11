@@ -6,6 +6,7 @@
 #define DG_PAGE_DEVICE_DATA_H
 
 #include "events.h"
+#include "lvgl.h"      /* lv_obj_t(本头自洽;页面 .c 不一定先 include lvgl) */
 
 #ifdef __cplusplus
 extern "C" {
