@@ -237,6 +237,10 @@ static void home_on_evt(const ui_evt_t *evt)
         break;                               /* 用户编辑/拍摄页消费 */
     case UI_EVT_QUALITY:
         break;                               /* 拍摄页消费(主页不显示质量) */
+    case UI_EVT_DATA_OP_RESULT:
+        break;                               /* 设备数据维护回执:设备数据页消费
+                                                (漏写这个 case 是 -Wswitch 告警,
+                                                也是「事件静默丢弃」的那类坑) */
     }
 }
 
