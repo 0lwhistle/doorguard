@@ -88,6 +88,31 @@ int rknn_retinaface_anchor_count(int size);
 /** IoU(交并比);退化框返回 0 */
 float rknn_iou(const rknn_face_t *a, const rknn_face_t *b);
 
+/* ---- 检测框合理性闸门(2026-10-12 板上取证) -----------------------------
+ * i8 量化的 RetinaFace 在低纹理场景会在大锚框层(stride 32,min_size 256/512)
+ * 输出高分幻框。板上实测(720×1280 屏):空场景 0.709 的 560×379、占满整帧的
+ * 720×1222(0.658)/720×1128(0.850)/720x1071(0.746),横置的 288×188(0.788)。
+ * 危害不止"画了个大框":面积最大会被选成 best(1:N 拿幻框的特征去检索),
+ * 还会在 NMS 里把与它 IoU>0.4 的真脸压掉,并让录入判「人脸不在取景框内」。
+ * 两条判据都与输入分辨率无关(纯比例),故本文件即可判定:
+ *   - 长宽比:人脸框略高于宽。板上真脸 w/h ∈ [0.52, 0.91];幻框 1.48/1.53。
+ *   - 面积占比:固定机位门禁下人脸不可能占满画面。板上真脸 ≤ 0.25,幻框 ≥ 0.46。
+ * 只在**摄像头固定机位**的路径上调用:静态图/网页上传可以是特写人像,
+ * 那里脸占满画面是合法的(故本闸门不进 rknn_retinaface_decode)。
+ */
+#define RKNN_FACE_MIN_WH_RATIO  0.35f   /* w/h 下限(真脸最窄实测 0.52;保险值) */
+#define RKNN_FACE_MAX_WH_RATIO  1.30f   /* w/h 上限(幻框最窄实测 1.48) */
+#define RKNN_FACE_MAX_AREA_FRAC 0.35f   /* 框面积/帧面积 上限(真脸最大 0.25) */
+
+/** 这个框像不像"这张画面里的一张脸"(img_w×img_h = 帧尺寸,与框同域) */
+bool rknn_box_plausible(const rknn_face_t *f, int img_w, int img_h);
+
+/**
+ * 就地剔掉不像人脸的框(保持原顺序),返回保留数。须在 NMS **之前**调用:
+ * 否则占满整帧的幻框会先把真脸压掉。
+ */
+int rknn_face_filter_plausible(rknn_face_t *faces, int n, int img_w, int img_h);
+
 /**
  * 贪心 NMS:**原地**按 score 降序保留、抑制重叠(>iou_thresh)。
  * @return 保留数(前 n_return 个元素有效)

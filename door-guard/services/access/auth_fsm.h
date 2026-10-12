@@ -75,6 +75,8 @@ typedef enum {
     FSM_EV_ADMIN_COUNT,         /**< 管理员人数回执(data: admin_count;服务层查库后喂) */
     FSM_EV_TIMER,               /**< 定时器到期(data: timer_evt_t) */
     FSM_EV_TOUCH,               /**< 任意触摸(data: now_ms) */
+    FSM_EV_BUSY,                /**< 前台耗时操作开始/结束(data: busy;
+                                     录入等操作期间暂停无操作倒计时) */
     FSM_EV_TICK,                /**< 1s 心跳(data: now_ms,用于待机/锁定计时) */
     FSM_EV_CAM_STATE,           /**< 相机可用态(data: cam_ready;断流时人脸
                                      1:1 步立即 reason=9,不空等 5s 超时) */
@@ -136,6 +138,11 @@ typedef union {
     bool vision_ready;             /**< FSM_EV_VISION_STATE:识别后端可用 */
     bool finger_ready;             /**< FSM_EV_FINGER_STATE:指纹模组就绪 */
     bool ic_ready;                 /**< FSM_EV_IC_STATE:读卡器就绪 */
+    bool busy;                     /**< FSM_EV_BUSY:前台耗时操作在进行中
+                                        (指纹录入引导窗、人脸拍摄页等)。期间
+                                        暂停待机/菜单两个无操作计数(用户正在
+                                        操作,不是"无操作");操作结束的那一拍
+                                        两个计数一并清零,给用户完整的余量。 */
 } fsm_event_data_t;
 
 /* ---- 定时器用途(FSM 声明,外部实现) ---- */
@@ -292,6 +299,12 @@ typedef struct {
     /* 菜单会话空闲秒计数(仅 ST_MENU 累加;触摸清零):超时自动回主页面,
      * 覆盖菜单及其下挂的用户/设备等子页(子页期间 FSM 停留 ST_MENU) */
     int32_t menu_idle_s;
+
+    /** 前台耗时操作保持(FSM_EV_BUSY):为真时两个空闲计数都不累加。
+     *  录入/拍摄这类"用户在场但没在摸屏"的操作要靠它,否则菜单超时会在
+     *  录入中途把用户踢回主页(2026-10-12 板上取证:指纹录到第二枚时
+     *  「菜单 15s 无操作,自动回主页面」与「录入开始」同帧出现)。 */
+    bool busy;
 
     /* 初始化参数 */
     int32_t door_open_ms;

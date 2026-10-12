@@ -115,6 +115,107 @@ static void test_nms(void)
     DG_CHECK(rknn_nms(f, 1, 0.45f) == 1);
 }
 
+/* ---- 检测框合理性闸门(判据与实测依据见 rknn_face.h) --------------------
+ * 用例里的尺寸/分数全部取自 2026-10-12 板上日志(door-guard.log 的
+ * 「检出 N 张脸…(%dx%d)」),不是拍脑袋造的:真脸 = 1:N 命中/开门那一帧,
+ * 幻框 = 空场景或与人脸同帧出现的大框。改阈值时先看这些数据。
+ */
+static rknn_face_t mk_box(float w, float h, float score)
+{
+    rknn_face_t f = { .x1 = 200, .y1 = 300, .x2 = 200 + w, .y2 = 300 + h,
+                      .score = score };
+    return f;
+}
+
+/* 板上真脸(720x1280 屏):一条都不许被闸掉,否则识别/录入会无故失灵 */
+static void test_box_plausible_real(void)
+{
+    static const struct { float w, h; } real[] = {
+        { 259, 498 }, { 349, 385 }, { 406, 498 }, { 432, 540 }, { 424, 531 },
+        { 399, 507 }, { 392, 477 }, { 409, 507 }, { 317, 376 }, { 303, 350 },
+        { 333, 334 }, { 313, 409 }, { 368, 440 }, { 378, 472 }, { 507, 560 },
+    };
+    for (unsigned i = 0; i < sizeof(real) / sizeof(real[0]); i++)
+        DG_CHECK(rknn_box_plausible(&(rknn_face_t){ .x1 = 100, .y1 = 100,
+                                                    .x2 = 100 + real[i].w,
+                                                    .y2 = 100 + real[i].h,
+                                                    .score = 0.9f }, 720, 1280));
+}
+
+/* 板上幻框:长宽比横置(560x379/288x188)或面积压过帧(≥575x734) */
+static void test_box_plausible_false(void)
+{
+    static const struct { float w, h, score; } fake[] = {
+        { 720, 1222, 0.658f },   /* 空场景:占满整帧宽 */
+        { 720, 1128, 0.850f },   /* 分数高到 0.85,单靠阈值拦不住 */
+        { 720, 1071, 0.746f }, { 720, 1198, 0.754f },
+        { 720, 1256, 0.604f }, { 720, 1232, 0.604f },
+        { 613, 904, 0.500f },  { 675, 835, 0.604f },  { 682, 1080, 0.709f },
+        { 669, 928, 0.728f },  { 575, 734, 0.718f },
+        { 560, 379, 0.709f },    /* 空场景(同帧 1:N -0.057/反欺骗 0.034):横置 */
+        { 288, 188, 0.788f },    /* 同帧有真脸:横置小扁框 */
+    };
+    for (unsigned i = 0; i < sizeof(fake) / sizeof(fake[0]); i++) {
+        rknn_face_t f = mk_box(fake[i].w, fake[i].h, fake[i].score);
+        DG_CHECK(!rknn_box_plausible(&f, 720, 1280));
+    }
+}
+
+static void test_box_plausible_limits(void)
+{
+    /* 退化框与非法尺寸:一律不算脸(而不是除零/NaN 一路放行) */
+    rknn_face_t deg = mk_box(0, 0, 0.9f);
+    DG_CHECK(!rknn_box_plausible(&deg, 720, 1280));
+    rknn_face_t nan_box = mk_box(NAN, NAN, 0.9f);
+    DG_CHECK(!rknn_box_plausible(&nan_box, 720, 1280));
+    DG_CHECK(!rknn_box_plausible(NULL, 720, 1280));
+    rknn_face_t ok = mk_box(400, 500, 0.9f);
+    DG_CHECK(!rknn_box_plausible(&ok, 0, 1280));       /* 帧尺寸非法 */
+    DG_CHECK(!rknn_box_plausible(&ok, 720, 0));
+
+    /* 上下限本身算通过(闭区间):1.30 长宽比 / 0.35 面积占比 */
+    rknn_face_t ar_hi = mk_box(130, 100, 0.9f);
+    DG_CHECK(rknn_box_plausible(&ar_hi, 720, 1280));
+    rknn_face_t ar_lo = mk_box(35, 100, 0.9f);
+    DG_CHECK(rknn_box_plausible(&ar_lo, 720, 1280));
+    rknn_face_t over = mk_box(131, 100, 0.9f);
+    DG_CHECK(!rknn_box_plausible(&over, 720, 1280));
+
+    /* 面积占比刚好 0.35:400x645 / (720*1280) = 0.2798… 用 560x576 凑满 */
+    rknn_face_t area_hi = mk_box(560, 576, 0.9f);      /* 322560/921600 = 0.35 */
+    DG_CHECK(rknn_box_plausible(&area_hi, 720, 1280));
+    DG_CHECK(!rknn_box_plausible(&(rknn_face_t){ .x1 = 0, .y1 = 0, .x2 = 561,
+                                                 .y2 = 576, .score = 0.9f },
+                                 720, 1280));
+}
+
+/* 闸门必须在 NMS 之前:幻框面积大、分数高,不先剔就会把真脸压掉 */
+static void test_box_filter_before_nms(void)
+{
+    /* 真脸 432x540(0.80) 与幻框 613x904(0.90),IoU ≈ 0.42 > 0.40 */
+    rknn_face_t faces[2] = {
+        { .x1 = 50,  .y1 = 150, .x2 = 663, .y2 = 1054, .score = 0.90f },  /* 幻框 */
+        { .x1 = 150, .y1 = 200, .x2 = 582, .y2 = 740,  .score = 0.80f },  /* 真脸 */
+    };
+    DG_CHECK(rknn_iou(&faces[0], &faces[1]) > 0.40f);
+
+    /* 顺序反了(先 NMS):幸存的是幻框 —— 真脸就是这么丢的 */
+    rknn_face_t wrong[2];
+    memcpy(wrong, faces, sizeof(wrong));
+    DG_CHECK(rknn_nms(wrong, 2, 0.40f) == 1);
+    DG_CHECK(feq(wrong[0].score, 0.90f));
+
+    /* 正确顺序(先闸门后 NMS):幻框出局,真脸留下且是唯一幸存者 */
+    int n = rknn_face_filter_plausible(faces, 2, 720, 1280);
+    DG_CHECK(n == 1);
+    DG_CHECK(feq(faces[0].score, 0.80f));
+    DG_CHECK(rknn_nms(faces, n, 0.40f) == 1);
+
+    /* 边界:空表/空指针 */
+    DG_CHECK(rknn_face_filter_plausible(NULL, 2, 720, 1280) == 0);
+    DG_CHECK(rknn_face_filter_plausible(faces, 0, 720, 1280) == 0);
+}
+
 static void test_pick_face(void)
 {
     /* 取景框 [100,100]~[300,300],中心 (200,200) */
@@ -390,6 +491,10 @@ int main(void)
     test_retinaface_decode_threshold();
     test_iou();
     test_nms();
+    test_box_plausible_real();
+    test_box_plausible_false();
+    test_box_plausible_limits();
+    test_box_filter_before_nms();
     test_pick_face();
     test_align_identity();
     test_align_scale_translate();

@@ -216,6 +216,39 @@ int rknn_nms(rknn_face_t *faces, int n, float iou_thresh)
     return keep;
 }
 
+/* ---- 检测框合理性(判据与实测依据见 rknn_face.h) ------------------------ */
+
+bool rknn_box_plausible(const rknn_face_t *f, int img_w, int img_h)
+{
+    if (!f || img_w <= 0 || img_h <= 0)
+        return false;
+
+    const float w = f->x2 - f->x1;
+    const float h = f->y2 - f->y1;
+    /* 退化/负框一律不算:后面 w/h 与面积都建立在正值上 */
+    if (!(w > 0.0f) || !(h > 0.0f))                /* !(x>0) 同时挡 NaN */
+        return false;
+
+    const float ar = w / h;
+    if (ar < RKNN_FACE_MIN_WH_RATIO || ar > RKNN_FACE_MAX_WH_RATIO)
+        return false;
+
+    const float frac = (w * h) / ((float)img_w * (float)img_h);
+    return frac <= RKNN_FACE_MAX_AREA_FRAC;
+}
+
+int rknn_face_filter_plausible(rknn_face_t *faces, int n, int img_w, int img_h)
+{
+    if (!faces || n <= 0)
+        return 0;
+
+    int keep = 0;
+    for (int i = 0; i < n; i++)
+        if (rknn_box_plausible(&faces[i], img_w, img_h))
+            faces[keep++] = faces[i];
+    return keep;
+}
+
 int rknn_pick_face(const rknn_face_t *faces, int n,
                    float vx1, float vy1, float vx2, float vy2, bool *in_view)
 {

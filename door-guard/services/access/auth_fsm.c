@@ -7,6 +7,7 @@
  * - 每个验证动作(成功/失败/任何方式)都经 FSM_ACT_WRITE_LOG 落一条
  * - timer_seq 机制:重设定时器 seq+1,旧事件按 seq 丢弃
  * - 密码连错锁 N 次锁 S 秒,计数内存态(掉电可丢,spec §5)
+ * - 前台耗时操作(FSM_EV_BUSY)期间两个无操作倒计时都停表
  * - FSM 不碰 LVGL/DB:提示输出语义枚举,文案由 UI 映射(_() 在 UI 侧)
  */
 #include "auth_fsm.h"
@@ -415,13 +416,28 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
         }
         return;
 
+    case FSM_EV_BUSY:
+        /* 前台耗时操作开始/结束(UI 侧成对发布)。为真期间两个空闲计数都
+         * 不推进(见 FSM_EV_TICK);结束时清零重新数——操作刚做完,给用户
+         * 一个完整超时才合理,否则"录入花了 14s"会让他只剩 1s 就跳走 */
+        if (fsm->busy && !data->busy) {
+            fsm->idle_s = 0;
+            fsm->menu_idle_s = 0;
+        }
+        fsm->busy = data->busy;
+        return;
+
     case FSM_EV_TICK:
-        /* 两个空闲计数都只在各自状态累加(触摸即清零):
+        /* 两个空闲计数都只在各自状态累加(触摸即清零),且耗时操作期间整体
+         * 停表:
          * - 待机倒计时只在主页面跑:离开主页(菜单/验证)不计时,回到主页
          *   重新倒数(back_to_normal 清零)——否则菜单里待久了,一回主页
          *   就立刻进待机(2026-09-21 用户反馈);
          * - 菜单会话无操作超时:覆盖菜单及其子页(子页期间停留 ST_MENU),
-         *   超时自动回主页面,防离开后屏幕停在配置页。 */
+         *   超时自动回主页面,防离开后屏幕停在配置页。
+         * busy = 用户正在录入/拍摄(在场但没摸屏),不是"无操作"(2026-10-12)。 */
+        if (fsm->busy)
+            return;
         if (fsm->state == ST_NORMAL) {
             fsm->idle_s++;
             if (fsm->idle_s >= fsm->standby_timeout_s)

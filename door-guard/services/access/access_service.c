@@ -44,7 +44,7 @@ static void copy_cstr(char *dst, size_t cap, const char *src)
 static const char *TAG = "[ACCESS]";
 
 static auth_fsm_t s_fsm;
-static event_subscription_t *s_subs[18];
+static event_subscription_t *s_subs[19];
 static int s_sub_cnt = 0;
 static struct task_node s_tick_node;
 static bool s_running = false;
@@ -655,6 +655,17 @@ static int on_touch(const event_t *e, void *ud)
     return 0;
 }
 
+/* 前台耗时操作开始/结束(录入引导窗、拍摄页):只影响无操作倒计时的推进 */
+static int on_ui_busy(const event_t *e, void *ud)
+{
+    (void)ud;
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.busy = ((const ev_ui_busy_t *)e->data)->busy;
+    fsm_feed(FSM_EV_BUSY, &d);
+    return 0;
+}
+
 static int on_access_tick(const event_t *e, void *ud)
 {
     (void)e;
@@ -708,6 +719,7 @@ int access_service_start(void)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_TEXT_INPUT, on_text_input, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_METHOD_PICK, on_method_pick, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_TOUCH, on_touch, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_UI_BUSY, on_ui_busy, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_ACCESS_TIMER, on_access_timer, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_ACCESS_TICK, on_access_tick, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_CAPTURE_STATE, on_capture_state, NULL);

@@ -14,6 +14,10 @@
  * 误弹「已退出录入」= 成功却先见失败窗,2026-10-04);终态 EV_ENROLL_RESULT
  * 关窗。页面销毁(返回/被盖)一律撤消进行中的录入流,防流程悬挂。
  *
+ * 浮层在显示期间经 bridge_busy(true/false) 申请/释放「前台耗时操作保持」:
+ * 用户按传感器的那几十秒没在摸屏,不保持就会被菜单超时当成「无人操作」
+ * 踢回主页(2026-10-12 用户反馈的真因)。
+ *
  * 分层:纯视图 + 页内小状态机;动作经 bridge,数据经 enroll_service 快照。
  */
 #include "page_finger_set.h"
@@ -55,6 +59,7 @@ static bool      s_enrolling;
 static uint32_t  s_seq;                   /* 本次录入请求 seq(回执配对) */
 
 static void refresh_slots(void);
+static void enroll_finish(void);
 
 /* 槽位行(标题静态,值/按钮随库刷新) */
 static const char *slot_title(int i)
@@ -108,8 +113,7 @@ static void press_timer_cb(lv_timer_t *t)
         return;
     /* 5s 无按压退出:撤消流程(未 Store 模板由 provider 检查点回滚) */
     bridge_enroll_request(s_uid, DG_ENROLL_FINGER_CANCEL);
-    s_enrolling = false;
-    lv_obj_add_flag(s_overlay, LV_OBJ_FLAG_HIDDEN);
+    enroll_finish();
     /* 未按下的中性提示走醒目样式短提示(编辑页既有惯例),非「验证失败」语义 */
     dg_popup_fail(_("未检测到指纹，已退出录入"), 1800, NULL, NULL);
 }
@@ -186,15 +190,19 @@ static void enroll_begin(void)
     }
     s_seq = bridge_enroll_request(s_uid, DG_ENROLL_FINGER);
     s_enrolling = true;
+    /* 录入期间暂停无操作倒计时:用户正按着传感器,没在摸屏,菜单超时
+     * 若照数会在第二枚录到一半把人踢回主页(2026-10-12 板上取证) */
+    bridge_busy(true);
     overlay_stage(DG_ENROLL_FP_STEP_PRESS1);   /* 文案先上屏,进度随后对齐 */
     lv_obj_clear_flag(s_overlay, LV_OBJ_FLAG_HIDDEN);
 }
 
-/* 终态/超时/取消共用的收尾:停表 + 收窗 + 刷槽位 */
+/* 终态/超时/取消共用的收尾:停表 + 收窗 + 放开倒计时保持 + 刷槽位 */
 static void enroll_finish(void)
 {
     press_timer_stop();
     s_enrolling = false;
+    bridge_busy(false);
     lv_obj_add_flag(s_overlay, LV_OBJ_FLAG_HIDDEN);
     refresh_slots();
 }
@@ -429,9 +437,13 @@ void page_finger_set_create(lv_obj_t *parent)
 void page_finger_set_destroy(void)
 {
     DG_LOGI("[FINGER_SET]", "page destroy");
-    /* 页面销毁即撤消录入流(未落库模板由 provider 回滚),防流程悬挂 */
-    if (s_enrolling)
+    /* 页面销毁即撤消录入流(未落库模板由 provider 回滚),防流程悬挂;
+     * 保持态在这里也要放——destroy 是唯一不经过 enroll_finish 的退出路径,
+     * 漏放会让倒计时永久停表(上层菜单超时从此不再回主页) */
+    if (s_enrolling) {
         bridge_enroll_request(s_uid, DG_ENROLL_FINGER_CANCEL);
+        bridge_busy(false);
+    }
     press_timer_stop();
     s_enrolling = false;
     s_overlay = NULL;

@@ -667,6 +667,53 @@ static void t10b_menu_timeout(void)
     DG_CHECK(s_fsm.state == ST_STANDBY);            /* 第 30s:进待机 */
 }
 
+/* ============ 10c 前台耗时操作(录入/拍摄)期间停表 ============ */
+
+static void set_busy(bool on)
+{
+    fsm_event_data_t d;
+    memset(&d, 0, sizeof(d));
+    d.busy = on;
+    auth_fsm_handle(&s_fsm, FSM_EV_BUSY, &d);
+}
+
+static void t10c_busy_holds_timeouts(void)
+{
+    printf("[F10c] 录入/拍摄期间菜单与待机倒计时全停表;结束即清零重新数\n");
+
+    /* —— 菜单里(指纹/人脸录入走这条):15s 超时到了也不许回主页 —— */
+    fsm_reset();
+    auth_fsm_handle(&s_fsm, FSM_EV_MENU_BTN, NULL);
+    ev_match_t m = mk_match("10001", "管理员", DG_ROLE_ADMIN, true);
+    handle_match(m);
+    DG_CHECK(s_fsm.state == ST_MENU);
+
+    set_busy(true);
+    for (int i = 0; i < 60; i++)                    /* 录入 60s(远超 15s) */
+        auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
+    DG_CHECK(s_fsm.state == ST_MENU);               /* 一次都没被踢走 */
+
+    set_busy(false);                                /* 操作结束:清零重新数 */
+    for (int i = 0; i < 14; i++)
+        auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
+    DG_CHECK(s_fsm.state == ST_MENU);               /* 操作刚做完:给满 15s */
+    auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);     /* 第 15 拍:照常超时 */
+    DG_CHECK(s_fsm.state == ST_NORMAL && s_fsm.match_enabled);
+
+    /* —— 主页同理:待机倒计时也停表 —— */
+    fsm_reset();
+    set_busy(true);
+    for (int i = 0; i < 60; i++)
+        auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
+    DG_CHECK(s_fsm.state == ST_NORMAL);             /* 没进待机 */
+    set_busy(false);
+    for (int i = 0; i < 29; i++)
+        auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
+    DG_CHECK(s_fsm.state == ST_NORMAL);             /* 29s:未到 30s */
+    auth_fsm_handle(&s_fsm, FSM_EV_TICK, NULL);
+    DG_CHECK(s_fsm.state == ST_STANDBY);            /* 第 30s:照常进待机 */
+}
+
 /* ================= 11 补充:成功期间重复 1:N 忽略 / 弹窗期匹配挂起恢复 ================= */
 
 static void t11_misc_invariants(void)
@@ -1072,6 +1119,7 @@ int main(void)
     t09_result_ignores_requests();
     t10_standby();
     t10b_menu_timeout();
+    t10c_busy_holds_timeouts();
     t11_misc_invariants();
     t12_menu_entry_and_verify_flow();
     t13_presence_window();

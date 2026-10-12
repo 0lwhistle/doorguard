@@ -11,6 +11,9 @@
  *   拍摄    EV_ENROLL_REQUEST(DG_ENROLL_FACE)→ 等 EV_ENROLL_RESULT(5s 超时)
  *   回看    enroll 服务人脸**草稿**(2026-09-27 起采集不落库,保存才落)
  *           → dg_avatar_decode 内存解码;「保存后生效」文案明示草稿语义
+ * 保持    本页存活期间 bridge_busy(true),destroy 释放:对准取景框/等质量/
+ *           回看复核都是「人在场但没摸屏」的操作,菜单超时不该在这期间数
+ *           (2026-10-12 用户反馈:选好角度前就被踢回主页)
  * 质量判定枚举来自 services/vision/face_quality.h(只读契约:纯枚举,
  * 与事件的 verdict 字段同源,不引入业务调用)。
  */
@@ -369,11 +372,16 @@ void page_capture_create(lv_obj_t *parent)
     set_state_live();
     /* 断流态跨页面存续:进页即找回(否则带冻结帧拍摄) */
     capture_cam_apply(capture_camera_ready());
+    /* 本页整段生命周期都算「前台耗时操作」:对准取景框、等质量合格、回看
+     * 复核都没在摸屏,而菜单超时只有 15s——不保持会在选好角度前把人踢回
+     * 主页(2026-10-12 用户反馈)。退出通道是页内的 取消/完成 按钮 */
+    bridge_busy(true);
 }
 
 void page_capture_destroy(void)
 {
     DG_LOGI("[CAPTURE]", "page destroy");
+    bridge_busy(false);              /* 释放保持(与 create 成对,唯一出口) */
     if (s_pump_timer) {
         lv_timer_delete(s_pump_timer);
         s_pump_timer = NULL;

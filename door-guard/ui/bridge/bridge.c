@@ -323,6 +323,12 @@ void bridge_touch(void)
     EVENT_BUS_PUBLISH_EMPTY(EV_UI_TOUCH);
 }
 
+void bridge_busy(bool busy)
+{
+    ev_ui_busy_t ev = { .busy = busy };
+    EVENT_BUS_PUBLISH(EV_UI_BUSY, &ev);
+}
+
 void bridge_uid_submit(const char *uid)
 {
     ev_text_input_t in;

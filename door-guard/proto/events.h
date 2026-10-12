@@ -150,6 +150,7 @@ typedef struct {
 #define EV_UI_HINT_CLEAR     EV_DEF(DG_MODULE_ID_UI, 0x002A)     /**< 清提示条 */
 #define EV_UI_FACEBOX        EV_DEF(DG_MODULE_ID_UI, 0x002B)     /**< 服务侧脸框颜色(绿/红/隐藏) */
 #define EV_UI_BRIGHTNESS     EV_DEF(DG_MODULE_ID_UI, 0x002C)     /**< 屏幕背光亮度设置(0~100,百分比;滑条/web) */
+#define EV_UI_BUSY           EV_DEF(DG_MODULE_ID_UI, 0x002D)     /**< 前台耗时操作开始/结束(录入等):期间暂停无操作倒计时 */
 
 /* access 内部:FSM 定时器/心跳经 tasker 回注(私有;FSM 全部在总线线程驱动) */
 #define EV_ACCESS_TIMER      EV_DEF(DG_MODULE_ID_AUTH, 0x0010)
@@ -484,6 +485,14 @@ typedef struct {
 typedef struct {
     int32_t pct;                          /**< 0~100,越界由 display 原语钳制 */
 } ev_brightness_t;
+
+/** EV_UI_BUSY:前台耗时操作在进行中(true = 开始 / false = 结束)。
+ *  语义 = "用户正在操作,不是无操作":FSM 期间暂停待机/菜单两个无操作计数
+ *  (2026-10-12)。发布方必须成对发布,且**页面销毁路径也要补一次 false**
+ *  (漏发 = 该倒计时永久失效),故页面统一在"操作收尾"与"destroy"两处释放。 */
+typedef struct {
+    bool busy;
+} ev_ui_busy_t;
 
 /** EV_UI_HINT:提示条文案语义
  *  method >= 0:验证方式提示(_(「请正对摄像头/请按指纹/请输入密码/请刷卡」))

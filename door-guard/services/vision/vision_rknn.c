@@ -9,8 +9,9 @@
  *     worker 线程取帧:
  *     ├─[每帧] **RGA 旋到预览同向**(横置摄像头原始帧里人是躺着的,模型只认
  *     │        正立脸;旋转后框/关键点与预览=屏幕同域,映射恒等)→
- *     │        RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)→ 解码 → NMS
- *     │        → 最大脸 → 逆映射(屏幕域)→ EV_VISION_FACE_BOX(黄框,15Hz 节流)
+ *     │        RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)→ 解码 → 逆映射
+ *     │        → **合理性闸门**(剔大锚框幻检,见 rknn_face.h)→ NMS
+ *     │        → 最大脸 → EV_VISION_FACE_BOX(黄框,15Hz 节流)
  *     └─[每 300ms 且非 IDLE] 从旋转帧裁人脸 ROI(RGA,正方形)→ 5 点对齐
  *              112×112 → (x-127.5)/127.5 → ArcFace@NPU(56ms)→ 512 维 → L2
  *              → 录入缓存 / 1:1 比对 / 1:N 检索(内存特征库暴力余弦)
@@ -787,22 +788,10 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
     }
     if (n > RKNN_MAX_CAND)
         n = RKNN_MAX_CAND;
-    n = rknn_nms(s_cand, n, RKNN_NMS_IOU);
-
-    if (n <= 0) {
-        camera_nv12_release(frame_id);
-        /* 滞回:单帧漏检(分数抖动/识别帧占用造成的检测间隙)立刻发 LOST 会让
-         * 脸框闪烁——lost_hold_ms 内保持最后位置不发,超时才判定"人走了"。
-         * 时长走配置(出厂 200ms):调小框跟手但易闪,调大稳但"框滞后于人" */
-        if (s_face_present &&
-            now_mono_ms() - s_last_det_ms > (int64_t)cfg_get()->face_lost_hold_ms)
-            pub_face_lost();
-        return;
-    }
-    s_last_det_ms = now_mono_ms();
 
     /* 全部候选逆映射到预览/屏幕域(框与关键点一并):录入选脸要按屏幕域
-     * 的取景框比较,脸框事件也恒等发布(检测域=显示域,见文件头) */
+     * 的取景框比较,脸框事件也恒等发布(检测域=显示域,见文件头)。
+     * 闸门要按真实像素框(面积占比 vs 帧面积)判定,故先映射再筛 */
     for (int i = 0; i < n; i++) {
         for (int k = 0; k < RKNN_FACE_KPS; k++)
             npu_letterbox_unmap(&s_lb, s_cand[i].kps[k][0], s_cand[i].kps[k][1],
@@ -816,6 +805,28 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
         if (s_cand[i].x2 > (float)rw) s_cand[i].x2 = (float)rw;
         if (s_cand[i].y2 > (float)rh) s_cand[i].y2 = (float)rh;
     }
+
+    /* 合理性闸门必须在 NMS **之前**(2026-10-12 用户反馈 + 板上取证):
+     * i8 量化在大锚框层会出幻框——占满整帧的 720x1128(0.850)/720x1222
+     * (0.658)、横置的 560x379(0.709,空场景:同帧 1:N 最高分 -0.057、
+     * 反欺骗 0.034)。它们面积最大,会先被选成 best(拿幻框特征去检索),
+     * 又会在 NMS 里压掉与它 IoU 过线的真脸(432x540 对 613x904 ≈ 0.42),
+     * 还让录入误判「人脸不在取景框内」。判据见 rknn_face.h;
+     * 只用于这条固定机位路径:静态图/网页上传可以是特写,脸占满画面合法 */
+    n = rknn_face_filter_plausible(s_cand, n, rw, rh);
+    n = rknn_nms(s_cand, n, RKNN_NMS_IOU);
+
+    if (n <= 0) {
+        camera_nv12_release(frame_id);
+        /* 滞回:单帧漏检(分数抖动/识别帧占用造成的检测间隙)立刻发 LOST 会让
+         * 脸框闪烁——lost_hold_ms 内保持最后位置不发,超时才判定"人走了"。
+         * 时长走配置(出厂 200ms):调小框跟手但易闪,调大稳但"框滞后于人" */
+        if (s_face_present &&
+            now_mono_ms() - s_last_det_ms > (int64_t)cfg_get()->face_lost_hold_ms)
+            pub_face_lost();
+        return;
+    }
+    s_last_det_ms = now_mono_ms();
 
     /* 识别(1:N/1:1)用最大脸:门禁场景默认离镜头最近的人优先 */
     int best = 0;

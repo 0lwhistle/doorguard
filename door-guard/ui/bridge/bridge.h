@@ -30,6 +30,10 @@ void bridge_init(void);
 void bridge_btn(const ev_ui_btn_t *btn);      /* 页面按钮请求(返回/验证…) */
 void bridge_touch(void);                      /* 待机页触摸唤醒请求 */
 
+/** 前台耗时操作开始/结束(true = 开始):期间 FSM 暂停无操作倒计时,以免
+ *  用户正在录入/拍摄时被菜单超时踢回主页。必须成对,页面 destroy 补释放 */
+void bridge_busy(bool busy);
+
 /* 验证流程回执(弹窗回调 → 服务层;uid 仅密码方式需要) */
 void bridge_uid_submit(const char *uid);      /* ID 输入框确认 */
 void bridge_pwd_submit(const char *uid, const char *pwd); /* 密码框确认 */
