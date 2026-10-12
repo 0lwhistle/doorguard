@@ -150,6 +150,7 @@ static int f_pwd(const rec_t *r) { return r->input_pwd; }
 static int f_pick(const rec_t *r) { return r->pick_method; }
 static int f_door(const rec_t *r) { return r->door_open; }
 static int f_menu(const rec_t *r) { return r->goto_menu; }
+static int f_home(const rec_t *r) { return r->goto_home; }
 
 static void add_user(const char *uid, const char *name, int32_t role,
                      uint32_t flags, const char *pwd)
@@ -199,6 +200,19 @@ static void pick(int32_t method)
 {
     ev_method_pick_t e = { .method = method };
     EVENT_BUS_PUBLISH(EV_UI_METHOD_PICK, &e);
+}
+
+/* 前台耗时操作开始/结束(UI 侧 = bridge_busy();此处直接发同一条事件) */
+static void busy(bool on)
+{
+    ev_ui_busy_t e = { .busy = on };
+    EVENT_BUS_PUBLISH(EV_UI_BUSY, &e);
+}
+
+/* 直接注入一个 access 心跳拍(FSM 的 1s tick;不必真等 1s) */
+static void tick(void)
+{
+    EVENT_BUS_PUBLISH_EMPTY(EV_ACCESS_TICK);
 }
 
 int main(void)
@@ -340,6 +354,39 @@ int main(void)
     DG_CHECK(r.result_not_admin);
     DG_CHECK(r.goto_menu == 0);
     DG_CHECK(s_get(NULL, f_door) == 0);
+    sleep(1);
+
+    /* ---- 9. 前台耗时操作保持(EV_UI_BUSY,= bridge_busy()):
+     * 录入/拍摄期间菜单超时不许把人踢回主页;操作结束倒计时照常复位重数。
+     * 这一跳(UI 事件 → access → FSM)是编译与 FSM 单测都覆盖不到的接线处,
+     * 故在服务层端到端用例里钉一次(2026-10-12) ---- */
+    memset(&s_rec, 0, sizeof(s_rec));
+    /* 上一步(非管理员)失败后 FSM 仍停在管理员认证模式:直接点验证走管理员链 */
+    btn(DG_BTN_VERIFY);
+    wait_cnt(f_ask, 1, 2000);
+    input_uid("00001");
+    wait_cnt(f_pick, 1, 2000);
+    pick(DG_METHOD_PWD);
+    wait_cnt(f_pwd, 1, 2000);
+    input_pwd("00001", "8888");
+    wait_cnt(f_menu, 1, 2000);
+    const int menu_n = s_get(NULL, f_menu);
+    DG_CHECK(menu_n == 1 && s_get(NULL, f_home) == 0);   /* 已在菜单里 */
+
+    /* 保持期间连打 20 拍(默认菜单超时 15s):一拍都不许触发回主页 */
+    busy(true);
+    for (int i = 0; i < 20; i++)
+        tick();
+    usleep(300000);                        /* 让总线把 20 拍全处理完 */
+    DG_CHECK(s_get(NULL, f_home) == 0);
+    DG_CHECK(s_get(NULL, f_menu) == menu_n);             /* 还在菜单 */
+
+    /* 释放后:计数清零重数,15 拍到点照常回主页(证明没被永久停表) */
+    busy(false);
+    for (int i = 0; i < 16; i++)
+        tick();
+    wait_cnt(f_home, 1, 3000);
+    DG_CHECK(s_get(NULL, f_home) == 1);
 
     /* ---- 清理 ---- */
     access_service_stop();

@@ -25,8 +25,9 @@ camera NV12 1280×720(主循环 camera_poll 投递)
   └─ worker 线程:[每帧] **RGA 旋转到预览同向**(横置摄像头原始帧里人是
            躺着的,模型只认正立脸;2026-09-22 修,见下方「检测输入方向」)
            → RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)
-           → rknn_retinaface_decode → NMS → 最大脸 → 逆映射(**屏幕域坐标**)
-           → EV_VISION_FACE_BOX(黄框,15Hz 节流)
+           → rknn_retinaface_decode → 逆映射(**屏幕域坐标**)
+           → **合理性闸门**(剔大锚框幻检,**必须在 NMS 之前**,2026-10-12)
+           → NMS → 最大脸 → EV_VISION_FACE_BOX(黄框,15Hz 节流)
      [每 300ms 且非 IDLE] 从旋转帧裁人脸 ROI(RGA,正方形,dw 向下 4 对齐——
            librga 对 RGB888 目标宽度 stride 硬约束)→ 5 点
            对齐 112×112 → (x-127.5)/127.5 → ArcFace@NPU(56ms)→ 512 维 → L2
@@ -42,13 +43,25 @@ NV12 帧里的人脸是 ±90° 横置的。曾直接把原始帧 letterbox 送�
 检测/ROI/对齐全在**预览=屏幕域**做,脸框坐标恒等发布,`rect_to_screen`
 两段式映射删除。判定入口:「对齐旋转角」日志应 ≈0°(头部自然倾角)。
 
+**大锚框幻检闸门(2026-10-12 板上取证,别删)**:i8 量化的 RetinaFace 在大
+锚框层(stride 32、min_size 256/512)会输出高分幻框,与上面的方向问题无关
+(方向修好后仍在)。板上日志实测:空场景 `560x379` 分数 0.709(同帧 1:N
+最高分 -0.057、反欺骗 0.034 = 画面里确实没人)、占满整帧的 `720x1222`(0.658)、
+`720x1128`(0.850)、`720x1071`(0.746)、横置的 `288x188`(0.788);把
+`face.det_threshold` 提到 0.70 也拦不住(0.850 照样出)。**危害不止画面**:
+面积最大会被选成 best(拿幻框的特征去检索)、在 NMS 里压掉 IoU 过线的真脸
+(真脸 432x540 对幻框 613x904 ≈ 0.42 > 0.40)、并让录入误判「人脸不在取景框内」
+(同批日志出现 4 次)。闸门判据(长宽比 + 面积占比,均为比例量)与实测区间
+见 `rknn_face.h`;它**只用于这条固定机位摄像头路径**——静态图/网页上传可以是
+特写人像,那里脸占满画面合法,故不进 `rknn_retinaface_decode`。
+
 分层与"在哪测":
 
 | 层 | 文件 | 内容 | 怎么验 |
 |---|---|---|---|
 | 驱动 | `drv/npu/npu_model.c` | rknn 运行时薄封装(全仓唯一 include `<rknn_api.h>`) | `tools/npu_probe` |
 | 驱动 | `drv/npu/npu_pre.c` | RGA letterbox + ROI 裁剪(坐标数学头内联) | `tests/test_npu_pre`(数学) |
-| 算法 | `rknn_face.c` | SCRFD/RetinaFace 解码、NMS、5 点对齐、余弦、归一化 | `tests/test_rknn_face` |
+| 算法 | `rknn_face.c` | SCRFD/RetinaFace 解码、**检测框合理性闸门**、NMS、5 点对齐、余弦、归一化 | `tests/test_rknn_face`(用例尺寸取自板上日志) |
 | 质量 | `face_quality.c` | 清晰度(Laplacian 方差)/人脸像素/检测分,阈值走配置 | `tests/test_face_quality` |
 | 装配 | `vision_rknn.c` | 契约实现、调度、事件发布 | 板上(npu_probe/rknn_det_test/rknn_rec_test) |
 
