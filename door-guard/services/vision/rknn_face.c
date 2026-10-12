@@ -88,36 +88,47 @@ int rknn_scrfd_decode(const rknn_scrfd_level_t *lv, int n_lv, float score_thresh
  *
  * 与 SCRFD 的差别(别混用):SCRFD 是 anchor-free 的距离回归、中心无 0.5 偏移、
  * 距离以 stride 为单位;RetinaFace 是 anchor-based、中心有 0.5 偏移、以归一化宽高为单位。
+ *
+ * n_lv 从 stride 8 档起连续取前 n_lv 档:档在张量里按 k 顺序紧密排布,
+ * 截掉尾档 = 只读前 anchor_count_lv(size, n_lv) 个锚的输出(NPU 仍算全量,
+ * 缓冲按全量分配)。摄像头固定机位传 2(stride 32 档是幻框产地,依据见
+ * rknn_face.h),静态图/离线对拍传 3。
  */
 static const int k_rf_min_sizes[3][2] = { { 16, 32 }, { 64, 128 }, { 256, 512 } };
 static const int k_rf_steps[3] = { 8, 16, 32 };
 
-int rknn_retinaface_anchor_count(int size)
+int rknn_retinaface_anchor_count_lv(int size, int n_lv)
 {
-    if (size <= 0)
+    if (size <= 0 || n_lv < 1 || n_lv > 3)
         return 0;
     int total = 0;
-    for (int k = 0; k < 3; k++) {
+    for (int k = 0; k < n_lv; k++) {
         const int f = (size + k_rf_steps[k] - 1) / k_rf_steps[k];   /* ceil */
         total += f * f * 2;                                        /* ×2 个 min_size */
     }
     return total;
 }
 
-int rknn_retinaface_decode(const float *loc, const float *conf, const float *landm,
-                           int n, int size, float score_thresh,
-                           rknn_face_t *out, int max_out)
+int rknn_retinaface_anchor_count(int size)
 {
-    if (!loc || !conf || !landm || !out || max_out <= 0 || size <= 0)
+    return rknn_retinaface_anchor_count_lv(size, 3);
+}
+
+int rknn_retinaface_decode_lv(const float *loc, const float *conf, const float *landm,
+                              int n, int size, int n_lv, float score_thresh,
+                              rknn_face_t *out, int max_out)
+{
+    if (!loc || !conf || !landm || !out || max_out <= 0 || size <= 0 ||
+        n_lv < 1 || n_lv > 3)
         return -1;
     /* 锚框数对不上说明解码方案与模型不是一套:响亮报错,不给错框 */
-    if (n != rknn_retinaface_anchor_count(size))
+    if (n != rknn_retinaface_anchor_count_lv(size, n_lv))
         return -2;
 
     const float fs = (float)size;
     int idx = 0, cnt = 0;
 
-    for (int k = 0; k < 3; k++) {
+    for (int k = 0; k < n_lv; k++) {
         const int step = k_rf_steps[k];
         const int f = (size + step - 1) / step;
         for (int i = 0; i < f; i++) {              /* 行 → y */
@@ -160,6 +171,14 @@ int rknn_retinaface_decode(const float *loc, const float *conf, const float *lan
         }
     }
     return cnt;
+}
+
+int rknn_retinaface_decode(const float *loc, const float *conf, const float *landm,
+                           int n, int size, float score_thresh,
+                           rknn_face_t *out, int max_out)
+{
+    return rknn_retinaface_decode_lv(loc, conf, landm, n, size, 3, score_thresh,
+                                     out, max_out);
 }
 
 /* ---- NMS ---------------------------------------------------------------- */

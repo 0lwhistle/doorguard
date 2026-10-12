@@ -63,8 +63,9 @@ int rknn_scrfd_decode(const rknn_scrfd_level_t *lv, int n_lv, float score_thresh
                       rknn_face_t *out, int max_out);
 
 /**
- * RetinaFace 解码(与 rknn_model_zoo `examples/RetinaFace/python/RetinaFace.py`
- * 的 PriorBox / box_decode / decode_landm 逐条对齐)。
+ * RetinaFace 解码,限前 n_lv 档(与 rknn_model_zoo
+ * `examples/RetinaFace/python/RetinaFace.py` 的 PriorBox / box_decode /
+ * decode_landm 逐条对齐)。
  * 锚框方案:min_sizes=[[16,32],[64,128],[256,512]]、steps=[8,16,32],
  * 归一化 [cx,cy,w,h] 形式(中心 +0.5 格偏移);方差 [0.1, 0.2];
  * 320 输入 → 40²×2 + 20²×2 + 10²×2 = **4200** 个锚框。
@@ -73,16 +74,29 @@ int rknn_scrfd_decode(const rknn_scrfd_level_t *lv, int n_lv, float score_thresh
  * @param loc    [n*4]  框回归输出
  * @param conf   [n*2]  分类输出(softmax 已含);本函数取 [.,1] 作人脸分
  * @param landm  [n*10] 关键点回归输出
- * @param n      锚框数
+ * @param n      锚框数(须等于 anchor_count_lv(size, n_lv))
  * @param size   模型输入边长(320)
+ * @param n_lv   参与解码的档数,从 stride 8 起数,1..3。**摄像头固定机位传 2**:
+ *               stride 32 档的 256/512 锚在 320 输入下对应原图 1024~2048px 的
+ *               "脸",门禁画面里物理上不存在,该档 200 个锚格永远得不到正样本,
+ *               i8 量化后是高分幻框的唯一产地(板上取证见下方闸门注释);
+ *               静态图/web 上传路径传 3——特写人像合法,大脸锚可能真被用到。
  * @return 命中总数(可能 > max_out);<0 = 参数非法;
- *         **-2 = 锚框数与 size 不匹配**(解码方案与模型不符,响亮报错而非给出错框)
+ *         **-2 = 锚框数与 (size, n_lv) 不匹配**(解码方案与模型不符,响亮报错而非给出错框)
  */
+int rknn_retinaface_decode_lv(const float *loc, const float *conf, const float *landm,
+                              int n, int size, int n_lv, float score_thresh,
+                              rknn_face_t *out, int max_out);
+
+/** 按 size 推算前 n_lv 档该有的锚框数(n_lv 非法返回 0;供调用方分配缓冲/自检) */
+int rknn_retinaface_anchor_count_lv(int size, int n_lv);
+
+/** 3 档全解 = decode_lv(n_lv=3);静态图路径与离线对拍工具用这份 */
 int rknn_retinaface_decode(const float *loc, const float *conf, const float *landm,
                            int n, int size, float score_thresh,
                            rknn_face_t *out, int max_out);
 
-/** 按 size 推算该有的锚框数(供调用方分配缓冲/自检) */
+/** 按 size 推算该有的锚框数(3 档全量,供调用方分配缓冲/自检) */
 int rknn_retinaface_anchor_count(int size);
 
 /** IoU(交并比);退化框返回 0 */
@@ -99,6 +113,10 @@ float rknn_iou(const rknn_face_t *a, const rknn_face_t *b);
  *   - 面积占比:固定机位门禁下人脸不可能占满画面。板上真脸 ≤ 0.25,幻框 ≥ 0.46。
  * 只在**摄像头固定机位**的路径上调用:静态图/网页上传可以是特写人像,
  * 那里脸占满画面是合法的(故本闸门不进 rknn_retinaface_decode)。
+ *
+ * 源头治理(2026-10-13):摄像头路径已改用 rknn_retinaface_decode_lv 只解
+ * stride 8/16 两档,幻框产地(stride 32 档)不再进候选;本闸门保留为兜底——
+ * 量化改善是概率性的,验收只能证伪不能证真,且换模型/换量化后本闸门继续生效。
  */
 #define RKNN_FACE_MIN_WH_RATIO  0.35f   /* w/h 下限(真脸最窄实测 0.52;保险值) */
 #define RKNN_FACE_MAX_WH_RATIO  1.30f   /* w/h 上限(幻框最窄实测 1.48) */

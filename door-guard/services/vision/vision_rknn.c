@@ -9,8 +9,9 @@
  *     worker 线程取帧:
  *     ├─[每帧] **RGA 旋到预览同向**(横置摄像头原始帧里人是躺着的,模型只认
  *     │        正立脸;旋转后框/关键点与预览=屏幕同域,映射恒等)→
- *     │        RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)→ 解码 → 逆映射
- *     │        → **合理性闸门**(剔大锚框幻检,见 rknn_face.h)→ NMS
+ *     │        RGA letterbox 320×320 → RetinaFace@NPU(6.7ms)→ 解码(摄像头
+ *     │        路径只前 2 档,见 RKNN_CAM_DET_LEVELS)→ 逆映射
+ *     │        → **合理性闸门**(剔形状异常框,兜底,见 rknn_face.h)→ NMS
  *     │        → 最大脸 → EV_VISION_FACE_BOX(黄框,15Hz 节流)
  *     └─[每 300ms 且非 IDLE] 从旋转帧裁人脸 ROI(RGA,正方形)→ 5 点对齐
  *              112×112 → (x-127.5)/127.5 → ArcFace@NPU(56ms)→ 512 维 → L2
@@ -70,6 +71,15 @@ static const char *TAG = "[VISION]";
 #define RKNN_FEATURE_MIN    16          /* 低于视为无效特征(字节) */
 #define RKNN_NMS_IOU        0.40f
 #define RKNN_MAX_CAND       256         /* 候选框上限 */
+/* 摄像头路径只解 stride 8/16 两档(2026-10-13 幻检源头治理):stride 32 档的
+ * 256/512 锚在 320 输入下对应原图 1024~2048px 的"脸",固定机位门禁画面里
+ * 物理上不存在——该档 200 个锚格永远得不到正样本,i8 量化后整层 logit 裕量
+ * 薄,是 0.6~0.85 高分幻框的唯一产地(板上取证见 rknn_face.h)。真脸在模型
+ * 空间 108×135,由 stride 16 覆盖;理论上唯一损失是模型空间 ≥190px 的脸,
+ * 那类框面积占比 >0.35,合理性闸门本来就会拒。NPU 图不变、缓冲仍按全量
+ * 4200 锚分配,只是不解这档的输出;静态图路径(web 上传,特写人像合法)
+ * 仍 3 档全解。合理性闸门继续保留兜底(vision README「大锚框幻检闸门」) */
+#define RKNN_CAM_DET_LEVELS 2
 #define RKNN_PUB_MS         66          /* 脸框事件节流(15Hz;10Hz 跟手性不足) */
 #define RKNN_BOX_LOG_MS     2000        /* 检出分数日志节流(调阈值用) */
 #define RKNN_SCORE_LOG_MS   2000        /* 1:N 最高分日志节流 */
@@ -90,6 +100,8 @@ static bool s_ready;
 
 /* 检测侧 */
 static int         s_in_w, s_in_h, s_nanchor;
+static int         s_dec_nanchor;      /* 摄像头路径实际解码的锚数(RKNN_CAM_DET_LEVELS
+                                          档;< s_nanchor;静态图路径仍用 s_nanchor) */
 static size_t      s_in_bytes;
 static uint8_t    *s_rgb;
 static uint8_t    *s_rot;              /* 旋到预览同向的 NV12 帧(worker 独占,
@@ -779,8 +791,9 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
     /* 检出阈值走配置(face.det_threshold):i8 量化后空场景会出现 0.5x 的
      * 幻检,0.5 的出厂线顶不住;板上用 2s 节流日志实测后调 */
     const float score_thresh = cfg_get()->face_det_threshold;
-    int n = rknn_retinaface_decode(s_loc, s_conf, s_landm, s_nanchor, s_in_w,
-                                   score_thresh, s_cand, RKNN_MAX_CAND);
+    int n = rknn_retinaface_decode_lv(s_loc, s_conf, s_landm, s_dec_nanchor, s_in_w,
+                                      RKNN_CAM_DET_LEVELS, score_thresh,
+                                      s_cand, RKNN_MAX_CAND);
     if (n < 0) {
         camera_nv12_release(frame_id);
         DG_LOGE(TAG, "解码失败(%d)", n);
@@ -1330,6 +1343,9 @@ static int rknn_start(bool enable_mock)
                 s_nanchor, s_in_w, rknn_retinaface_anchor_count(s_in_w));
         goto fail;
     }
+    /* 摄像头路径截掉 stride 32 档(幻框产地,依据见 RKNN_CAM_DET_LEVELS):
+     * 加载即算好并打进就绪日志,板上 grep 该行即可确认新逻辑在跑 */
+    s_dec_nanchor = rknn_retinaface_anchor_count_lv(s_in_w, RKNN_CAM_DET_LEVELS);
 
     /* ---- 识别模型 ---- */
     s_rec = npu_model_load(rpath);
@@ -1407,10 +1423,10 @@ static int rknn_start(bool enable_mock)
 
     s_ready = true;
     s_started = true;
-    DG_LOGI(TAG, "rknn 就绪:检测 %s %dx%d(锚框 %d,阈值 %.2f)+ 识别 %s(%d 维,"
-                 "特征 %d B),库 %d 人",
-            RKNN_FACE_MODEL, s_in_w, s_in_h, s_nanchor,
-            cfg_get()->face_det_threshold,
+    DG_LOGI(TAG, "rknn 就绪:检测 %s %dx%d(锚框 %d,摄像头路径解前 %d 档 = %d 锚,"
+                 "阈值 %.2f)+ 识别 %s(%d 维,特征 %d B),库 %d 人",
+            RKNN_FACE_MODEL, s_in_w, s_in_h, s_nanchor, RKNN_CAM_DET_LEVELS,
+            s_dec_nanchor, cfg_get()->face_det_threshold,
             RKNN_REC_MODEL, s_rec_dim, RKNN_FEATURE_BYTES, loaded);
     return DG_OK;
 

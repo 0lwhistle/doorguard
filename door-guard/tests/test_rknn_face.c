@@ -479,6 +479,55 @@ static void test_retinaface_decode_threshold(void)
     DG_CHECK(rknn_retinaface_decode(rf_loc, rf_conf, rf_landm, RF_N, 64, 0.5f, out, 8) == 0);
 }
 
+static void test_retinaface_level_count(void)
+{
+    DG_CHECK(rknn_retinaface_anchor_count_lv(64, 1) == 128);   /* 8²×2 */
+    DG_CHECK(rknn_retinaface_anchor_count_lv(64, 2) == 160);   /* + 4²×2 */
+    DG_CHECK(rknn_retinaface_anchor_count_lv(64, 3) == RF_N);
+    DG_CHECK(rknn_retinaface_anchor_count_lv(320, 2) == 4000); /* 4200 − 10²×2 */
+    DG_CHECK(rknn_retinaface_anchor_count_lv(64, 0) == 0);     /* 非法档数 */
+    DG_CHECK(rknn_retinaface_anchor_count_lv(64, 4) == 0);
+}
+
+/* 幻框源头治理(2026-10-13):摄像头路径只解前 2 档。size=64 缩样里
+ * stride 32 档 = 最后 8 个锚(idx 160..167)。给它的首锚 0.85 高分(板上
+ * 720×1128 幻框的量级),2 档解码必须见不到它、真脸照常出;3 档则两框都出,
+ * 钉死"幻框产自该档"这一归因。 */
+static void test_retinaface_decode_levels(void)
+{
+    rf_reset();
+    rf_conf[128 * 2 + 1] = 0.9f;            /* stride 16 首锚:真脸(loc=0=锚框本体)*/
+    rf_conf[160 * 2 + 1] = 0.85f;           /* stride 32 首锚:幻框 */
+
+    rknn_face_t out[8];
+    /* 3 档全解(静态图路径语义):两框都出,幻框在锚序第二位 */
+    DG_CHECK(rknn_retinaface_decode(rf_loc, rf_conf, rf_landm, RF_N, 64, 0.5f, out, 8) == 2);
+    DG_CHECK(feq(out[0].score, 0.9f) && feq(out[1].score, 0.85f));
+    /* s32 首锚 pw=256/64=4.0,中心 16 → 框 (-112,-112,144,144) */
+    DG_CHECK(feq(out[1].x1, -112.0f) && feq(out[1].x2, 144.0f));
+    /* 这框面积占比 = 256²/64² = 16 ≫ 0.35:就算没砍档,闸门也兜得住 */
+    DG_CHECK(!rknn_box_plausible(&out[1], 64, 64));
+
+    /* 2 档(摄像头路径,n=160):幻框档整体缺席,真脸不受影响 */
+    DG_CHECK(rknn_retinaface_decode_lv(rf_loc, rf_conf, rf_landm, 160, 64, 2,
+                                       0.5f, out, 8) == 1);
+    DG_CHECK(feq(out[0].score, 0.9f));
+    DG_CHECK(feq(out[0].x1, -24.0f) && feq(out[0].x2, 40.0f));
+    /* 1 档只有 stride 8:两框都不出 */
+    DG_CHECK(rknn_retinaface_decode_lv(rf_loc, rf_conf, rf_landm, 128, 64, 1,
+                                       0.5f, out, 8) == 0);
+
+    /* 档数与锚框数必须配套:错配 = -2(同"方案与模型不符"响亮报错) */
+    DG_CHECK(rknn_retinaface_decode_lv(rf_loc, rf_conf, rf_landm, RF_N, 64, 2,
+                                       0.5f, out, 8) == -2);
+    DG_CHECK(rknn_retinaface_decode_lv(rf_loc, rf_conf, rf_landm, 160, 64, 3,
+                                       0.5f, out, 8) == -2);
+    DG_CHECK(rknn_retinaface_decode_lv(rf_loc, rf_conf, rf_landm, 160, 64, 0,
+                                       0.5f, out, 8) == -1);
+    DG_CHECK(rknn_retinaface_decode_lv(rf_loc, rf_conf, rf_landm, 160, 64, 4,
+                                       0.5f, out, 8) == -1);
+}
+
 int main(void)
 {
     test_decode();
@@ -489,6 +538,8 @@ int main(void)
     test_retinaface_decode_offset();
     test_retinaface_decode_badcount();
     test_retinaface_decode_threshold();
+    test_retinaface_level_count();
+    test_retinaface_decode_levels();
     test_iou();
     test_nms();
     test_box_plausible_real();
