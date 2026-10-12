@@ -58,6 +58,8 @@ auth_fsm_init(&fsm, cfg_get()->door_open_ms, cfg_get()->standby_timeout_s,
   `EV_UI_ASK_UID` → 提交 ID → `EV_UI_PICK_METHOD`(带 auth_flags)→ 选密码 →
   `EV_UI_INPUT_PWD`(带 uid)→ 提交密码 → `EV_UI_RESULT`(成功+开门 / 失败+原因)
   + 菜单入口两条(无管理员免认证;有管理员要认证,非管理员验证通过也进不去)
+  + **`EV_UI_BUSY` → access → FSM 这一跳**(保持期间连打 20 拍不超时,释放后
+  16 拍照常回主页 —— 同时钉住"没被永久停表";删掉 FSM 的 busy 门控这条会红)
 
 ## 模拟器人工走通步骤(全流程验收,截图 docs/img/)
 
