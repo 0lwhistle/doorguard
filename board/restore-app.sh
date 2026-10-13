@@ -71,6 +71,17 @@ scp "${SSHOPTS[@]}" -q "$DG_REC_DIR/w600k_r50.rknn"             "root@$IP:/userd
 scp "${SSHOPTS[@]}" -q "$DG_AP/2.7_80x80_MiniFASNetV2.rknn"     "root@$IP:/userdata/doorguard/models/"
 scp "${SSHOPTS[@]}" -q "$DG_AP/4_0_0_80x80_MiniFASNetV1SE.rknn" "root@$IP:/userdata/doorguard/models/"
 
+# IC 卡驱动 .ko:内核模块不在 rootfs 镜像里(重刷即丢),来源是
+# sync-driver.sh 的交付目录 ~/k7-deliverables/;S60doorguard 启动时从这里 insmod
+DG_KO="${DG_KO:-$HOME/k7-deliverables/k7_rc522.ko}"
+if [ -f "$DG_KO" ]; then
+    echo "==> 推 IC 卡驱动 .ko"
+    sshx 'mkdir -p /userdata/doorguard'
+    scp "${SSHOPTS[@]}" -q "$DG_KO" "root@$IP:/userdata/doorguard/k7_rc522.ko"
+else
+    echo "!! 跳过 IC 卡驱动(缺 $DG_KO;在 WSL 跑 ~/k7-tools/sync-driver.sh 产出)"
+fi
+
 echo "==> 禁 lv_demo(它会占住屏幕)"
 sshx 'bash -s' <<'REMOTE'
 if [ -e /etc/init.d/S00-lv_demo ]; then

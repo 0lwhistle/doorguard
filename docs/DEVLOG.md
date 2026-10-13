@@ -2,6 +2,27 @@
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 
+## 2026-10-13 IC 卡开发链路恢复:重刷丢 .ko 已重建,S60 自载+restore-app 收编(芯片待接线复核)
+
+背景:板 10-11 重刷后应用层走了 restore-app.sh,但内核态 RC522 驱动不在恢复链里,
+板上 .ko 与自载配置全丢;今日用户接回模块实测。
+
+- 重刷的 boot.img 本身带 iccard@0 节点(spi@2ad30000 okay + compatible k7,rc522)
+  ——**boot 不用重刷**,只差 .ko
+- `sync-driver.sh k7_rc522` 重建 .ko:md5 与 10-07 定版逐字节一致(5e4977fa,
+  确定性构建);落板 /root + /userdata/doorguard(持久)
+- 严格 insmod:probe 绑定成功但 `rc522 init failed: -110`;force=1 复载打出
+  回波 **raw ff ff** = MISO 无人驱动(SPI 控制器通,芯片不应答)——与旧板电源
+  劣化期同签名;新板新接线判定接线向,按 10-06 定版表复核:3V3→1/17 脚、
+  RST→3.3V 轨(永不接 GPIO)、SCK 8 / MOSI 10 / MISO 12 / SDA(CS) 16 / RQ 9
+- **S60doorguard 加自载钩子**(节点缺且 /userdata/doorguard/k7_rc522.ko 在位则
+  insmod 严格模式)+ **restore-app.sh 收编 .ko 重推**(缺文件跳过不阻塞)——
+  重刷恢复链闭环;自载钩子已推板但未 reboot 验证
+- force=1 模块暂留板上(节点+看门狗在,接线修好后自愈出帧),验收时换严格模式
+- 没做成:芯片应答 / 放卡验 UID / 四项验收(等接线)
+- 下一步:接线复核 → rmmod + 严格 insmod → dmesg 验 0x92 → 放卡 → reboot 验
+  自载 → 四项验收
+
 ## 2026-10-13 指纹误触发治理:WAK 按压确认窗(短保持=假按压,宿主测试绿,待板上真人验收)
 
 用户报「手指没按上去也会触发」。先评估「WAK 保持 1s 才触发业务」方案并否掉:

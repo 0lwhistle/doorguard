@@ -136,6 +136,13 @@ case "$1" in
     { [ -f "$SLOT_A" ] || [ -f "$SLOT_B" ] || [ -f "$DAEMON" ]; } || {
         echo "door-guard 不存在,跳过"; exit 0; }
     mkdir -p "$STATE"
+    # IC 卡驱动(RC522)自载:内核模块不随 rootfs 镜像分发,重刷后由
+    # restore-app.sh 补回 .ko,这里在应用起来前加载。不带参数 = 严格自检,
+    # 芯片不应答时不建节点,应用走既有"读卡器未就绪"降级,不影响其余业务
+    if [ ! -e /dev/dg_iccard0 ] && [ -f /userdata/doorguard/k7_rc522.ko ]; then
+        insmod /userdata/doorguard/k7_rc522.ko 2>>"$LOG" \
+            || log "k7_rc522 insmod 失败,读卡器降级(其余业务不受影响)"
+    fi
     if [ -f "$SUP_PID" ] && kill -0 "$(cat "$SUP_PID")" 2>/dev/null; then
         echo "door-guard 已在运行"; exit 0
     fi
