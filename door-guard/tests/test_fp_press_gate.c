@@ -291,13 +291,19 @@ int main(void)
     wait_ge(&s_released_cnt, 2, 2000);
 
     printf("[P4] 配置置 0 → 钳 30ms 下限(只留电气消抖,不裸奔)\n");
-    char jpath[160];
+    /* cfg_load 两路径缺一即走纯内置默认分支(不读文件),default/cur 都要给 */
+    char jpath[160], cpath[160];
     snprintf(jpath, sizeof(jpath), "%s/default.json", dir);
+    snprintf(cpath, sizeof(cpath), "%s/cur.json", dir);
     FILE *fp = fopen(jpath, "w");
     DG_CHECK(fp != NULL);
     fputs("{\"finger\":{\"press_hold_ms\":0}}", fp);
     fclose(fp);
-    DG_CHECK(cfg_load(jpath, NULL) == DG_OK);
+    fp = fopen(cpath, "w");
+    DG_CHECK(fp != NULL);
+    fputs("{}", fp);
+    fclose(fp);
+    DG_CHECK(cfg_load(jpath, cpath) == DG_OK);
     DG_CHECK(cfg_get()->fp_press_hold_ms == 0);
     press();                              /* 30ms 窗:立即按住即过 */
     wait_ge(&s_pressed_cnt, 3, 2000);

@@ -1001,7 +1001,7 @@ static void log_short_press(int held_ms)
 /* 确认窗判定:true=真按压;false=窗内掉电平(假按压)/电平读失败/模式切走。
  * 循环内泵 apply_cmd:模式命令不压在窗里等满 500ms(wait_release 饿死
  * 教训的同型预防);mode0=进入时模式,被切走即让位,不算按压也不算假按 */
-static bool press_confirmed(int lvl, int mode0)
+static bool press_confirmed(int lvl, dg_finger_mode_t mode0)
 {
     const int hold = press_hold_window();
     int64_t start = now_mono_ms();
@@ -1046,7 +1046,7 @@ static int wait_press_once(int active)
      * 只是空转(fp_provider_start 见 s_running 直接返回),下轮即 DISABLED
      * 粘死 → 验证按钮永远「指纹模块未就绪」(模组明明在线,2026-10-03) */
     atomic_store(&s_hb_ms, now_mono_ms());
-    const int mode0 = s_mode;
+    const dg_finger_mode_t mode0 = s_mode;
     int lvl;
     int rc = s_link->wak_wait(200, &lvl);
     if (rc == DG_OK) {
