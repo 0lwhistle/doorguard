@@ -119,6 +119,12 @@ JSON,`face_model_tag` 遗留键以 cur_config.json 的 face.model_tag 为准);
 - 两条取流路径:
   - **rkcif 直采**:RAW10 裸帧(无 3A),仅用于验证传感器出图
   - **rkisp + rkaiq 3A**:正式成像路径,**已打通**(door-guard 在用):V4L2 单平面 NV12 1280x720 → RGA 旋转90 → 双出口:①转 XRGB → LVGL 软渲染(降级态,26~30fps);②**NV12 写 dma-heap 池 → VOP2 video plane(Overlay 132)硬件合成直通(2026-09-25 重启落地,主线态:DG_UI_PLANE=1)**——LVGL9.5 内建逐脏区透明擦除(lv_refr.c 对带 alpha display),8.3 透明擦除缺失根因已除;实测 fps 29~30、整机 CPU 28.0%(软渲染)→~21%(直通,与 v8 基线 20.9% 持平)。**时序契约(必守)**:video plane 的 atomic 提交前必须 `lv_linux_drm_wait_flip` 等驱动挂起 flip 完成,且用**阻塞 commit**(NONBLOCK 排队会把驱动 flip 挤成 EBUSY——失败的 flip 不入队,驱动 flush_wait 的 poll 永久等不到事件=主循环卡死 12s 被看门狗杀,无 core 静默死)。plane 直通关闭=自动降级软渲染(DG_UI_PLANE_FORCE_FAIL=1 可演练)。视觉(NPU)走 NV12 CPU 指针路径不变。⚠️ 3 个死坑:uAPI2 参数是传感器实体名(非 media 节点,传错段错误);aiq2.lock 死锁需"取流线程与 prepare 并发会合";librga 成功码有两个——详见 door-guard/modules/camera/README.md
+- **拔相机(实体缺失)会让应用秒退(2026-10-13 实测)**:holder 里 camera 本是
+  Required: No,但 `rk_aiq_uapi2_sysctl_init` 在 sensor 实体不存在时**库内空指针
+  崩溃**带走整个进程(rc=139 秒退,与上面"传错实体名段错误"同族)。治理:S60 启动
+  前判 `/sys/bus/i2c/devices/8-0037/driver`(DT 恒枚举设备节点,模组插上才绑驱动),
+  不在位自动 `DG_AIQ=0` 裸流(指纹/IC 各自降级不受影响);正式修法
+  (cam_init_thread 预检实体存在再决定走不走 3A)待做
 - door-guard 相机链路开关与环境变量见 `door-guard/modules/camera/README.md`
 
 ---

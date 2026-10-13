@@ -143,6 +143,13 @@ case "$1" in
         insmod /userdata/doorguard/k7_rc522.ko 2>>"$LOG" \
             || log "k7_rc522 insmod 失败,读卡器降级(其余业务不受影响)"
     fi
+    # 相机不在位时跳过 3A:librkaiq 在 sensor 实体缺失时库内空指针崩溃
+    # (拔相机实测 rc=139 秒退;与 camera_board.c 注释的实体查找坑同类)。
+    # 判据=i2c 传感器设备无驱动绑定(DT 恒枚举设备节点,插上才有 driver 链接)
+    if [ ! -e /sys/bus/i2c/devices/8-0037/driver ]; then
+        export DG_AIQ=0
+        log "相机不在位,自动 DG_AIQ=0(裸流,相机/3A 相关业务降级)"
+    fi
     if [ -f "$SUP_PID" ] && kill -0 "$(cat "$SUP_PID")" 2>/dev/null; then
         echo "door-guard 已在运行"; exit 0
     fi
