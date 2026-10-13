@@ -86,6 +86,11 @@ typedef struct {
                                     电平反相定按下,fp_provider wak_calibrate);
                                     0/1=强制。按压极性是 FINGERPRINT_PROTOCOL
                                     §6.④ 开放项,自动档消除该未知数 */
+    int  fp_press_hold_ms;     /**< 按压确认窗 ms:WAK 须保持按下电平满此时长才算
+                                    真按压(fp_provider press_confirmed,钳
+                                    30~2000)。2026-10-13 用户拍板:短于 500ms
+                                    的都是假按压——克隆模组触摸感应前置(悬停/
+                                    掠过即翻转)+ 干扰毛刺;默认 500 */
     /* IC 读卡器(json-only;ICCARD_PROTOCOL §8;最终节点名由驱动定,只改配置) */
     char iccard_dev_path[32];  /**< 读卡器节点,默认 /dev/dg_iccard0;"sim"=宿主模拟后端 */
     /* MQTT 通道(json-only;services/mqtt。默认关:broker 地址属部署参数,

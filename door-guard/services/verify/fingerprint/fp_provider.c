@@ -2,7 +2,10 @@
  * fp_provider.c — 指纹业务线程实现(FINGERPRINT_AS608.md §5 业务流程语义)
  *
  * 指令序列帧级依据:docs/tech/FINGERPRINT_PROTOCOL.md v1(§5 序列表)。
- * 一次按压一次判定:RELEASED 前不再触发新流程(§6 边界);录入是两次按压,
+ * 一次按压一次判定:RELEASED 前不再触发新流程(§6 边界);判定前有按压
+ * 确认窗(press_confirmed):WAK 保持按下电平满 finger.press_hold_ms 才算
+ * 真按,短保持按假按压丢弃留痕(2026-10-13 用户口径:短于 500ms 都是假按)。
+ * 录入是两次按压,
  * 查重插在按压①(采到即提示抬手、确认释放)之后,同指校验在按压②后,
  * 按压②采到即发 PROCESS(UI 停「5s 无按压」计时),取消/退出回滚已 Store 模板。
  */
@@ -50,6 +53,8 @@ static ev_finger_mode_t s_cur;            /* 当前模式参数(uid/arg/pages/se
 static int  s_wak_active = 1;             /* 生效"按下"电平(0/1) */
 static bool s_wak_ready;
 static int  s_edge_miss;                  /* 连续边沿超时计数(轮询兜底节奏) */
+static int  s_short_press_cnt;            /* 确认窗丢弃的假按压累计(留痕取证) */
+static int64_t s_short_press_log_ms;      /* 假按压日志节拍(1s 一条防刷屏) */
 
 static int wait_press_once(int active);   /* 前置:定义在"按压沿与释放"段 */
 static void wait_release(void);           /* 前置:LIFT 确认在录入序列先于定义使用 */
@@ -967,6 +972,59 @@ static int on_data_op(const event_t *e, void *ud)
 }
 
 /* ---- 按压沿与释放 ---- */
+
+/* 按压确认窗(cfg finger.press_hold_ms,钳 30~2000):WAK 须保持按下电平
+ * 满窗才算真按压。用户口径(2026-10-13):短于 500ms 的都是假按压——克隆
+ * 模组触摸感应前置(悬停/掠过即翻转)与干扰毛刺的共同特征是保持时间短;
+ * 窗口期同时覆盖指腹贴稳,capture_retry 首拍 NO_FINGER 概率随之下降。
+ * 下限 30ms:配置置 0 也保留电气消抖,不裸奔 */
+static int press_hold_window(void)
+{
+    int hold = cfg_get()->fp_press_hold_ms;
+    if (hold < 30)
+        hold = 30;
+    return hold > 2000 ? 2000 : hold;
+}
+
+/* 假按压留痕:带累计计数,1s 节流——悬空/受扰引脚会把日志刷爆 */
+static void log_short_press(int held_ms)
+{
+    s_short_press_cnt++;
+    int64_t now = now_mono_ms();
+    if (now - s_short_press_log_ms < 1000)
+        return;
+    s_short_press_log_ms = now;
+    DG_LOGW(TAG, "假按压丢弃:WAK 有效 %dms < 确认窗 %dms(累计 %d)",
+            held_ms, press_hold_window(), s_short_press_cnt);
+}
+
+/* 确认窗判定:true=真按压;false=窗内掉电平(假按压)/电平读失败/模式切走。
+ * 循环内泵 apply_cmd:模式命令不压在窗里等满 500ms(wait_release 饿死
+ * 教训的同型预防);mode0=进入时模式,被切走即让位,不算按压也不算假按 */
+static bool press_confirmed(int lvl, int mode0)
+{
+    const int hold = press_hold_window();
+    int64_t start = now_mono_ms();
+    for (;;) {
+        int64_t held = now_mono_ms() - start;
+        if (held >= hold)
+            return true;
+        apply_cmd();
+        if (s_mode != mode0)
+            return false;
+        usleep(20 * 1000);
+        int lv = -1;
+        if (s_link->wak_level(&lv) != DG_OK)
+            return false;
+        if (lv != lvl) {
+            log_short_press((int)held);
+            return false;
+        }
+    }
+}
+
+/* 释放侧消抖:30ms 单次回读(2026-10-04 口径沿用;按压侧确认窗见
+ * press_confirmed——释放迟 0.5s 无体验代价,按压迟 0.5s 有,故不对称) */
 static bool debounce_press(int lvl)
 {
     usleep(30 * 1000);
@@ -979,7 +1037,8 @@ static bool debounce_press(int lvl)
 /* 一次按压检测:边沿为主,连续约 1s 边沿超时后补一次电平直读兜底。
  * sysfs 边沿依赖内核 edge 事件,极性配置错/边沿丢失/引脚悬空读数恒静息
  * 时,纯边沿等待 = 永远等不到按压(2026-10-03 板上"无法录入"主嫌疑);
- * 电平直读不依赖事件,≤1s 即能见到按下。1=按下,0=无,-1=链路错 */
+ * 电平直读不依赖事件,≤1s 即能见到按下。沿后过按压确认窗(press_confirmed,
+ * 2026-10-13:短保持=假按压丢弃)。1=按下,0=无,-1=链路错 */
 static int wait_press_once(int active)
 {
     /* 等按压 = 线程活着在等输入,不是挂死:必须按步刷心跳。否则录入等
@@ -987,11 +1046,12 @@ static int wait_press_once(int active)
      * 只是空转(fp_provider_start 见 s_running 直接返回),下轮即 DISABLED
      * 粘死 → 验证按钮永远「指纹模块未就绪」(模组明明在线,2026-10-03) */
     atomic_store(&s_hb_ms, now_mono_ms());
+    const int mode0 = s_mode;
     int lvl;
     int rc = s_link->wak_wait(200, &lvl);
     if (rc == DG_OK) {
         s_edge_miss = 0;
-        if (lvl != active || !debounce_press(lvl))
+        if (lvl != active || !press_confirmed(lvl, mode0))
             return 0;
         return 1;
     }
@@ -1001,7 +1061,7 @@ static int wait_press_once(int active)
         s_edge_miss = 0;
         int lv2;
         if (s_link->wak_level(&lv2) == DG_OK && lv2 == active &&
-            debounce_press(lv2))
+            press_confirmed(lv2, mode0))
             return 1;
     }
     return 0;

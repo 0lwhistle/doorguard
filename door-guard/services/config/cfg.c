@@ -280,6 +280,7 @@ static void defaults_apply(dg_cfg_t *c)
     c->fp_wak_gpio = 94;
     c->fp_wak_active = -1;  /* -1=自动:启动采样静息电平定极性(fp_provider);
                                板上按压极性未验收前,自动档比猜 0/1 更可靠 */
+    c->fp_press_hold_ms = 500;  /* 2026-10-13 用户拍板:短保持=假按压(见 cfg.h) */
     snprintf(c->fp_uart_dev, sizeof(c->fp_uart_dev), "/dev/ttyS8");
     snprintf(c->iccard_dev_path, sizeof(c->iccard_dev_path), "/dev/dg_iccard0");
     /* MQTT:默认整链路关(见 cfg.h 注;broker 未定,先立配置面与服务骨架) */
@@ -423,6 +424,9 @@ static void json_apply_extra(dg_cfg_t *c, const cJSON *root)
     if ((item = json_path_get(root, "finger.wak_active_level")) &&
         cJSON_IsNumber(item))
         c->fp_wak_active = item->valueint;
+    if ((item = json_path_get(root, "finger.press_hold_ms")) &&
+        cJSON_IsNumber(item))
+        c->fp_press_hold_ms = item->valueint;   /* 越界钳制在 fp_provider 侧 */
     if ((item = json_path_get(root, "iccard.dev_path")) &&
         cJSON_IsString(item) && item->valuestring)
         copy_cstr(c->iccard_dev_path, sizeof(c->iccard_dev_path), item->valuestring);

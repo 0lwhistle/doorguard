@@ -10,7 +10,7 @@
 | 文件 | 职责 |
 |---|---|
 | `fp_as608.h/.c` | 协议层(纯函数):组包/流式解析/校验和/确认码。不持线程不碰 IO,golden 单测 `test_fp_proto` |
-| `fp_provider.h/.c` | 业务线程:WAK 按压沿 → 采集/比对/录入序列 → 发事件;降级与 PageID 映射 |
+| `fp_provider.h/.c` | 业务线程:WAK 按压沿(确认窗 press_hold_ms 过滤假按压,2026-10-13)→ 采集/比对/录入序列 → 发事件;降级与 PageID 映射 |
 | `fp_link_uart.c` | 板级链路 ops:uart_hal 收发(uart 单例)+ gpio_hal WAK 边沿等待 |
 
 ## 事件契约(proto/events.h)
@@ -25,6 +25,13 @@
 
 provider 忙于录入/删除序列时忽略 IDLE/SCAN/VERIFY 常规模式;**取消 = 切 IDLE**,
 未落库模板自动 `DeletChar` 回滚。
+
+## 按压确认窗(假按压过滤,2026-10-13)
+
+WAK 沿后须保持按下电平满 `finger.press_hold_ms`(默认 500,钳 30~2000)才算真按压;
+短保持=假按压(克隆模组触摸感应前置悬停即翻转/干扰毛刺),丢弃并 WARN 留痕
+(「假按压丢弃:WAK 有效 Nms」,1s 节流带累计)。IDLE 待机亮屏、1:N/1:1、录入
+等所有按压路径同点生效。配置置 0 只剩 30ms 电气消抖下限。
 
 ## 降级(模组没接/串口不通 ≠ 系统坏)
 
@@ -53,4 +60,5 @@ fp_provider_start();
 
 - `test_fp_proto`:协议 golden(官方 51 例程逐字节)。
 - `test_fp_enroll`:假模组端到端——happy path/查重/LIMIT/FULL/两次不一致重采/取消回滚/逐枚删除。
+- `test_fp_press_gate`:按压确认窗——短保持不出 PRESSED/不采集,长保持照常,默认 500 钉版,置 0 钳下限。
 - 板上验收清单:`FINGERPRINT_PROTOCOL.md §6`(uart8 时钟修复后逐条勾销)。

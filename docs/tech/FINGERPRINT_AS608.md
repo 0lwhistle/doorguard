@@ -106,7 +106,8 @@ UI 文案表与 web 错误映射同步。查重拒绝仍用既有 `DG_ERR_DUP_FI
 ### 5.1 普通模式 1:N(ST_NORMAL)
 
 ```
-WAK 按下沿(消抖 30ms)→ EV_FINGER_STATUS(PRESSED)
+WAK 按下沿 → 按压确认窗(保持按下满 finger.press_hold_ms,默认 500ms;
+  2026-10-13 口径:短保持=假按压,丢弃并 WARN 留痕)→ EV_FINGER_STATUS(PRESSED)
   → GenImg → Img2Tz(Buf1)              [失败(无手指/质量差)→ ERROR 事件,静默复位等待]
   → Search(Buf1, 全库) → 命中(PageID, score) → 反查 DB(user_id)
       → FSM:role=2 黑名单→失败(reason=2)/未开指纹→失败(6)/命中→开门(0),日志 method=2
@@ -162,7 +163,8 @@ reason=9 同款;退避重试,恢复上报 READY。模组上电到可响应有稳
 
 ## 6. 边界清单(实现时逐条自测)
 
-- WAK 抖动:驱动侧消抖 30ms;PRESSED..RELEASED 之间单次判定
+- WAK 抖动/悬停误触发:按压确认窗 finger.press_hold_ms(默认 500ms,钳 30~2000)
+  内保持按下才算真按,短保持丢弃留痕(2026-10-13);PRESSED..RELEASED 之间单次判定
 - 手指按住不放:只判一次,RELEASED 后才允许新流程(防按住连环开门)
 - 干手指/按压不实(采集失败确认码):普通模式静默复位等待;录入模式提示重按,不占进度
 - **两次按压不同手指**:Match 同指校验(§5.3)明确提示重采;RegModel 合成失败兜底

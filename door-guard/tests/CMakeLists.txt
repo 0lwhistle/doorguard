@@ -50,6 +50,11 @@ set_tests_properties(test_enroll_ic PROPERTIES TIMEOUT 120)
 dg_add_test(test_fp_enroll dg_fp dg_enroll dg_storage dg_config dg_tasker
                             dg_event_bus dg_proto cjson)
 set_tests_properties(test_fp_enroll PROPERTIES TIMEOUT 120)
+# 按压确认窗(2026-10-13 口径:短于 finger.press_hold_ms 的保持=假按压,
+# 不出 PRESSED/不进采集;覆盖默认 500/短保持丢弃/长保持放行/置 0 钳下限)
+dg_add_test(test_fp_press_gate dg_fp dg_storage dg_config dg_tasker
+                               dg_event_bus dg_proto cjson)
+set_tests_properties(test_fp_press_gate PROPERTIES TIMEOUT 60)
 # 指纹两侧数量一致性策略(纯判定边界 0/0、0/N、N/0、N/M + 告知优先级)
 dg_add_test(test_fp_sync dg_fp_sync)
 dg_add_test(test_rknn_face dg_rknn_face)
