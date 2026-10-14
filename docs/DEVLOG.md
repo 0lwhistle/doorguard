@@ -33,10 +33,19 @@
   好的);DTS 无 io-domains 节点(域=硬件接线),DEVICE TREE 判不了电压域
 - 解法分叉(HANDOFF 已证 40pin 唯一硬件 SPI=spi4,换控制器不可行;defconfig
   无 SPI_GPIO):①电平位移器 4ch(TXB0104 类,即买即用);②spi-gpio 位拆到
-  3.3V 域引脚——header 可释放 GPIO:GPIO0_C3(14,RST 兼任)+GPIO0_A5+
-  GPIO3_B0/D4/D5/A4/D0(vendor leds,disable 零副作用),**待用户读官方图
-  GPIO2/GPIO3 域**:3.3V 则走②(defconfig+DT+重编 boot.img,WSL 链就绪,
-  驱动零改动),1.8V 则只剩①
+  3.3V 域引脚。**用户拍板走②**,官方图补读:板上 3.3V 域 GPIO=2_D7/2_D6/
+  0_D5/0_D4/0_C3/3_A0/3_A1。**spi-gpio 方案已实施落地**:SDK 板级 DTS 重写
+  ——spi4 disable、pwm2_8ch_6 disable(释放 2_D6)、新 spi-gpio 节点
+  SCK=0_D5/MOSI=0_D4/MISO=2_D6/CS=2_D7(MISO/CS 上拉,CS 空闲保持释放)、
+  RST 沿用 0_C3;i2c7 与 vendor leds 引脚全程不碰。defconfig
+  +CONFIG_SPI_GPIO=y(BITBANG 本就=y)。boot.img 重编通过,**md5=38f84fda**,
+  已拷 Windows `flash_images/boot-rc522-spigpio-20261014.img`(跨侧 md5 核对
+  一致);补丁存 ~/k7-deliverables/0010-spigpio-rc522-dts-defconfig.diff,
+  原 DTS 备份同目录。可行性前置全查实:驱动是纯 spi_driver 零总线依赖、
+  probe 自限 1MHz、**GPIO-IRQ 零依赖**(旧 DT 的 interrupts 属性是摆设);
+  GPIO0_D4/D5 全树零消费者。剩余人工步:对照官方图把四根线挪到新脚号 →
+  RKDevTool 刷 boot@0x8000 → dmesg 应见 probe 读 0x92 → /dev/dg_iccard0;
+  .ko 用 025ece76 版(S60 自载,claim_rst 默认 0)
 - 对拍两篇 RC522 Linux 驱动教程(csdn guet_kite 2017 / cnblogs jiaozhu 2023,
   均厂家例程移植):架构层面无增量——我们 v4 是两者超集;**唯一我们没配的寄存器
   = RFCfgReg=0x7F(接收增益拉满,默认 0x48=38dB→0x7F=48dB)+ RxSelReg=0x86**,
