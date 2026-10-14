@@ -21,6 +21,7 @@ source env/env.sh
 | `dg-font` | 语言包变更后重生成中文位图字库 | `dg-font` |
 | `dg-frontend` | 重建 web 上位机前端并内嵌进二进制 | `dg-frontend` / `dg-frontend --install`(先 npm ci) |
 | `dg-ota-upload` | 生产 OTA HTTP 通道(web 端口流式 + sha256) | `dg-ota-upload <板IP> <升级包>` |
+| `dg-ota-publish` | MQTT OTA 发布一条龙(上传分发服务器 + retained 公告) | `dg-ota-publish [二进制] [--version x.y.z] [--notes S]`(DEV_HANDBOOK §7.4) |
 | `dg-tc-install` | 安装/更新交叉工具链到 `~/dg-toolchain`(md5 校验→解压) | `dg-tc-install` |
 | `dg-serial` | 串口控制台(**1500000 8N1**,不是 115200) | `dg-serial` |
 

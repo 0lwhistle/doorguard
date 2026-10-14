@@ -277,6 +277,32 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 - **测试账号**:10001/123456(role=1 管理员,auth_flags=5)在板库长期
   保留供走查登录。
 
+### 7.4 固件自动升级(MQTT OTA)生产部署(2026-10-15 定版,板上全链实测)
+
+- **服务器组件**(homeserver 192.168.2.150,docker,`--restart unless-stopped`):
+  - `mosquitto-doorguard`:eclipse-mosquitto:2,端口 1883,账号 `doorguard`,
+    口令只在服务器 `/opt/mosquitto/config/dg.pass`(600 root);配置/数据/日志
+    挂 `/opt/mosquitto/{config,data,log}`。注意 **passwd 文件属主须 1883:1883**
+    (实测 root:600 会让 mosquitto 循环崩溃 exit 13)。
+  - `nginx-doorguard`:nginx:alpine,端口 8088 → 只读挂载 `/opt/doorguard-fw`
+    (静态直出,定长 Content-Length,满足 ota_http 硬契约)。
+  - 服务器 ssh:root 免密已配(WSL 公钥经 olwhistle+sudo 写入;root 密码登录
+    不可用,olwhistle 口令与板相同)。
+- **板端配置**:`/userdata/doorguard/cur_config.json` 增 `mqtt` 段
+  (enabled/uri=mqtt://192.168.2.150:1883/topic_prefix=doorguard/账号口令)+
+  `network.ota_auto_update: 1`;改后 S60 **stop/start 拆两条**重启。
+- **发版**:`source env/env.sh && dg-build -c`(版本注入须 -c)→ `dg-ota-publish`
+  (env/bin/,点分校验+上传+retained 公告一条龙;broker 口令全程留在服务器侧)。
+  发版须打点分 tag 或 `--version x.y.z`——git describe 哈希/同点分重发都不会
+  触发升级。
+- **验收链**:服务器 `mosquitto_sub -t doorguard/status` 见 online(retain)→
+  板日志 `[OTA-UPD] 发现新版本→立即下载→暂存就绪` → `readlink /root/door-guard`
+  换槽且 sha256 与产物一致 → `doorguard/ota/state` 终态 staged;升级后重收
+  retained 公告应「不比当前新,忽略」(无升级循环)。
+- **回滚演练注意**:发坏包测回滚时,**公告被消费后立即清 retain**
+  (`mosquitto_pub -r -n -t doorguard/ota/version`)——否则 FAILED 后重启的进程
+  重收 retained 坏公告会反复下载形成循环。
+
 
 ## 8. 已知问题与待办
 

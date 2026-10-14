@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# dg-ota-publish — MQTT OTA 发布一条龙:产物上传分发服务器 → 发 retained 公告(2026-10-15)
+#
+# 前提(一次配好,见 docs/DEV_HANDBOOK.md §7.3):
+#   分发服务器 root 免密 ssh;broker 容器 mosquitto-doorguard 在 1883;
+#   broker 口令只存服务器 /opt/mosquitto/config/dg.pass(600,root)——本脚本
+#   经 ssh 在服务器侧读取,口令不落到开发机。
+# 用法:
+#   dg-ota-publish [二进制路径] [--version V] [--notes S] [--force]
+# 二进制缺省:$DG_BUILD_DIR/door-guard,否则取 dg-build 目录里最新的 aarch64 产物
+# 版本缺省:git describe --tags。设备端版本比较只认点分数字前缀
+#   (services/ota/README.md「版本比较」)——非点分版本直接拒绝;点分但带
+#   -N-gxxx 增量时给提醒(增量不参与比较,同点分值重发不会触发升级)。
+# 环境变量:
+#   DG_FW_HOST     分发服务器 ssh 目标(缺省 root@192.168.2.150)
+#   DG_FW_DIR      服务器分发目录(缺省 /opt/doorguard-fw)
+#   DG_FW_PORT     分发 HTTP 端口(缺省 8088)
+#   DG_MQTT_BROKER broker 容器名(缺省 mosquitto-doorguard)
+#   DG_MQTT_TOPIC  topic 前缀(缺省 doorguard)
+#   DG_MQTT_USER   broker 账号(缺省 doorguard)
+#   DG_MQTT_PASSFILE 服务器侧口令文件(缺省 /opt/mosquitto/config/dg.pass)
+# 发布后:板端(ota_auto_update=1)30~90s 内自动下载→校验→装槽重启;
+#   跟踪:ssh 板 tail -f /var/log/door-guard.log(看 [OTA-UPD])。
+set -euo pipefail
+
+BIN="" VER="" NOTES="" FORCE=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --version) VER="$2"; shift 2 ;;
+        --notes)   NOTES="$2"; shift 2 ;;
+        --force)   FORCE=1; shift ;;
+        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        *) if [ -z "$BIN" ]; then BIN="$1"; shift; else echo "多余参数:$1" >&2; exit 2; fi ;;
+    esac
+done
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+FW_HOST="${DG_FW_HOST:-root@192.168.2.150}"
+FW_DIR="${DG_FW_DIR:-/opt/doorguard-fw}"
+FW_PORT="${DG_FW_PORT:-8088}"
+BROKER="${DG_MQTT_BROKER:-mosquitto-doorguard}"
+TOPIC="${DG_MQTT_TOPIC:-doorguard}"
+MQTT_USER="${DG_MQTT_USER:-doorguard}"
+PASSFILE="${DG_MQTT_PASSFILE:-/opt/mosquitto/config/dg.pass}"
+
+# 产物定位:显式参数 > $DG_BUILD_DIR > dg-build 目录最新
+if [ -z "$BIN" ]; then
+    if [ -n "${DG_BUILD_DIR:-}" ] && [ -x "$DG_BUILD_DIR/door-guard" ]; then
+        BIN="$DG_BUILD_DIR/door-guard"
+    else
+        BIN="$(ls -t "$HOME"/dg-build/aarch64-*/door-guard /root/dg-build/aarch64-*/door-guard 2>/dev/null | head -1 || true)"
+    fi
+fi
+[ -x "$BIN" ] || { echo "找不到可执行产物:$BIN(可用 dg-ota-publish <路径> 显式指定)" >&2; exit 1; }
+
+# 版本:显式 > git describe;必须是点分数字前缀(设备端比较规则)
+if [ -z "$VER" ]; then
+    VER="$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo unknown)"
+fi
+if ! printf %s "$VER" | grep -Eq '^v?[0-9]+(\.[0-9]+)+'; then
+    [ "$FORCE" = 1 ] || { echo "拒绝发布:版本「$VER」无点分数字前缀,设备端不会当作新版(见 services/ota/README.md 版本比较)。打点分 tag 或 --version x.y.z;确要强发加 --force" >&2; exit 1; }
+    echo "警告:--force 强发非点分版本「$VER」——设备端将忽略该公告" >&2
+fi
+# 点分相同但带增量后缀:提醒(增量不参与比较,不会触发升级)
+DOT="$(printf %s "$VER" | sed -E 's/^v?([0-9]+(\.[0-9]+)+).*/\1/')"
+case "$VER" in
+    "$DOT") ;;
+    *) echo "提醒:版本「$VER」的点分前缀是 $DOT——增量后缀不参与比较,若设备已是 $DOT 则不会升级;发新版请打新 tag 或 --version 指定更高点分版" >&2 ;;
+esac
+NOTES="${NOTES//\"/}"                      # notes 进 JSON,去引号防注入
+DATE="$(date +%F)"
+
+SHA="$(sha256sum "$BIN" | cut -d' ' -f1)"
+SIZE="$(stat -c %s "$BIN")"
+HOSTONLY="${FW_HOST#*@}"
+
+echo "发布:$(basename "$BIN")  版本 $VER  $SIZE B"
+echo "  sha256 $SHA"
+scp -q "$BIN" "$FW_HOST:$FW_DIR/door-guard.bin" || { echo "上传失败($FW_HOST:$FW_DIR)" >&2; exit 1; }
+ssh -o BatchMode=yes "$FW_HOST" "docker exec $BROKER mosquitto_pub -h 127.0.0.1 -u $MQTT_USER -P \$(cat $PASSFILE) -r -t $TOPIC/ota/version -m '{\"version\":\"$VER\",\"date\":\"$DATE\",\"url\":\"http://$HOSTONLY:$FW_PORT/door-guard.bin\",\"sha256\":\"$SHA\",\"size\":$SIZE,\"notes\":\"$NOTES\"}'" \
+    || { echo "公告发布失败" >&2; exit 1; }
+echo "已发布 retained 公告 → $TOPIC/ota/version(版本 $VER)"
+echo "板端将自动下载升级;观察:ssh ${DOORGUARD_IP:-192.168.2.96} tail -f /var/log/door-guard.log"

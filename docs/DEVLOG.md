@@ -2,6 +2,26 @@
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 
+## 2026-10-15 MQTT 固件自动升级生产部署:全链跑通(公告→下载→装槽→回滚保护待演练)
+
+- 服务端(homeserver 192.168.2.150,docker,unless-stopped):Mosquitto 1883
+  (账号 doorguard,口令只在服务器 /opt/mosquitto/config/dg.pass)+ nginx 8088
+  → /opt/doorguard-fw(静态定长直出)。**坑:passwd 文件须属主 1883:1883**,
+  root:600 会让 mosquitto 起来 3s 后 exit 13 循环崩溃。
+- 服务器 ssh:root 密码登录不可用(密码属 olwhistle 账号);WSL 公钥经
+  olwhistle+sudo 写入 /root/.ssh 免密达成。
+- 板端:cur_config.json 加 mqtt 段 + ota_auto_update=1,S60 stop/start 拆条
+  重启;status retained online 实收。
+- 发版 v1.0.1(tag 打在 ca10b03,dg-build -c 注入版本,8s 出包)→
+  dg-ota-publish 前身手工链:裸二进制上传 → mosquitto_pub retained 公告 →
+  板端「发现新版本→立即下载」(ota/state 进度 451‰→999‰→staged)→ sha256
+  校验闭环 → S60 装非活动槽 → 重启 v1.0.1;活动槽 A sha256 与产物一致;
+  重启后重收 retained 公告正确忽略(无循环)。
+- 固化:env/bin/dg-ota-publish(点分版本硬校验/上传/公告,口令不落开发机);
+  DEV_HANDBOOK §7.4 / services/ota/README 生产部署节。
+- 待办:回滚演练(发坏包验 3 次秒退回滚;**公告消费后立即清 retain** 防循环)
+  列入验收;iccard_daemon 等旁路服务升级包不含,重刷仍走 restore-app.sh。
+
 ## 2026-10-14 板网络切路由器直连:eth0 DHCP,doorguard.local 为漂移后的稳定入口
 
 - 用户把板网线改直连家用路由器,eth0 切 **DHCP**(镜像 interfaces 的静态 .100

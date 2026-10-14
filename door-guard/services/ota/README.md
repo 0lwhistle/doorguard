@@ -55,6 +55,18 @@ S60 轮询到即装**非活动槽** → 符号链接原子切换 → 重启;新�
 - **失败语义**:下载/校验失败 → FAILED(公告保留,同版本重公告或用户
   重按「立即更新」可重试);sha 不符坏包不落 staged。
 
+## 生产部署(homeserver MQTT OTA 通道,2026-10-15 全链实测)
+
+| 组件 | 位置 | 说明 |
+|---|---|---|
+| broker | `mqtt://192.168.2.150:1883`(容器 mosquitto-doorguard) | 账号 doorguard,口令只在服务器 `/opt/mosquitto/config/dg.pass` |
+| 分发 | `http://192.168.2.150:8088/door-guard.bin`(容器 nginx-doorguard) | 目录 `/opt/doorguard-fw`,静态定长直出 |
+| 发布 | `env/bin/dg-ota-publish` | 打包产物→上传→retained 公告一条龙;点分版本硬校验 |
+
+板端:`cur_config.json` 的 `mqtt` 段 + `network.ota_auto_update`(默认 0,
+部署侧显式开;关于设备页可切)。完整部署/验收/回滚演练口径见
+DEV_HANDBOOK §7.4。
+
 ## 关于设备页(消费端)
 
 菜单 → 设备管理 → 关于设备:设备名称(cfg `device.name`)/固件版本
