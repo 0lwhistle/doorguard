@@ -172,6 +172,11 @@ void camera_rgb_preview_set(bool on)
     (void)on;
 }
 
+void camera_stream_preview_set(bool on)
+{
+    (void)on;                                /* sim 恒出帧,无转换可省 */
+}
+
 /* ---- 流健康事实(与板上后端同语义;sim 图片循环恒"在流") ---- */
 bool camera_stream_on(void)
 {

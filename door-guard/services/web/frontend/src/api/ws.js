@@ -19,8 +19,10 @@ const BASE_BACKOFF_MS = 800
  * @param {(data:object) => void} o.onEvent
  * @param {(state:'connecting'|'open'|'closed') => void} o.onStatus
  * @param {() => void} o.onReconnectProbe 连续失败后探活(用于发现会话失效)
+ * @param {(data:Blob) => void} [o.onBinary] 二进制帧(监控推流 JPEG;JSON 解析
+ *        前分流,否则会被静默丢弃)
  */
-export function createEventSocket({ getToken, onEvent, onStatus, onReconnectProbe }) {
+export function createEventSocket({ getToken, onEvent, onStatus, onReconnectProbe, onBinary }) {
   let ws = null
   let tries = 0
   let timer = null
@@ -53,6 +55,10 @@ export function createEventSocket({ getToken, onEvent, onStatus, onReconnectProb
       onStatus('open', 0)
     }
     ws.onmessage = (ev) => {
+      if (ev.data instanceof Blob || ev.data instanceof ArrayBuffer) {
+        if (onBinary) onBinary(ev.data)
+        return
+      }
       let data
       try {
         data = JSON.parse(ev.data)
@@ -75,6 +81,16 @@ export function createEventSocket({ getToken, onEvent, onStatus, onReconnectProb
       closedByUs = false
       tries = 0
       connect()
+    },
+    /** 上行文本消息(监控订阅控制;未连接时静默丢弃,开连接后由调用方重发) */
+    send(text) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(text)
+        } catch {
+          /* 发送失败无后续影响:重连后调用方按需重发 */
+        }
+      }
     },
     stop() {
       closedByUs = true

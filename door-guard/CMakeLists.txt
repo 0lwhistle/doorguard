@@ -144,6 +144,18 @@ add_library(dg_jpeg STATIC modules/jpeg/dg_jpeg.c)
 target_include_directories(dg_jpeg PUBLIC ${CMAKE_SOURCE_DIR}/modules/jpeg)
 target_link_libraries(dg_jpeg PUBLIC dg_proto ${DG_JPEG_LIB})
 
+# web 监控推流库(2026-10-14):编码线程 10fps 拉 camera_latest 降采样编 JPEG,
+# 发布双缓冲;web_server(loop 定时器)是唯一发送方,规格见 web_stream.h。
+# 定义必须早于 tests 分支的 return()(test 模式不解析文件后半段,而
+# test_stream 要链它);camera 符号在此挂不上(tests 模式无 dg_camera 目标,
+# 由测试内相机桩提供)——板/sim 模式在 dg_camera 定义后补挂链接序
+add_library(dg_web_stream STATIC services/web/web_stream.c)
+target_include_directories(dg_web_stream PUBLIC ${CMAKE_SOURCE_DIR}/services
+                                                ${CMAKE_SOURCE_DIR}/services/web
+                                                ${CMAKE_SOURCE_DIR}/modules/camera
+                                                ${CMAKE_SOURCE_DIR}/proto)
+target_link_libraries(dg_web_stream PUBLIC dg_jpeg dg_config dg_log)
+
 # ---- LVGL(两代 vendored 源码按 DG_USE_LVGL9 二选一,同一 `lvgl` 目标名,
 # 上层链接点零改动)。OFF = 完整回退 8.3 旧栈(运行期回退通道,必须常绿)。
 # C1 定版:默认 ON(契约 §2);显式 -DDG_USE_LVGL9=OFF 即回退 ----
@@ -400,6 +412,8 @@ target_link_libraries(dg_net PUBLIC dg_net_info)
 # crypto:web_auth(PBKDF2)/web_session(RAND)依赖;mongoose 自带 SHA1 无需 shim
 target_link_libraries(dg_net PUBLIC dg_access dg_storage mongoose crypto dg_timeutil
                                     dg_iccard)
+# web_stream 目标定义在 dg_camera 之后(见该处注释),这里补挂进 dg_net
+target_link_libraries(dg_net PUBLIC dg_web_stream)
 
 # 固件版本号:git describe 注入(上位机"设备概览"与 /api/device 显示)。
 # 无 git / 无 tag 时退化为 unknown——不能因为版本号取不到就让编译失败。
@@ -522,6 +536,11 @@ target_link_libraries(dg_camera PUBLIC dg_log)
 # (原先靠 dg_log 的 include 目录恰好是 proto/ 而意外传导,迁移后必须写明)
 target_include_directories(dg_display PUBLIC ${CMAKE_SOURCE_DIR}/proto)
 target_include_directories(dg_camera PUBLIC ${CMAKE_SOURCE_DIR}/proto)
+
+# web 监控推流:板/sim 模式补挂 dg_camera 链接序(库本体定义在 tests 的
+# return() 之前,见该处注释;本行只在非 test 模式执行,dg_net→web_stream→
+# camera 的静态链接顺序由此确定)
+target_link_libraries(dg_web_stream PUBLIC dg_camera)
 
 # rockiva 视觉链接(dg_vision 引用 camera/storage/cfg/liveness 符号;
 # 必须在这些库定义之后,CMake 才能建立正确的静态链接顺序)

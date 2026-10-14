@@ -233,3 +233,15 @@ set_tests_properties(test_ota_update PROPERTIES TIMEOUT 120)
 # 远程报警上报(sink 注入;类型/字段口径/净化)
 dg_add_test(test_alarm dg_alarm)
 set_tests_properties(test_alarm PROPERTIES TIMEOUT 60)
+
+# web 监控推流(2026-10-14):sim 相机全链——降采样/编码/10fps 节流/退订/
+# 配置开关;发送侧(WS 二进制)不在宿主范围,板上手验
+dg_add_test(test_stream dg_web_stream)
+# dg_web_stream 定义在 add_subdirectory(tests) 之后,接口目录这里显式补齐
+target_include_directories(test_stream PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
+    ${CMAKE_SOURCE_DIR}/modules ${CMAKE_SOURCE_DIR}/modules/camera
+    ${CMAKE_SOURCE_DIR}/modules/jpeg ${CMAKE_SOURCE_DIR}/modules/sqlite
+    ${CMAKE_SOURCE_DIR}/services ${CMAKE_SOURCE_DIR}/services/config
+    ${CMAKE_SOURCE_DIR}/services/web)
+set_tests_properties(test_stream PROPERTIES TIMEOUT 60)

@@ -92,6 +92,11 @@ void camera_dmabuf_mark_shown(int slot);
 /** LVGL 预览 RGB(XRGB)转换开关:plane 模式下关掉省一次 RGA;默认开 */
 void camera_rgb_preview_set(bool on);
 
+/** web 监控推流的取帧开关(2026-10-14):与 UI 的 rgb_preview 按位或——
+ * 两路消费方各自声明、互不顶掉(UI 回退软渲染与远程预览可同时取帧);
+ * 有人订阅推流才置位,无人时零 RGA 开销。sim 无实现(恒出帧) */
+void camera_stream_preview_set(bool on);
+
 #ifdef __cplusplus
 }
 #endif

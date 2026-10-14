@@ -12,6 +12,9 @@ services/web/
 ├── web_server.c/h     路由(表驱动)、鉴权包装、响应工具、WS 连接表(loop 私有)
 ├── web_auth.c/h       上位机凭据(device_config + PBKDF2)与登录风控
 ├── web_session.c/h    token 表:签发/校验(滑动续期)/注销/容量驱逐
+├── web_stream.c/h     监控推流(2026-10-14):编码线程 10fps 拉 camera_latest
+│                      降采样编 JPEG;发送在 web_server loop 定时器。口径
+│                      spec-network §1;测试 tests/test_stream.c
 ├── frontend/          前端工程(Vue 3 + Vite;只在这里才需要 node/npm)
 │   ├── src/
 │   │   ├── api/           HTTP/WS 出口(client 统一注入 token、处理 401)

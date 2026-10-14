@@ -73,6 +73,9 @@ static bool s_dbuf_requested;                /* 有直通消费方拉取过才�
 static int s_vid_write = -1;                 /* 上次写入槽 */
 static int s_vid_shown = -1;                 /* 正被 plane 扫描的槽 */
 static bool s_rgb_preview = true;            /* XRGB 预览转换开关(plane 模式关) */
+static bool s_rgb_ui = true, s_rgb_stream;   /* 两个消费方分写的请求(UI/推流),
+                                                s_rgb_preview = 按位或(见
+                                                camera_stream_preview_set) */
 
 /* 三缓冲:capture/视觉(worker 线程)与 UI 轮询并发读,轮转写入——
  * 双缓冲下主循环偶尔连投两帧、UI 还没拷走时第三帧会写回 s_frame 正指向的
@@ -563,5 +566,12 @@ void camera_dmabuf_mark_shown(int slot)
 
 void camera_rgb_preview_set(bool on)
 {
-    s_rgb_preview = on;
+    s_rgb_ui = on;
+    s_rgb_preview = s_rgb_ui || s_rgb_stream;
+}
+
+void camera_stream_preview_set(bool on)
+{
+    s_rgb_stream = on;
+    s_rgb_preview = s_rgb_ui || s_rgb_stream;
 }

@@ -67,6 +67,13 @@ typedef struct {
     char language[16];         /**< zh-CN / en-US,默认 zh-CN */
     /* 网络(spec-network) */
     int  web_port;             /**< web 上位机端口(含 OTA 上传端点),默认 80;PC 模拟器等非 root 绑定失败自动回退 8080 */
+    int  video_enabled;        /**< 0/1:web 监控推流总开关(2026-10-14,默认 1=开;
+                                    摄像头画面属敏感面,部署方可在配置显式关闭;
+                                    关闭时 video_on 请求被拒)。WS 鉴权与单会话
+                                    策略不变,此开关只关推流这一路 */
+    int  video_max_side;       /**< 推流帧较长边上限像素,160~1280,默认 640
+                                    (等比缩放;板上竖屏 720×1280 → 360×640) */
+    int  video_quality;        /**< JPEG 编码质量 10~95,默认 70(质量/带宽权衡) */
     char ntp_server[64];       /**< 默认 ntp.aliyun.com(国内部署实测可用) */
     char ota_url[128];         /**< OTA 升级包源地址,可空;公告无 url 时作下载回落 */
     int  ota_auto_update;      /**< 0/1:MQTT 检到新版本是否自动下载升级(关于设备页可切),默认 0 */

@@ -52,6 +52,9 @@
   "network": {
     "ntp_server": "ntp.aliyun.com",
     "web_port": 80,
+    "video_enabled": true,
+    "video_max_side": 640,
+    "video_quality": 70,
     "ota_url": "",
     "ota_auto_update": 0,
     "net_mode": "dhcp",

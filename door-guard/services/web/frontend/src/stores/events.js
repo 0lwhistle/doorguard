@@ -61,6 +61,11 @@ function onEvent(msg) {
     if (msg.ok) toast.ok(msg.msg || '操作成功')
     else toast.err(msg.msg || '操作失败')
     enrollListeners.forEach((cb) => cb(msg))
+    return
+  }
+  if (msg.type === 'video') {
+    /* 监控订阅回执(video_on 的受理结果);画面本体走二进制帧,onBinary */
+    videoCtlListeners.forEach((cb) => cb(msg))
   }
 }
 
@@ -71,13 +76,39 @@ export function onEnrollResult(cb) {
   return () => enrollListeners.delete(cb)
 }
 
+/* ---- 监控推流(2026-10-14)----
+ * 订阅是页面级意图(videoDesired):VideoView 挂载置位、卸载清位;
+ * 连接建立/重连成功后按意图重发 video_on——服务端按连接记账,重连即新
+ * 订阅。画面二进制帧与控制回执分两路回调,消费者只有 VideoView */
+let videoDesired = false
+const videoFrameListeners = new Set()
+const videoCtlListeners = new Set()
+
+export function onVideoFrame(cb) {
+  videoFrameListeners.add(cb)
+  return () => videoFrameListeners.delete(cb)
+}
+
+export function onVideoControl(cb) {
+  videoCtlListeners.add(cb)
+  return () => videoCtlListeners.delete(cb)
+}
+
+export function setVideoSubscribe(on) {
+  videoDesired = on
+  if (socket) socket.send(on ? '{"type":"video_on"}' : '{"type":"video_off"}')
+}
+
 export function start() {
   if (socket) return
   socket = createEventSocket({
     getToken,
     onEvent,
+    onBinary: (blob) => videoFrameListeners.forEach((cb) => cb(blob)),
     onStatus: (status) => {
       state.status = status
+      if (status === 'open' && videoDesired)
+        socket.send('{"type":"video_on"}')   /* 重连即新连接:订阅要重发 */
     },
     onReconnectProbe: () => {
       /* 连不上两次:探一次接口,会话失效时 HTTP 层会 401 → 回登录页 */

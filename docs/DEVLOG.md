@@ -2,6 +2,29 @@
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 
+## 2026-10-14(深夜三)web 监控实时推流落地(用户拍板:默认开/无设备端提示/固定 10fps)
+
+- **实现**(取代 09-20 占位决议,RTSP 仍不做):新 `services/web/web_stream`——
+  编码线程 10fps 拉 `camera_latest()`(XRGB)→ 盒滤波降采样(长边≤
+  `network.video_max_side` 默认 640)→ `dg_jpeg` 编码(`video_quality` 默认 70)
+  → 发布缓冲;web_server 加 100ms loop 定时器按 seq 变化 `mg_ws_send(OP_BINARY)`
+  逐订阅连接发。客户端上行仅 `video_on/off` 文本(回执 `{"type":"video",ok,msg}`),
+  订阅=连接级状态,断开自动退订;无人订阅时 worker 停拍并释放相机取帧(零开销)。
+  相机侧新增 `camera_stream_preview_set`(与 UI 软渲染标志按位或,互不顶掉),
+  摄像头模块其余零改动、NV12 监听槽(vision 独占)不受影响。配置三键
+  json-only(cfg.h/cfg.c/default.json);`video_enabled=0` 时 video_on 显式拒绝。
+- **前端**:ws.js 增 onBinary 分流(JSON.parse 前拦,原实现二进制会被静默丢弃)+
+  send();events store 管 videoDesired 意图(重连自动重发 video_on)与帧/回执
+  两路回调;VideoView 占位换实装(Blob objectURL 刷 img、断流 2s 回等待态、
+  截图=存当前帧)。
+- **测试**:`tests/test_stream.c`(sim 相机全链:两张 BMP 喂 camera_sim →
+  降采样 320×160→160×80 实测、SOI/EOI、10fps 节流上限、重复帧跳过、退订即停、
+  配置关闭拒绝订阅);架构只读直调登记(architecture-v2 §1);spec-network §1
+  与 web/README 更新。WS 发送侧与真机画面待板上手验。
+- **教训**:mongoose WS 客户端消息原被"只保持连接"注释占位——上行通道要留
+  解析位;浏览器 WS 二进制默认 Blob,`JSON.parse(ev.data)` 对它抛异常被吞,
+  二进制必须在 parse 前分流。
+
 ## 2026-10-14(深夜二)读卡业务正式挂起(用户拍板):开关化屏蔽+全链验证
 
 - 用户拍板:RC522 太占时间,业务挂起待后续;代码资产保留。落地(2b9fdc0+e10ecfd):

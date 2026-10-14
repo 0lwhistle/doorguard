@@ -42,6 +42,7 @@
 #include "web_auth.h"
 #include "web_session.h"
 #include "web_pages.h"
+#include "web_stream.h"
 #include "ota/ota_package.h"
 #include "ota/ota_service.h"
 #include "ntp/ntp_service.h"
@@ -93,6 +94,12 @@ static int64_t s_ntp_ts = 0;
 /* ---- WebSocket 连接表(loop 线程私有,无锁)+ 推送队列(跨线程,互斥) ---- */
 
 static struct mg_connection *s_ws[WS_MAX_CONN];
+static bool s_ws_video[WS_MAX_CONN];          /* 该连接已订阅监控推流 */
+
+/* 推流发送侧:loop 定时器按快照 seq 变化拉帧,发给所有订阅连接。
+ * 缓冲静态分配(web_stream 只出 JPEG,上限即 DG_WEB_STREAM_JPEG_CAP) */
+static uint8_t s_video_tx[DG_WEB_STREAM_JPEG_CAP];
+static uint32_t s_video_last_seq;
 
 static char s_queue[WS_QUEUE][WS_MSG_MAX];
 static int s_q_head = 0, s_q_tail = 0;
@@ -145,6 +152,7 @@ static void ws_add(struct mg_connection *c)
     for (int i = 0; i < WS_MAX_CONN; i++) {
         if (!s_ws[i]) {
             s_ws[i] = c;
+            s_ws_video[i] = false;
             DG_LOGI(TAG, "WebSocket 已连接");
             return;
         }
@@ -157,6 +165,10 @@ static void ws_remove(struct mg_connection *c)
 {
     for (int i = 0; i < WS_MAX_CONN; i++) {
         if (s_ws[i] == c) {
+            if (s_ws_video[i]) {             /* 断开必须退订:计数配对归还 */
+                web_stream_viewer_remove();
+                s_ws_video[i] = false;
+            }
             s_ws[i] = NULL;
             DG_LOGI(TAG, "WebSocket 已断开");
             return;
@@ -2174,6 +2186,69 @@ static void route(struct mg_connection *c, struct mg_http_message *hm)
               strlen(DG_WEB_INDEX_HTML), NULL);
 }
 
+/* ---- WebSocket 客户端→设备消息 ----
+ * 事件推送不依赖客户端说话;客户端唯一的上行是监控推流订阅控制
+ * (video_on/video_off)。消息体就是这两个词,子串判足矣(互不为子串) */
+
+static void ws_on_client_msg(struct mg_connection *c, void *ev_data)
+{
+    struct mg_ws_message *wm = ev_data;
+    char buf[64];
+    size_t n = wm->data.len < sizeof(buf) - 1 ? wm->data.len : sizeof(buf) - 1;
+    memcpy(buf, wm->data.buf, n);
+    buf[n] = '\0';
+
+    int idx = -1;
+    for (int i = 0; i < WS_MAX_CONN; i++) {
+        if (s_ws[i] == c) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx < 0)
+        return;                              /* 表满被拒的连接:不服务 */
+
+    if (strstr(buf, "video_on")) {
+        int rc = web_stream_viewer_add();
+        s_ws_video[idx] = (rc == DG_OK);
+        const char *msg = rc == DG_OK ? "监控画面已开启" :
+                          rc == DG_ERR_UNSUPPORTED ? "监控推流已在设备上关闭" :
+                                                     "监控订阅数已达上限";
+        char reply[128];
+        snprintf(reply, sizeof(reply), "{\"type\":\"video\",\"ok\":%s,\"msg\":\"%s\"}",
+                 rc == DG_OK ? "true" : "false", msg);
+        mg_ws_send(c, reply, strlen(reply), WEBSOCKET_OP_TEXT);
+        return;
+    }
+    if (strstr(buf, "video_off")) {
+        if (s_ws_video[idx]) {
+            web_stream_viewer_remove();
+            s_ws_video[idx] = false;
+        }
+        return;
+    }
+}
+
+/* loop 定时(100ms):监控推流帧下发。快照 seq 未变不发送;无订阅者时
+ * web_stream_active() 短路,编码线程也停拍,整机零开销 */
+static void video_push_cb(void *arg)
+{
+    (void)arg;
+    if (!s_started || !web_stream_active())
+        return;
+    uint32_t seq = 0;
+    size_t len = 0;
+    if (!web_stream_snapshot(s_video_tx, sizeof(s_video_tx), &len, &seq))
+        return;
+    if (seq == s_video_last_seq)
+        return;                              /* 同帧重发无意义(10fps 节拍) */
+    s_video_last_seq = seq;
+    for (int i = 0; i < WS_MAX_CONN; i++) {
+        if (s_ws[i] && s_ws_video[i])
+            mg_ws_send(s_ws[i], s_video_tx, len, WEBSOCKET_OP_BINARY);
+    }
+}
+
 /* ---- 连接事件入口(loop 线程) ---- */
 
 static void http_handler(struct mg_connection *c, int ev, void *ev_data)
@@ -2198,7 +2273,7 @@ static void http_handler(struct mg_connection *c, int ev, void *ev_data)
                 netcore_post(fw_retry_cb, NULL);
         }
     } else if (ev == MG_EV_WS_MSG) {
-        /* 推送不依赖客户端消息;只需保持连接 */
+        ws_on_client_msg(c, ev_data);
     } else if (ev == MG_EV_CLOSE) {
         if (c == s_ota_c) {                  /* 客户端中途断开:保留 .part 供续传 */
             ota_abort();
@@ -2492,6 +2567,7 @@ static void web_setup(void *arg)
         DG_LOGI(TAG, "web 上位机就绪 :%d(版本 %s)", s_port, DG_FW_VERSION);
     mg_timer_add(netcore_mgr(), 5000, MG_TIMER_REPEAT, net_watch_cb, NULL);
     mg_timer_add(netcore_mgr(), 5000, MG_TIMER_REPEAT, uptime_push_cb, NULL);
+    mg_timer_add(netcore_mgr(), 100, MG_TIMER_REPEAT, video_push_cb, NULL);
     net_watch_cb(NULL);                  /* 起服即记录基线地址(变化才推) */
 }
 
@@ -2555,6 +2631,7 @@ int web_server_start(void)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_ADDR, on_net_addr, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_NET_CFG_SET, on_net_cfg_set, NULL);
 
+    web_stream_start();                      /* 监控推流(配置可屏蔽,失败不拦 web) */
     netcore_post(web_setup, NULL);           /* 监听注册在 loop 线程执行 */
     publish_web_state();
     return DG_OK;
@@ -2575,6 +2652,7 @@ void web_server_stop(void)
         event_bus_unsubscribe(s_subs[i]);
     s_sub_cnt = 0;
 
+    web_stream_stop();
     netcore_post(web_teardown, NULL);        /* netcore 已停则静默丢弃(mgr_free 兜底) */
     web_session_revoke_all();
 }

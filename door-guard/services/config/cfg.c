@@ -266,6 +266,9 @@ static void defaults_apply(dg_cfg_t *c)
     c->brightness = 100;                 /* 出厂全亮;用户在屏幕显示页调整 */
     snprintf(c->language, sizeof(c->language), "zh-CN");
     c->web_port = 80;    /* 2026-09-27 起默认 80:URL 免带端口;非 root 回退 8080 */
+    c->video_enabled = 1;    /* 2026-10-14 用户拍板默认开(token 门禁+局域网) */
+    c->video_max_side = 640;
+    c->video_quality = 70;
     snprintf(c->ntp_server, sizeof(c->ntp_server), "ntp.aliyun.com");
     c->ota_url[0] = '\0';
     c->ota_auto_update = 0;              /* 自动升级默认关:升级是重大动作,部署侧显式开 */
@@ -468,6 +471,22 @@ static void json_apply_extra(dg_cfg_t *c, const cJSON *root)
         cJSON_IsString(item) && item->valuestring)
         copy_cstr(c->audio_prompt_dir, sizeof(c->audio_prompt_dir),
                   item->valuestring);
+    if ((item = json_path_get(root, "network.video_enabled")) != NULL)
+        c->video_enabled = json_bool(item, c->video_enabled);
+    if ((item = json_path_get(root, "network.video_max_side")) &&
+        cJSON_IsNumber(item))
+        c->video_max_side = item->valueint;
+    if (c->video_max_side < 160)
+        c->video_max_side = 160;
+    if (c->video_max_side > 1280)
+        c->video_max_side = 1280;
+    if ((item = json_path_get(root, "network.video_quality")) &&
+        cJSON_IsNumber(item))
+        c->video_quality = item->valueint;
+    if (c->video_quality < 10)
+        c->video_quality = 10;
+    if (c->video_quality > 95)
+        c->video_quality = 95;
 }
 
 /* 快照重建:默认两层 → cur 层;写入另一份缓冲后切换(读端持旧快照不受影响) */
