@@ -24,10 +24,14 @@
 - 对拍两篇 RC522 Linux 驱动教程(csdn guet_kite 2017 / cnblogs jiaozhu 2023,
   均厂家例程移植):架构层面无增量——我们 v4 是两者超集;**唯一我们没配的寄存器
   = RFCfgReg=0x7F(接收增益拉满,默认 0x48=38dB→0x7F=48dB)+ RxSelReg=0x86**,
-  正对 ESP32「RF 命中率低 ~2/20」未结案项——列为 RST 判决落定后的下一个实验
-  (裁判台+K7 驱动同步加,保持两机同构);另:cnblogs 版整个驱动零 RST GPIO
-  (纯软复位,每 open 重配),独立佐证「RST 常高+软复位」是社区通行做法。
-  勿学其 spi_read_regs 1 字节越界(kzalloc(len) 却 len+1 传输/偏移读)
+  正对 ESP32「RF 命中率低 ~2/20」未结案项。用户拍板立即补配(不等判决):
+  **两机同步加**——裁判台 v4.1 + K7 驱动 rc522_init 补两写(基线转储表增
+  RxSel/RFCfg 行可验生效;顺带修正注释错把 ModeReg 当 RxGain 之源),
+  新 .ko md5=025ece76(旧定版 5e4977fa 作废),板当时不在线待 scp 落盘
+  /root+/userdata/doorguard。注意:此改动靶子是 RF 命中率,不解释版本寄存器
+  读死;RST 判决实验判据不变。另:cnblogs 版整个驱动零 RST GPIO(纯软复位,
+  每 open 重配),独立佐证「RST 常高+软复位」是社区通行做法;勿学其
+  spi_read_regs 1 字节越界(kzalloc(len) 却 len+1 传输/偏移读)
 
 ## 2026-10-13(晚)判决翻案:ESP32 仲裁证明模块活着;用户澄清后嫌疑收敛到 K7 主机侧
 
