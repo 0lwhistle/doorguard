@@ -2,6 +2,27 @@
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 
+## 2026-10-14(深夜二)读卡业务正式挂起(用户拍板):开关化屏蔽+全链验证
+
+- 用户拍板:RC522 太占时间,业务挂起待后续;代码资产保留。落地(2b9fdc0+e10ecfd):
+  ①cfg 新键 `iccard.enabled`(int,默认 1,解析对齐 mqtt.enabled 的 json_bool 风格);
+  ②`mod_iccard` disabled 时不建线程不订阅,日志「读卡业务已按配置屏蔽」;
+  ③`access_service_start` 尾部直接 `fsm_feed(FSM_EV_IC_STATE, ic_ready=false)`
+  ——provider 不启动就没有降级事件来纠正 auth_fsm_init 的乐观 true,不喂则选
+  IC 方式会「请刷卡」空等而非 reason=9 拒绝;④UI 录卡入口 `card_provider_ready()`
+  恒 false 自动拒(零改动);⑤仓库 default.json iccard.enabled=false;⑥S60 的
+  spidev 绑定+daemon 自启整段包进 `/userdata/doorguard/.iccard_enable` flag
+  文件门控(恢复=touch+重启);⑦板上 /etc/door-guard/default.json 同步 false、
+  daemon 已杀、FIFO 已清
+- 验证:51/51 宿主测试绿;板上新启动日志零 IC 相关行、屏蔽日志在、daemon 不在、
+  应用正常。恢复路径=仓库配置置 true+touch flag 文件+推板重启,资产全保留
+  (iccard_daemon 二进制在 /userdata/doorguard,rc522_wr_test 诊断工具入仓)
+- **坑×2**:①dg-test 编译的是 tests-* 目录产物,dg-deploy 取 aarch64-* 产物,
+  只跑测试不跑 dg-build 会推**旧 app**(md5「一致」只证板上=本地产物,不证产物
+  含新代码,判据=板上 strings 查新日志串);②`cmd | tail` 的退出码是 tail 的,
+  `dg-build | tail && dg-deploy` 短路失效,编译失败也推了旧包——管道后判断
+  须 `set -o pipefail`
+
 ## 2026-10-14(深夜)「刷卡没反应」追凶:链路级诊断定案——写通道死/读通道间歇,待用户接线
 
 - 承上条:S60 钩子+daemon 部署收尾后用户实测**真卡刷卡恒无反应**。应用日志
