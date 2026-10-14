@@ -21,6 +21,13 @@
 - 待办:①ESP32 实测(RST 线挪 3V3→flash.bat→盯 [STAT] ver 与读卡)②K7 复刻
   (rmmod k7_rc522 → spidev 绑定 spi4.0 → 探针连读)③判决后同步 DEV_HANDBOOK
   接线定版(注意探针 README 仍有「M1 起改接 14 脚」旧案,待判决后勘误)
+- 对拍两篇 RC522 Linux 驱动教程(csdn guet_kite 2017 / cnblogs jiaozhu 2023,
+  均厂家例程移植):架构层面无增量——我们 v4 是两者超集;**唯一我们没配的寄存器
+  = RFCfgReg=0x7F(接收增益拉满,默认 0x48=38dB→0x7F=48dB)+ RxSelReg=0x86**,
+  正对 ESP32「RF 命中率低 ~2/20」未结案项——列为 RST 判决落定后的下一个实验
+  (裁判台+K7 驱动同步加,保持两机同构);另:cnblogs 版整个驱动零 RST GPIO
+  (纯软复位,每 open 重配),独立佐证「RST 常高+软复位」是社区通行做法。
+  勿学其 spi_read_regs 1 字节越界(kzalloc(len) 却 len+1 传输/偏移读)
 
 ## 2026-10-13(晚)判决翻案:ESP32 仲裁证明模块活着;用户澄清后嫌疑收敛到 K7 主机侧
 
