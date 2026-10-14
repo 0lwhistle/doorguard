@@ -44,6 +44,10 @@ ws.onmessage = async (ev) => {
       console.log(
         `首帧 ${b.length}B SOI=${b[0] === 0xff && b[1] === 0xd8 ? '是' : '否'}`,
       )
+      if (process.env.DG_SAVE_FRAME)
+        await import('node:fs/promises').then((fs) =>
+          fs.writeFile(process.env.DG_SAVE_FRAME, b),
+        )
     }
   } else {
     const m = JSON.parse(ev.data)
