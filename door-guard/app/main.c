@@ -205,9 +205,15 @@ static int mod_finger(void)
     return fp_provider_start();
 }
 
-/* IC 读卡服务(2026-10-01):ko 未加载同样走内部降级(协议 §10 失败隔离) */
+/* IC 读卡服务(2026-10-01):ko 未加载同样走内部降级(协议 §10 失败隔离)。
+ * 2026-10-14 起 K7 读卡链路挂起(iccard.enabled=0):不建线程不订阅,FSM 的
+ * ic_ready 由 access_service 启动时直接喂 false;代码与板上 daemon 资产保留 */
 static int mod_iccard(void)
 {
+    if (!cfg_get()->iccard_enabled) {
+        DG_LOGI("[ICCARD] 读卡业务已按配置屏蔽(iccard.enabled=0)");
+        return DG_OK;
+    }
     return card_provider_start();
 }
 

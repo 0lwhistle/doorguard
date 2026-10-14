@@ -136,12 +136,21 @@ case "$1" in
     { [ -f "$SLOT_A" ] || [ -f "$SLOT_B" ] || [ -f "$DAEMON" ]; } || {
         echo "door-guard 不存在,跳过"; exit 0; }
     mkdir -p "$STATE"
-    # IC 卡驱动(RC522)自载:内核模块不随 rootfs 镜像分发,重刷后由
-    # restore-app.sh 补回 .ko,这里在应用起来前加载。不带参数 = 严格自检,
-    # 芯片不应答时不建节点,应用走既有"读卡器未就绪"降级,不影响其余业务
-    if [ ! -e /dev/dg_iccard0 ] && [ -f /userdata/doorguard/k7_rc522.ko ]; then
-        insmod /userdata/doorguard/k7_rc522.ko 2>>"$LOG" \
-            || log "k7_rc522 insmod 失败,读卡器降级(其余业务不受影响)"
+    # IC 读卡 A 路方案(2026-10-14):内核 k7_rc522 退役(spi-gpio 总线上 probe
+    # 必败且 rmmod 有段错误风险),用户态 iccard_daemon 经 spidev 直驱 RC522,
+    # 帧进 FIFO(/tmp/dg_iccard.fifo)交付应用,应用侧配置 iccard.dev_path 已
+    # 指向该 FIFO。**2026-10-14 起 K7 读卡链路挂起:须存在
+    # /userdata/doorguard/.iccard_enable 标志文件才绑定+拉起,否则整段跳过
+    # (应用侧 iccard.enabled=0 同步屏蔽);恢复=touch 该文件+重启,资产保留**
+    if [ -f /userdata/doorguard/.iccard_enable ]; then
+        if [ -d /sys/bus/spi/devices/spi7.0 ] && [ ! -e /sys/bus/spi/devices/spi7.0/driver ]; then
+            echo spidev > /sys/bus/spi/devices/spi7.0/driver_override 2>/dev/null
+            echo spi7.0 > /sys/bus/spi/drivers/spidev/bind 2>/dev/null \
+                || log "spidev 绑定 spi7.0 失败,读卡器降级(其余业务不受影响)"
+        fi
+        if [ -x /userdata/doorguard/iccard_daemon ] && ! pidof iccard_daemon >/dev/null 2>&1; then
+            /userdata/doorguard/iccard_daemon </dev/null >>"$LOG" 2>&1 &
+        fi
     fi
     # 相机不在位时跳过 3A:librkaiq 在 sensor 实体缺失时库内空指针崩溃
     # (拔相机实测 rc=139 秒退;与 camera_board.c 注释的实体查找坑同类)。
@@ -173,9 +182,18 @@ case "$1" in
     [ -f "$SUP_PID" ] && kill "$(cat "$SUP_PID")" 2>/dev/null
     [ -f "$WATCH_PID" ] && kill "$(cat "$WATCH_PID")" 2>/dev/null
     killall door-guard 2>/dev/null
+    killall iccard_daemon 2>/dev/null
     killall rkaiq_3A_server 2>/dev/null
     rm -f "$SUP_PID" "$WATCH_PID" /tmp/.rkaiq_3A /tmp/aiq2.lock
-    killall S60doorguard 2>/dev/null    # 兜底必须最后:上一行先清干净 pidfile
+    # 兜底必须最后:上一行先清干净 pidfile。按名 killall 会把 restart 的
+    # 父脚本进程一并命中——父进程无 trap 护体,被杀后 start 分支永不执行,
+    # restart 整体失灵(2026-10-14 实测);改逐 pid 杀,排除本进程($$,有
+    # trap 护体)与调用方($PPID)
+    for p in $(pidof S60doorguard); do
+        if [ "$p" != "$$" ] && [ "$p" != "$PPID" ]; then
+            kill "$p" 2>/dev/null
+        fi
+    done
     echo "door-guard 已停止"
     ;;
   restart)

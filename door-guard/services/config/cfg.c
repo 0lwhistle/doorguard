@@ -283,6 +283,7 @@ static void defaults_apply(dg_cfg_t *c)
     c->fp_press_hold_ms = 500;  /* 2026-10-13 用户拍板:短保持=假按压(见 cfg.h) */
     snprintf(c->fp_uart_dev, sizeof(c->fp_uart_dev), "/dev/ttyS8");
     snprintf(c->iccard_dev_path, sizeof(c->iccard_dev_path), "/dev/dg_iccard0");
+    c->iccard_enabled = 1;
     /* MQTT:默认整链路关(见 cfg.h 注;broker 未定,先立配置面与服务骨架) */
     c->mqtt_enabled = 0;
     c->mqtt_uri[0] = '\0';
@@ -430,6 +431,8 @@ static void json_apply_extra(dg_cfg_t *c, const cJSON *root)
     if ((item = json_path_get(root, "iccard.dev_path")) &&
         cJSON_IsString(item) && item->valuestring)
         copy_cstr(c->iccard_dev_path, sizeof(c->iccard_dev_path), item->valuestring);
+    if ((item = json_path_get(root, "iccard.enabled")) != NULL)
+        c->iccard_enabled = json_bool(item, c->iccard_enabled);
     if ((item = json_path_get(root, "mqtt.enabled")) != NULL)
         c->mqtt_enabled = json_bool(item, c->mqtt_enabled);
     if ((item = json_path_get(root, "mqtt.uri")) &&

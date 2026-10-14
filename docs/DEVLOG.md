@@ -2,6 +2,66 @@
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 
+## 2026-10-14(深夜)「刷卡没反应」追凶:链路级诊断定案——写通道死/读通道间歇,待用户接线
+
+- 承上条:S60 钩子+daemon 部署收尾后用户实测**真卡刷卡恒无反应**。应用日志
+  实锤:只有合成帧(seq=1~4),真卡一帧未到——问题锁定 daemon 的 RF 收卡链
+- **诊断装备**(door-guard/tools/rc522_wr_test.c,新工具):①`w` 统计模式
+  (5 寄存器×50 轮写读一致性);②`d` 模式全 64 寄存器指纹 dump;`iccard_daemon`
+  增:stats 心跳(scan/atqa/uid,20s)/回波过滤 rd(rx[1]==地址字节即重读,
+  **0xEE 死亡签名=0x37 的地址字节回波,十天悬案终破**)/就绪门禁+每笔配置
+  写校验重写(wr_verify)/SPI 降速 100kHz
+- **全表指纹(判别性时刻)**:64 寄存器读回与标准 MFRC522 复位值表全面吻合
+  (0x11=0x3F/0x14=0x80/0x17=0x84/0x26=0x48/0x37=0x92)——**芯片=正牌
+  MFRC522 v2.0,读可信;配置写确实从未生效**(RxSel 恒 0x84 复位值非 0x86)
+- **但碎片化生效证据确凿**:0x0d=0x07(REQA 7bit)+0x09=0x26(REQA 入 FIFO)
+  +FIFO=空=**transceive 的写生效过,芯片真执行过 REQA**(且天线开丢失=
+  有命令无场=恒无卡的精确机理);FIFO 实验曾见 FIFOLVL 4→11 递增=数据写
+  曾连续生效;RFCfg=0xA5 门禁曾过
+- **终态量化**:`w` 统计**写通道 ~0/50 全死**(100 轮 1 次漏过),读侧间歇
+  (真值/复位值/地址回波漂移,空闲 MISO 电平 lo↔hi 漂)。写死不是协议/
+  速度问题(100kHz 同死),是**物理链路劣化**(杜邦线边际接触/模块供电,
+  今日反复接线+多次实验后恶化)
+- 软件已到极限:回波过滤/校验重写/降速在线好时段全部有效,线死时无法可救。
+  **PowerDown 假说已否证**(写 CommandReg 唤醒后配置写照旧不生效,且唤醒
+  写本身也死);CS 粘低假说已否证(gpio-95 空闲正确 hi);手工 CS 实验因
+  gpio95 被 spi-gpio 占用未能做(备选:DT 去 cs-gpios+SPI_NO_CS)
+- **待用户**:①重插拔 4 线两头(重点 MISO 14 脚)②换线/缩短线长③万用表量
+  模块 VDD;**每动一次线跑 `/root/rc522_wr_test /dev/spidev7.0 w`,五寄存器
+  ≥45/50 即链路合格**,然后 `/etc/init.d/S60doorguard start` 拉起 daemon 刷卡
+- 官方例程(TJDZ-RC522 资料)已对拍:配置序列等价(Mode=0x3D/RxSel=0x86/
+  RFCfg=0x7F/TMode=0x8D/TxASK=0x40;TReload 官方 30 已对齐),SPI 帧结构
+  一致,无增量魔法——问题不在这层
+
+## 2026-10-14(晚)A 路方案部署收尾:刷卡链路端到端打通 + S60 restart 自杀坑修复
+
+- 用户报「RC522 刷卡应用没反应」。板上侦察定案:**A 路方案部署只完成一半**——
+  daemon 二进制已在 `/userdata/doorguard/iccard_daemon`,板上
+  `/etc/door-guard/default.json` 的 `iccard.dev_path` 已改指
+  `/tmp/dg_iccard.fifo`(应用日志实锤:30s 限频刷「open FIFO: No such file
+  or directory」进降级),**但启动链不存在**:仓库版/板上版 S60 均无 spidev
+  绑定钩子与 daemon 自启,`spi7.0` 无 driver 绑定(driver_override 空)→
+  `/dev/spidev7.0` 不存在,FIFO 无人 mkfifo → daemon 即便手动跑也第一步 open 失败
+- **修复(仓库 S60 + 板上同步,备份 S60doorguard.bak-20261014)**:
+  start 分支退役 insmod 块替换为——①spidev 绑定钩子(`echo spidev >
+  spi7.0/driver_override` + bind,`-e driver` 幂等守卫,失败 log 降级);
+  ②daemon 自启(`pidof` 守卫,stderr 进 $LOG);stop 分支补 `killall iccard_daemon`
+- **验证(板上)**:绑定后 `/dev/spidev7.0` 出现;daemon probe **0x92 一次过**
+  (终验夹心实验结论:0xEE 是内核 spi_sync 路径特有,spidev 路径芯片活);
+  应用 2s 退避重连上 FIFO。端到端自证:向 FIFO 手注 24B 合成帧(magic
+  0x30434349/uid_len 4/uid 801AA75C)→ 应用日志「读卡器就绪→读到卡
+  ********A75C(type=1 seq=N)→POPUP 验证失败」——无效卡正确反应,链路
+  芯片→daemon→FIFO→provider→EV_IC_CARD→UI 全通;restart 后复验同样通过
+- **踩坑(已知坑实锤复现+修复)**:`S60doorguard restart` 自杀——stop 兜底
+  `killall S60doorguard` 按名把 restart 父脚本一并 TERM(父无 trap 护体),
+  start 分支永不执行,实测板上 app+daemon 全死、监督循环也没了;修复=
+  兜底改逐 pid 杀并排除 `$$`(自身,有 trap)与 `$PPID`(restart 调用方),
+  restart 全程走通后 `pidof S60doorguard` 归零无游离。**之前只有「别用
+  restart」的口头规避,现在是修好了**
+- 待办:①用户真卡验收(合成帧只验链路,RF 命中率/真实刷卡手感未测);
+  ②`iccard_daemon.c` 与 S60 改动未提交;③DEVLOG 上条(白天)的 CS 波形
+  抓取使命已被 A 路方案替代——内核驱动路线正式封存,仪器化 .ko 留档不再部署
+
 ## 2026-10-14 判决实验准备:裁判台 v4(RST 常高同构版)+ K7 步骤定稿
 
 - 用户拍板流程:先在 ESP32-S3 上验「RST 硬线 3V3、只走软复位」这一配置本身,

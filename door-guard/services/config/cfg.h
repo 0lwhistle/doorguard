@@ -93,6 +93,9 @@ typedef struct {
                                     掠过即翻转)+ 干扰毛刺;默认 500 */
     /* IC 读卡器(json-only;ICCARD_PROTOCOL §8;最终节点名由驱动定,只改配置) */
     char iccard_dev_path[32];  /**< 读卡器节点,默认 /dev/dg_iccard0;"sim"=宿主模拟后端 */
+    int  iccard_enabled;       /**< 0=屏蔽读卡业务(2026-10-14 起,K7 链路问题挂起:
+                                    provider 不启动/FSM ic_ready=false/录卡入口拒);
+                                    后续恢复置 1 即可,默认 1 */
     /* MQTT 通道(json-only;services/mqtt。默认关:broker 地址属部署参数,
      * 硬接好之前不留对外连接面) */
     int  mqtt_enabled;         /**< 0/1,默认 0;开启后连 broker、订阅 cmd、转发验证事件 */

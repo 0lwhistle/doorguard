@@ -735,6 +735,16 @@ int access_service_start(void)
         DG_LOGE(TAG, "心跳任务入队失败");
         return DG_ERR_INTERNAL;
     }
+    /* 读卡业务屏蔽时 FSM 直接喂 ic_ready=false:provider 不启动就没有
+     * 降级事件来纠正 auth_fsm_init 的乐观 true,不喂则选 IC 方式会进
+     * 「请刷卡」空等而非 reason=9 拒绝(2026-10-14 屏蔽收尾) */
+    if (!cfg_get()->iccard_enabled) {
+        fsm_event_data_t d;
+        memset(&d, 0, sizeof(d));
+        d.ic_ready = false;
+        fsm_feed(FSM_EV_IC_STATE, &d);
+    }
+
     s_running = true;
     DG_LOGI(TAG, "access 服务启动");
     return DG_OK;

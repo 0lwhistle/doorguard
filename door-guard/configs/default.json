@@ -28,6 +28,7 @@
     "press_hold_ms": 500
   },
   "iccard": {
+    "enabled": false,
     "dev_path": "/dev/dg_iccard0"
   },
   "mqtt": {
