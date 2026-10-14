@@ -211,7 +211,7 @@ static int mod_finger(void)
 static int mod_iccard(void)
 {
     if (!cfg_get()->iccard_enabled) {
-        DG_LOGI("[ICCARD] 读卡业务已按配置屏蔽(iccard.enabled=0)");
+        DG_LOGI("[MAIN]", "读卡业务已按配置屏蔽(iccard.enabled=0)");
         return DG_OK;
     }
     return card_provider_start();
