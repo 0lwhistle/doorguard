@@ -55,6 +55,21 @@ static void frame_push(void)
     s_frame.pixels = s_px;
 }
 
+/* 指定纯色推帧(字节序 = 帧标准 BGRA8888);通道序回归测试用 */
+static void frame_push_color(uint8_t b, uint8_t g, uint8_t r)
+{
+    for (size_t i = 0; i < sizeof(s_px); i += 4) {
+        s_px[i + 0] = b;
+        s_px[i + 1] = g;
+        s_px[i + 2] = r;
+        s_px[i + 3] = 0xFF;
+    }
+    s_frame.w = SRC_W;
+    s_frame.h = SRC_H;
+    s_frame.seq++;
+    s_frame.pixels = s_px;
+}
+
 static void msleep(int ms)
 {
     struct timespec ts = { .tv_sec = 0, .tv_nsec = ms * 1000000L };
@@ -173,6 +188,26 @@ static void test_happy_path(void)
     DG_CHECK(w == EXP_W && h == EXP_H);        /* 等比降采样 320×160 → 160×80 */
 }
 
+/* 通道序回归(2026-10-14 紫屏事故):标准序纯红帧 → 编码 → 解码,
+ * 中心像素必须 R 高 / G、B 低。首版把帧按 XRGB 字面序读(RGA 实际写
+ * BGRA8888),红绿互换+蓝通道恒 255 = 整画面紫屏 */
+static void test_channel_order(void)
+{
+    frame_push_color(0, 0, 255);               /* 纯红(标准字节序) */
+    msleep(300);                               /* 等 worker 编码发布 */
+    size_t len = 0;
+    uint32_t seq = 0;
+    DG_CHECK(grab(&len, &seq));
+    static uint8_t rgb[SRC_W * SRC_H * 3];
+    int w = 0, h = 0;
+    DG_CHECK(dg_jpeg_decode_rgb(s_jpeg, len, 1, rgb, sizeof(rgb), &w, &h) ==
+             DG_OK);
+    int idx = ((h / 2) * w + w / 2) * 3;       /* 中心像素(避开边缘压缩伪影) */
+    DG_CHECK(rgb[idx + 0] > 200);              /* R */
+    DG_CHECK(rgb[idx + 1] < 60);               /* G */
+    DG_CHECK(rgb[idx + 2] < 60);               /* B */
+}
+
 static void test_repeat_frame_skipped(uint32_t last)
 {
     /* 不再推新帧:同帧不得重复编码发布 */
@@ -218,6 +253,7 @@ int main(void)
 
     size_t len = 0;
     uint32_t last = 0;
+    test_channel_order();
     msleep(300);               /* 等 worker 排空最后一推,再取基线 seq(时序竞争) */
     grab(&len, &last);
     test_repeat_frame_skipped(last);

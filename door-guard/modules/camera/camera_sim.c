@@ -69,7 +69,9 @@ int camera_init(const char *res_path, camera_frame_fn cb, void *ud)
             DG_LOGW(TAG, "解码失败 %s", full);
             continue;
         }
-        /* RGB888 → XRGB8888 展开:与 LVGL 32 位色/板上 ARGB 帧直通一致 */
+        /* RGB888 → 帧标准字节序展开:BGRA8888(内存 B,G,R,X;板上 RGA
+         * RK_FORMAT_BGRA_8888 同款,LVGL 32 位直通一致)。曾按 X,R,G,B 展
+         * 开,sim 软渲染预览与 web 推流红蓝互换(2026-10-14 修) */
         size_t npix = (size_t)w * h;
         uint8_t *xrgb = malloc(npix * 4);
         if (!xrgb) {
@@ -77,10 +79,10 @@ int camera_init(const char *res_path, camera_frame_fn cb, void *ud)
             continue;
         }
         for (size_t i = 0; i < npix; i++) {
-            xrgb[i * 4 + 0] = 0xFF;            /* X */
-            xrgb[i * 4 + 1] = rgb[i * 3 + 0];  /* R */
-            xrgb[i * 4 + 2] = rgb[i * 3 + 1];  /* G */
-            xrgb[i * 4 + 3] = rgb[i * 3 + 2];  /* B */
+            xrgb[i * 4 + 0] = rgb[i * 3 + 2];  /* B */
+            xrgb[i * 4 + 1] = rgb[i * 3 + 1];  /* G */
+            xrgb[i * 4 + 2] = rgb[i * 3 + 0];  /* R */
+            xrgb[i * 4 + 3] = 0xFF;            /* X */
         }
         stbi_image_free(rgb);
         s_imgs[s_img_cnt].pixels = xrgb;

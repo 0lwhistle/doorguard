@@ -1,8 +1,9 @@
 /*
  * web_stream.c — web 监控推流实现(架构 v2 决议:RTSP 暂缓,WS 快照)
  *
- * 链路:worker 线程 10fps 节拍拉 camera_latest()(XRGB8888,板上=720×1280
- * 竖屏,板侧 XRGB 转换经 camera_stream_preview_set 按位或打开;sim 恒出帧)
+ * 链路:worker 线程 10fps 节拍拉 camera_latest()(4B/像素,内存字节序
+ * BGRA8888——板上=720×1280 竖屏,板侧转换经 camera_stream_preview_set
+ * 按位或打开;sim 恒出帧)
  * → 等比降采样 + XRGB→RGB888 → dg_jpeg 编码 → 发布缓冲 → netcore_post 通知
  * loop 线程发送。
  *
@@ -81,9 +82,12 @@ static void convert_frame(const uint8_t *xrgb, int sw, int sh,
             for (int sy = sy0; sy < sy1; sy++) {
                 const uint8_t *p = xrgb + ((size_t)sy * sw + sx0) * 4;
                 for (int sx = sx0; sx < sx1; sx++, p += 4) {
-                    r += p[1];
-                    g += p[2];
-                    b += p[3];
+                    /* 帧内存字节序 = BGRA8888(见 camera.h camera_frame_t;
+                     * 板上 RGA 用 RK_FORMAT_BGRA_8888 写出,与 LVGL 32 位
+                     * 直通一致)。首版按 XRGB 读反,整画面紫屏(2026-10-14) */
+                    b += p[0];
+                    g += p[1];
+                    r += p[2];
                     n++;
                 }
             }

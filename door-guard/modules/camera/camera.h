@@ -20,7 +20,10 @@ extern "C" {
 typedef struct {
     int32_t w, h;              /**< 帧宽高 */
     uint32_t seq;              /**< 递增序号(丢帧检测) */
-    const uint8_t *pixels;     /**< XRGB8888(4 字节/像素,与 LVGL 32 位色直通),
+    const uint8_t *pixels;     /**< 4 字节/像素,与 LVGL 32 位色直通;内存
+                                    字节序 = **B,G,R,X**(BGRA8888;板上
+                                    RGA 用 RK_FORMAT_BGRA_8888 写出,勿按
+                                    XRGB 字面序读——web 推流首版读反致紫屏),
                                     回调返回后失效 */
 } camera_frame_t;
 
