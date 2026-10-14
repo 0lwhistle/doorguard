@@ -62,6 +62,18 @@
   剩余人工步:查图补 3_A0/A1 两个物理脚号 → 接线(原 14 脚线改接模块
   MISO、原 16 脚线改接 9 脚 CS)→ 刷 boot@0x8000 → dmesg probe 0x92 →
   /dev/dg_iccard0 → 应用层刷卡+指纹触摸唤醒回归
+- 软 SPI 外部供电联调(下午):init_seq/spi_loop 系列曾全部报死——**根因是
+  工具自身变量遮蔽 bug**(main 局部 `int fd` 遮蔽全局,rd() 的 ioctl 全打到
+  stdin),「芯片死态 92/EE/18 漂移」大半是假象;修好后 1M 与 4M 连读全部
+  92×6,芯片健康。真正的未解之谜收敛为一条:**同一时刻同一总线,spidev 读
+  必 0x92、k7_rc522 的 spi_sync 读必 0xEE**(夹心铁证:spidev 3×92 → 驱动
+  00ee → spidev 3×92,芯片全程活)。已排除:速度(1M/4M 对调双活)、缓冲
+  内存(栈/kmalloc/双 transfer 三变体全 EE)、复位状态(活芯片跳过复位仍
+  EE)。已部署仪器化驱动(probe 三变体+4096B 长读窗口)+ cs_watch.sh 波形
+  采样器(板上 /root/),下次板在线窗口跑「采样器后台 + insmod」抓驱动
+  传输期间 CS 波形,判别 CS 是否真拉低(疑点收窄至 spi 核心对客户端的
+  CS/传输执行差异)。教训:**排障工具的 ioctl 返回值必须检查打印**,变量
+  遮蔽 → 打到 stdin 全 00 假死。驱动 .ko 最新 md5 见 ~/k7-deliverables
 - 对拍两篇 RC522 Linux 驱动教程(csdn guet_kite 2017 / cnblogs jiaozhu 2023,
   均厂家例程移植):架构层面无增量——我们 v4 是两者超集;**唯一我们没配的寄存器
   = RFCfgReg=0x7F(接收增益拉满,默认 0x48=38dB→0x7F=48dB)+ RxSelReg=0x86**,
