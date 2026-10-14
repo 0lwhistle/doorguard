@@ -23,9 +23,20 @@
   与 v3「沿后首读未就绪」同象、非本配置问题;基线 RxSel=0x86 / RFCfg=0x7F
   写入生效;连续扫描两次完整读出 801AA75C(10-07 原卡)+1A40A40C,空场 TMO
   (Timer=1)正常,未见 0xEE 死亡签名;[STAT] ver= 长跑行待补。→ 准予上 K7
-- K7 侧执行序:板上线先 scp 新 .ko(md5 025ece76)落 /root+/userdata/doorguard,
-  RST 14 脚→3V3(1/17),rmmod k7_rc522→spidev 绑定→`rc522_m0 -r 0` 连读数分钟:
-  稳 0x92=GPIO0_C3 定罪 / 1×0x92 后 0xEE=轨问题,万用表量模块 VDD
+- K7 万用表仲裁(用户实测,claim_rst=1 拉高后):**RST=3.3V、CS=1.8V、
+  MOSI/MISO 空闲 0.8V(浮空)** → 官方电压图证实:GPIO0=3.3V 域、GPIO1/GPIO4
+  =1.8V 域。**定案:RC522 在 K7 上从第一天起就是电平域错配**——1.8V 逻辑喂
+  3.3V 供电的 RC522(VIH=2.31V,典型阈值~1.65V),全部历史怪象收敛:一次即死
+  /恒高留不住/减载无效/换 3V3 脚无效/ESP32(3.3V)完美——边际电平,寄存器短读
+  能过(M0 五连读、6/6 单读),协议长链必错。旧「四线可信」验的是回波连通性
+  不是电平有效性;RST/轨/驱动全部无罪。**RST→3V3 判决实验作废**(RST 一直是
+  好的);DTS 无 io-domains 节点(域=硬件接线),DEVICE TREE 判不了电压域
+- 解法分叉(HANDOFF 已证 40pin 唯一硬件 SPI=spi4,换控制器不可行;defconfig
+  无 SPI_GPIO):①电平位移器 4ch(TXB0104 类,即买即用);②spi-gpio 位拆到
+  3.3V 域引脚——header 可释放 GPIO:GPIO0_C3(14,RST 兼任)+GPIO0_A5+
+  GPIO3_B0/D4/D5/A4/D0(vendor leds,disable 零副作用),**待用户读官方图
+  GPIO2/GPIO3 域**:3.3V 则走②(defconfig+DT+重编 boot.img,WSL 链就绪,
+  驱动零改动),1.8V 则只剩①
 - 对拍两篇 RC522 Linux 驱动教程(csdn guet_kite 2017 / cnblogs jiaozhu 2023,
   均厂家例程移植):架构层面无增量——我们 v4 是两者超集;**唯一我们没配的寄存器
   = RFCfgReg=0x7F(接收增益拉满,默认 0x48=38dB→0x7F=48dB)+ RxSelReg=0x86**,
