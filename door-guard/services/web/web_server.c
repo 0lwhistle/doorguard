@@ -96,6 +96,15 @@ static int64_t s_ntp_ts = 0;
 static struct mg_connection *s_ws[WS_MAX_CONN];
 static bool s_ws_video[WS_MAX_CONN];          /* 该连接已订阅监控推流 */
 
+/* 监控连接在线检测(用户拍板:退出网页必须让推流线程睡眠):订阅连接周期性
+ * 发 WS Ping,浏览器按 RFC6455 自动回 Pong(mongoose 上报为 MG_EV_WS_CTL);
+ * 超时无任何入帧判死并断开——CLOSE→退订→编码线程停车。覆盖断网/睡眠/
+ * 杀进程等不发 FIN 的异常退出;正常关页走 TCP FIN,同一条 CLOSE 路径 */
+#define VIDEO_PING_MS   2000                  /* 保活探测周期 */
+#define VIDEO_DEAD_MS   5000                  /* 无入帧判死阈值 */
+static uint64_t s_ws_last_rx[WS_MAX_CONN];    /* 最后收到该连接任何帧的时刻 */
+static uint64_t s_ws_last_ping[WS_MAX_CONN];
+
 /* 推流发送侧:loop 定时器按快照 seq 变化拉帧,发给所有订阅连接。
  * 缓冲静态分配(web_stream 只出 JPEG,上限即 DG_WEB_STREAM_JPEG_CAP) */
 static uint8_t s_video_tx[DG_WEB_STREAM_JPEG_CAP];
@@ -153,6 +162,8 @@ static void ws_add(struct mg_connection *c)
         if (!s_ws[i]) {
             s_ws[i] = c;
             s_ws_video[i] = false;
+            s_ws_last_rx[i] = mg_millis();
+            s_ws_last_ping[i] = mg_millis();
             DG_LOGI(TAG, "WebSocket 已连接");
             return;
         }
@@ -2187,8 +2198,8 @@ static void route(struct mg_connection *c, struct mg_http_message *hm)
 }
 
 /* ---- WebSocket 客户端→设备消息 ----
- * 事件推送不依赖客户端说话;客户端唯一的上行是监控推流订阅控制
- * (video_on/video_off)。消息体就是这两个词,子串判足矣(互不为子串) */
+ * 事件推送不依赖客户端说话;客户端上行是监控订阅控制(video_on/video_off),
+ * 其余任何入帧(含 Pong 控制帧)都是在线证据 */
 
 static void ws_on_client_msg(struct mg_connection *c, void *ev_data)
 {
@@ -2229,13 +2240,39 @@ static void ws_on_client_msg(struct mg_connection *c, void *ev_data)
     }
 }
 
-/* loop 定时(100ms):监控推流帧下发。快照 seq 未变不发送;无订阅者时
- * web_stream_active() 短路,编码线程也停拍,整机零开销 */
+/* 该连接有入帧(loop 线程专用;在线检测的时间基准) */
+static void ws_touch(struct mg_connection *c)
+{
+    for (int i = 0; i < WS_MAX_CONN; i++) {
+        if (s_ws[i] == c) {
+            s_ws_last_rx[i] = mg_millis();
+            return;
+        }
+    }
+}
+
+/* loop 定时(100ms):订阅连接保活探测(周期 Ping,5s 无入帧判死断开——
+ * CLOSE 事件退订,编码线程随之停车)+ 监控帧下发。快照 seq 未变不发送;
+ * 无订阅者时 web_stream_active() 短路,整机零开销 */
 static void video_push_cb(void *arg)
 {
     (void)arg;
     if (!s_started || !web_stream_active())
         return;
+    uint64_t now = mg_millis();
+    for (int i = 0; i < WS_MAX_CONN; i++) {
+        if (!s_ws[i] || !s_ws_video[i])
+            continue;
+        if (now - s_ws_last_ping[i] >= VIDEO_PING_MS) {
+            mg_ws_send(s_ws[i], "", 0, WEBSOCKET_OP_PING);
+            s_ws_last_ping[i] = now;
+        }
+        if (now - s_ws_last_rx[i] > VIDEO_DEAD_MS) {
+            DG_LOGW(TAG, "监控客户端无响应 %llu ms,断开并停拍",
+                    (unsigned long long)(now - s_ws_last_rx[i]));
+            s_ws[i]->is_closing = 1;         /* CLOSE→ws_remove→退订→停车 */
+        }
+    }
     uint32_t seq = 0;
     size_t len = 0;
     if (!web_stream_snapshot(s_video_tx, sizeof(s_video_tx), &len, &seq))
@@ -2273,7 +2310,10 @@ static void http_handler(struct mg_connection *c, int ev, void *ev_data)
                 netcore_post(fw_retry_cb, NULL);
         }
     } else if (ev == MG_EV_WS_MSG) {
+        ws_touch(c);
         ws_on_client_msg(c, ev_data);
+    } else if (ev == MG_EV_WS_CTL) {
+        ws_touch(c);                         /* Ping/Pong/Close 控制帧=在线证据 */
     } else if (ev == MG_EV_CLOSE) {
         if (c == s_ota_c) {                  /* 客户端中途断开:保留 .part 供续传 */
             ota_abort();

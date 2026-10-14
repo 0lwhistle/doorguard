@@ -5,7 +5,9 @@
  * 双缓冲;传输(mg_ws_send)在 web_server 的 loop 线程做,本模块绝不碰连接。
  * 编码线程自己拉 camera_latest()(pull,与 UI 轮询同款语义),不进事件总线、
  * 不占 NV12 监听槽(vision 独占)——相机侧只按位或打开 XRGB 转换
- * (camera_stream_preview_set),无人订阅时零 RGA 开销。
+ * (camera_stream_preview_set)。**平时不跑**(用户拍板):web 页面点开始才
+ * 订阅;无人订阅时线程睡在条件变量上(零唤醒),取帧开关同步关闭;
+ * 断连/判死的退订路径见 web_server 的在线检测(周期 Ping+超时判死)。
  *
  * 用户拍板(2026-10-14):总开关 web.video_enabled 默认开;帧率固定 10fps
  * 不做档位;设备端不做"远程预览中"提示。

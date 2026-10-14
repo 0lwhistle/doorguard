@@ -3,8 +3,8 @@
  *
  * 用法:node ws_video_test.mjs [host] [port]     (默认 192.168.137.100:80)
  * 流程:admin/admin 登录 → WS ?token= → 发 video_on → 统计 3s 内二进制 JPEG 帧。
- * 判定 PASS = 订阅回执 ok 且帧数 ∈ [5,34](10fps×3s≈30 为名义值;下限防
- * 慢机/待机降帧,上限防超发)。
+ * 判定分两段:①连接后 2s 不订阅,应零帧("平时不跑",用户拍板);
+ * ②发 video_on 后 3s 内帧数 ∈ [5,34](10fps×3s≈30 名义值,下限防慢机)。
  * 注意:真机画面内容(门口实景)只能人眼确认,本探针只验链路与节流。
  */
 const host = process.argv[2] || '192.168.137.100'
@@ -28,7 +28,14 @@ let frames = 0
 let ctl = null
 const t0 = Date.now()
 
-ws.onopen = () => ws.send('{"type":"video_on"}')
+ws.onopen = () => {
+  /* 阶段①:连接但先不订阅——推流线程应停车,2s 零帧 */
+  setTimeout(() => {
+    if (frames === 0) console.log('未订阅 2s 零帧 ✓(平时不跑)')
+    else console.log(`未订阅却有 ${frames} 帧 ✗`)
+    ws.send('{"type":"video_on"}')
+  }, 2000)
+}
 ws.onmessage = async (ev) => {
   if (ev.data instanceof Blob) {
     frames++
@@ -49,10 +56,11 @@ ws.onmessage = async (ev) => {
 ws.onerror = () => console.error('WS 错误(连接被拒/会话失效?)')
 
 setTimeout(() => {
-  const sec = (Date.now() - t0) / 1000
+  /* 阶段②:video_on 发出后 3s(总窗 5s,扣除 2s 空闲段)统计帧数 */
+  const sec = (Date.now() - t0) / 1000 - 2
   const fps = frames / sec
-  console.log(`3s 内收到 ${frames} 帧(≈${fps.toFixed(1)} fps)`)
-  const ok = ctl && ctl.ok && frames >= 5 && frames <= 34
+  console.log(`订阅后 3s 收到 ${frames} 帧(≈${fps.toFixed(1)} fps)`)
+  const ok = idleOk && ctl && ctl.ok && frames >= 5 && frames <= 34
   console.log(ok ? 'WS VIDEO PASS' : 'WS VIDEO FAIL')
   try {
     ws.close()
@@ -60,4 +68,9 @@ setTimeout(() => {
     /* 忽略 */
   }
   process.exit(ok ? 0 : 1)
-}, 3000)
+}, 5000)
+
+let idleOk = false
+const _idleTimer = setTimeout(() => {
+  idleOk = frames === 0
+}, 1950)

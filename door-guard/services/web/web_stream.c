@@ -33,6 +33,7 @@ static const char *TAG = "[STREAM]";
 
 static pthread_t s_thread;
 static pthread_mutex_t s_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t s_cv = PTHREAD_COND_INITIALIZER;
 static bool s_running = false;        /* 线程生命周期(worker 自检退出) */
 static bool s_enabled = false;        /* 配置 web.video_enabled */
 static int s_viewers = 0;
@@ -93,21 +94,9 @@ static void convert_frame(const uint8_t *xrgb, int sw, int sh,
     }
 }
 
-/* 单拍工作:取帧→降采样→编码→发布(无人看/无新帧直接返回,零成本) */
+/* 单拍工作:取帧→降采样→编码→发布(无新帧直接返回,零成本) */
 static void do_tick(void)
 {
-    pthread_mutex_lock(&s_mtx);
-    int viewers = s_viewers;
-    pthread_mutex_unlock(&s_mtx);
-
-    if (viewers <= 0) {
-        if (s_claimed) {
-            camera_stream_preview_set(false);   /* 无人看:释放 RGA 转换 */
-            s_claimed = false;
-            DG_LOGI(TAG, "无订阅者,推流取帧已停");
-        }
-        return;
-    }
     if (!s_claimed) {
         camera_stream_preview_set(true);
         s_claimed = true;
@@ -153,20 +142,38 @@ static void sleep_to(int64_t deadline)
     }
 }
 
+/* 停车:无人订阅时线程睡在条件变量上(用户拍板"平时不跑"),零唤醒零相机
+ * 开销;订阅/退订/停服各经 broadcast 唤醒重判。超时 1s 只是 quit 兜底,
+ * 正常增减订都走即时唤醒。返回 true = 停服退出 */
+static bool park_until_viewer_or_quit(void)
+{
+    pthread_mutex_lock(&s_mtx);
+    while (s_running && s_viewers <= 0) {
+        if (s_claimed) {
+            camera_stream_preview_set(false);    /* 顺手释放取帧(纯标志写) */
+            s_claimed = false;
+            DG_LOGI(TAG, "无订阅者,推流取帧已停");
+        }
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += 1;                          /* 兜底周期,正常不走到 */
+        pthread_cond_timedwait(&s_cv, &s_mtx, &ts);
+    }
+    bool quit = !s_running;
+    pthread_mutex_unlock(&s_mtx);
+    return quit;
+}
+
 static void *worker(void *arg)
 {
     (void)arg;
     while (true) {
+        if (park_until_viewer_or_quit())
+            break;
+
         /* 截止时刻先于工作确定:转换+编码耗时(板上实测 ~15ms/帧)不挤占
          * 帧率——"固定 10fps"才名副其实(固定睡 100ms 会退化成 ~8.5fps) */
         int64_t deadline = now_mono_ms() + STREAM_PERIOD_MS;
-
-        pthread_mutex_lock(&s_mtx);
-        bool quit = !s_running;
-        pthread_mutex_unlock(&s_mtx);
-        if (quit)
-            break;
-
         do_tick();
         sleep_to(deadline);
     }
@@ -231,6 +238,7 @@ void web_stream_stop(void)
     }
     s_running = false;
     s_viewers = 0;
+    pthread_cond_broadcast(&s_cv);           /* 唤醒停车中的 worker 走退出分支 */
     pthread_mutex_unlock(&s_mtx);
     pthread_join(s_thread, NULL);
     free(s_rgb);
@@ -260,6 +268,7 @@ int web_stream_viewer_add(void)
     }
     s_viewers++;
     int n = s_viewers;
+    pthread_cond_broadcast(&s_cv);           /* 唤醒停车中的 worker 开始取帧 */
     pthread_mutex_unlock(&s_mtx);
     if (n == 1)
         DG_LOGI(TAG, "web 客户端订阅监控画面");
@@ -271,6 +280,7 @@ void web_stream_viewer_remove(void)
     pthread_mutex_lock(&s_mtx);
     if (s_viewers > 0)
         s_viewers--;
+    pthread_cond_broadcast(&s_cv);           /* 令 worker 尽快停车释放取帧 */
     pthread_mutex_unlock(&s_mtx);
 }
 

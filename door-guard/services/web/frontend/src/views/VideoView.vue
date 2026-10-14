@@ -1,10 +1,10 @@
 <!--
-  VideoView.vue — 监控画面(2026-10-14 实装)
+  VideoView.vue — 监控画面(2026-10-14 实装;用户拍板:点开始才推,平时不跑)
 
-  链路:WS 订阅(video_on)→ 服务端 10fps 推二进制 JPEG → Blob objectURL 刷
-  <img>。挂载订阅/卸载退订由 stores/events 的 videoDesired 意图管理(重连自动
-  重发);相机未就绪或推流被配置关闭时,画面区保持等待态/给出来自设备的文案。
-  「截图」直接保存当前帧(canvas 不参与,objectURL 即 JPEG 原始字节)。
+  链路:点「开始」→ WS 订阅(video_on)→ 服务端 10fps 推二进制 JPEG → Blob
+  objectURL 刷 <img>;点「停止」退订并清帧。订阅意图(videoDesired)由
+  stores/events 管理,连接重连后自动重发——按钮状态即意图状态。设备端配置
+  关闭推流时,订阅回执 ok=false,按钮弹回并显示设备给的说法。
 -->
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
@@ -12,9 +12,10 @@ import AppButton from '../components/AppButton.vue'
 import AppCard from '../components/AppCard.vue'
 import { onVideoControl, onVideoFrame, setVideoSubscribe } from '../stores/events'
 
-const frameUrl = ref('')
-const waiting = ref(true) // 首帧前/断流中
+const started = ref(false) // 是否已点开始(= 订阅意图)
+const waiting = ref(false) // 已开始但没帧(首帧前/断流中)
 const errMsg = ref('')
+const frameUrl = ref('')
 let lastUrl = null
 let offFrame = null
 let offCtl = null
@@ -27,11 +28,31 @@ function feed(blob) {
   if (lastUrl) URL.revokeObjectURL(lastUrl)
   lastUrl = url
   frameUrl.value = url
-  /* 断流看门狗:2s 无新帧回等待态(相机未就绪/编码线程停拍都收敛到这里) */
+  /* 断流看门狗:2s 无新帧回等待态(相机未就绪/编码停拍都收敛到这里) */
   clearTimeout(stallTimer)
   stallTimer = setTimeout(() => {
     waiting.value = true
   }, 2000)
+}
+
+function start() {
+  started.value = true
+  waiting.value = true
+  errMsg.value = ''
+  setVideoSubscribe(true)
+}
+
+function stop() {
+  started.value = false
+  waiting.value = false
+  errMsg.value = ''
+  clearTimeout(stallTimer)
+  setVideoSubscribe(false)
+  if (lastUrl) {
+    URL.revokeObjectURL(lastUrl)
+    lastUrl = null
+  }
+  frameUrl.value = ''
 }
 
 function snapshot() {
@@ -46,15 +67,16 @@ onMounted(() => {
   offFrame = onVideoFrame(feed)
   offCtl = onVideoControl((m) => {
     if (!m.ok) {
-      errMsg.value = m.msg || '监控不可用'
+      /* 设备侧拒绝(推流被配置关闭/订阅超限):按钮弹回开始态 */
+      started.value = false
       waiting.value = false
+      errMsg.value = m.msg || '监控不可用'
     }
   })
-  setVideoSubscribe(true)
 })
 
 onBeforeUnmount(() => {
-  setVideoSubscribe(false)
+  setVideoSubscribe(false) // 离开页面必退订(即使从未开始也只是空操作)
   if (offFrame) offFrame()
   if (offCtl) offCtl()
   clearTimeout(stallTimer)
@@ -66,15 +88,22 @@ onBeforeUnmount(() => {
   <AppCard title="监控画面" span2 :index="2">
     <div class="video">
       <img v-if="frameUrl" class="video__img" :src="frameUrl" alt="门口实时画面" />
-      <div v-if="waiting && !errMsg" class="video__msg">
+      <div v-if="!started && !errMsg" class="video__msg">监控未开启,点「开始监控」查看实时画面</div>
+      <div v-if="started && waiting && !errMsg" class="video__msg">
         <span class="video__dot" aria-hidden="true"></span>
         等待画面…
       </div>
       <div v-if="errMsg" class="video__msg video__err">{{ errMsg }}</div>
     </div>
     <div class="video__bar">
-      <span class="small">实时画面由设备以约 10 帧/秒推送,仅当前浏览器标签接收。</span>
-      <AppButton :disabled="!frameUrl" @click="snapshot">截图</AppButton>
+      <span class="small">
+        {{ started ? '实时画面由设备以约 10 帧/秒推送;停止后设备侧完全停拍。' : '平时不占用摄像头:只有点开始后设备才取帧推送。' }}
+      </span>
+      <div class="video__actions">
+        <AppButton v-if="frameUrl" variant="ghost" @click="snapshot">截图</AppButton>
+        <AppButton v-if="!started" @click="start">开始监控</AppButton>
+        <AppButton v-else variant="warn" @click="stop">停止</AppButton>
+      </div>
     </div>
   </AppCard>
 </template>
@@ -124,6 +153,10 @@ onBeforeUnmount(() => {
   gap: 12px;
   margin-top: 8px;
   color: var(--dg-text-dim, #6b7a8c);
+}
+.video__actions {
+  display: flex;
+  gap: 8px;
 }
 @keyframes pulse {
   0%,
