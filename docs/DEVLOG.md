@@ -18,9 +18,14 @@
   RST),跳线后直接成立;判决仪器=spidev 探针 `rc522_m0 -r 0` 连读(与 10-13
   方法论同构)。判读不变:连读数分钟稳 → GPIO0_C3 判罪(固定跳线即长期方案);
   1×0x92 后仍 0xEE → K7 3.3V 轨,万用表量模块 VDD 定案
-- 待办:①ESP32 实测(RST 线挪 3V3→flash.bat→盯 [STAT] ver 与读卡)②K7 复刻
-  (rmmod k7_rc522 → spidev 绑定 spi4.0 → 探针连读)③判决后同步 DEV_HANDBOOK
-  接线定版(注意探针 README 仍有「M1 起改接 14 脚」旧案,待判决后勘误)
+- ESP32 判决第 1 步实测(v4.1 日志):RST 硬线 3V3 + 纯软复位 → **通过**。
+  `soft reset: FAIL`=上电首接触 50ms 窗口内未就绪,下一段自愈立即恢复(0x92),
+  与 v3「沿后首读未就绪」同象、非本配置问题;基线 RxSel=0x86 / RFCfg=0x7F
+  写入生效;连续扫描两次完整读出 801AA75C(10-07 原卡)+1A40A40C,空场 TMO
+  (Timer=1)正常,未见 0xEE 死亡签名;[STAT] ver= 长跑行待补。→ 准予上 K7
+- K7 侧执行序:板上线先 scp 新 .ko(md5 025ece76)落 /root+/userdata/doorguard,
+  RST 14 脚→3V3(1/17),rmmod k7_rc522→spidev 绑定→`rc522_m0 -r 0` 连读数分钟:
+  稳 0x92=GPIO0_C3 定罪 / 1×0x92 后 0xEE=轨问题,万用表量模块 VDD
 - 对拍两篇 RC522 Linux 驱动教程(csdn guet_kite 2017 / cnblogs jiaozhu 2023,
   均厂家例程移植):架构层面无增量——我们 v4 是两者超集;**唯一我们没配的寄存器
   = RFCfgReg=0x7F(接收增益拉满,默认 0x48=38dB→0x7F=48dB)+ RxSelReg=0x86**,
