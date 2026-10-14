@@ -2,6 +2,20 @@
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 
+## 2026-10-14 板网络切路由器直连:eth0 DHCP,doorguard.local 为漂移后的稳定入口
+
+- 用户把板网线改直连家用路由器,eth0 切 **DHCP**(镜像 interfaces 的静态 .100
+  已注释;出厂 default.json 即 net_mode=dhcp,cur_config.json 无 network 段覆盖
+  ——已上板核实,重启不会退回旧地址)。当前租约 192.168.2.96。
+- 连通性实测:Windows/WSL 双侧 `ssh root@192.168.2.96` 免密均通,一条龙推板不
+  受影响;doorguard.local 在 Windows 侧解析到 .96(mDNS 是地址漂移后的稳定入口)。
+- 同步改动:env/env.sh、board/restore-app.sh 默认 IP→.96;getshot.sh(原本还硬
+  编码更老的 .130)与 freeze_probe.sh 参数化走 DOORGUARD_IP;ws_video_test.mjs
+  默认 host 更新;DEV_HANDBOOK §4/§7.2 重写;rc522_m0 / mqtt README 示例更新。
+- 判别口径(用户拍板):ping .96 不通 → Windows 侧 ping doorguard.local 取新 IP。
+- 遗留:Windows portproxy 2223→.100 指向死地址(要用备用路径须管理员 netsh 删
+  或改指新 IP);WSL 侧 mDNS 不保证解析,推板一律以 DOORGUARD_IP 为准。
+
 ## 2026-10-14(深夜五)监控画面紫屏修复:帧字节序真相 = BGRA8888 不是 XRGB 字面序
 
 - 用户反馈 web 监控画面明显偏紫。根因:web_stream 转换按「XRGB 字面字节序

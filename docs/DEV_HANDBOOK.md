@@ -68,8 +68,8 @@
 
 ## 4. 板端速查
 
-- **网络**:固件里 `/etc/network/interfaces` 为 **eth0 静态 `192.168.137.100/24`(网关 .1,ICS 网段)**、eth1 DHCP——地址**重启不变**(2026-10-11 重刷后实测:静态配置随镜像在,reboot 后仍 .100)。若连不上:先板端 `ip a` 查实际地址,再核对 env/env.sh 的 DOORGUARD_IP
-- **SSH**:`root` / 密码 `a231634904`(开发板局域网口令;WSL 公钥已装,`dg-deploy` 免密)。注意 dropbear 主机钥**不持久化**,板子重启/重刷后 key 会变 → 开发机先 `ssh-keygen -R 192.168.137.100` 再连
+- **网络(2026-10-14 起)**:板网线直连路由器,eth0 走 **DHCP**(镜像里 `/etc/network/interfaces` 的静态 .100 已注释成保底备注;出厂 `default.json` 即 `net_mode:"dhcp"`,`cur_config.json` 无网络段覆盖 → 重启不会退回旧地址)。当前地址 **192.168.2.96**,随租约可能漂移——**稳定入口是 mDNS `doorguard.local`**:连不上先在 Windows 侧 `ping doorguard.local` 拿新 IP(WSL 侧 mDNS 不保证解析,以 DOORGUARD_IP 为准),再核对 env/env.sh 的 DOORGUARD_IP
+- **SSH**:`root` / 密码 `a231634904`(开发板局域网口令;WSL 公钥已装,`dg-deploy` 免密)。注意 dropbear 主机钥**不持久化**,板子重启/重刷后 key 会变 → 开发机先 `ssh-keygen -R <板IP>` 再连(板换新 IP 后,旧 IP 的 known_hosts 条目同样要先删)
 - **重刷/裸板后恢复应用层**:`bash board/restore-app.sh [板IP]`(WSL 侧跑)。应用层**不烘进固件**,重刷即归零,此时 `dg-deploy` 用不了(它只做已装应用的 A/B 换槽);首次安装走这个脚本(幂等),之后日常改码再用 `dg-deploy`
 - 串口 **1500000 8N1**(不是 115200);dropbear 拒绝空密码
 - **走查/取证工具**:仓库 `tools/board-walk/`(注入库/七页走查脚本/CPU 采样/导图,README 含坐标表与编译命令);LVGL 走查方法论与坑见该 README + `docs/superpowers/specs/2026-09-26-useredit-crash-debug.md` §8
@@ -216,7 +216,7 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 
 ### 7.1 Windows 侧推板(WSL 到板网络不通时的备用路径,2026-09-27 实测)
 
-- 前提:WSL 的 ssh 私钥已拷到 Windows ~/.ssh/(git bash 可直连 root@192.168.137.100)
+- 前提:WSL 的 ssh 私钥已拷到 Windows ~/.ssh/(git bash 可直连 root@192.168.2.96;WSL→板直连在新网段同样实测可达,2026-10-14)
 - **2026-09-29 起构建目录默认在 WSL ext4**(env.sh 自动 export):交叉产物在
   `~/dg-build/aarch64-<仓库路径哈希>/door-guard`,宿主测试/PC 模拟器在
   `~/dg-build/{tests,pc}-<哈希>/`(两克隆各一份缓存不串)。dg-deploy 默认直取
@@ -241,14 +241,15 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
   分开跑 stop、start 两条
 - dg-build 链接失败时 build/door-guard 保持旧产物,推板前核对版本串/md5
 
-### 7.2 局域网访问(2026-09-27 定版)
+### 7.2 局域网访问(2026-10-14 随路由器直连更新)
 
-- web 上位机:http://doorguard.local(默认 80,mDNS 实测 Windows 解析可达;IP 直连
-  http://192.168.137.100 等价)。非 root 回退 8080 时为 http://doorguard.local:8080
-- 板网络是纯静态环境(无 DHCP 服务器):/etc/network/interfaces(用户维护)为系统
-  保底;应用层 cur_config.json 的 net_mode/net_ip/net_mask/net_gw 开机由 net_cfg
-  服务应用(启动最晚,实际生效)。任何切回 DHCP 的操作都会让地址释放且拿不回 =
-  失联,只能串口/人工恢复;web 端与设备端做 DHCP 切换前须二次确认
+- web 上位机:http://doorguard.local(默认 80,板端 mDNS 服务广播,Windows 解析
+  实测可达;IP 直连 http://192.168.2.96 等价,租约漂移后以 doorguard.local 为准)。
+  非 root 回退 8080 时为 http://doorguard.local:8080
+- 板网络现状:网线直连路由器,eth0 DHCP;net_cfg 开机按 cur_config.json →
+  default.json 的 network 段应用(现无覆盖,出厂 dhcp)。2026-09-27 之前的
+  「Windows ICS 纯静态、切 DHCP 必失联」约束已随环境切换作废;新风险是**地址
+  漂移**而非失联——web 端/设备端改静态 IP 或换网段前,仍须先确认新地址可达再提交
 
 ### 7.3 板上 UI 走查环境(2026-09-28 实测定版)
 

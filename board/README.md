@@ -4,7 +4,7 @@
 
 ```bash
 # 在 WSL 侧运行(构建产物与检测模型都在 WSL)
-bash board/restore-app.sh [板IP]      # 缺省 192.168.137.100
+bash board/restore-app.sh [板IP]      # 缺省 192.168.2.96(DOORGUARD_IP 可覆盖)
 ```
 
 应用层**不烘进固件**,所以重刷 rootfs 后板上只剩 SDK 基础镜像:没有 S60doorguard、

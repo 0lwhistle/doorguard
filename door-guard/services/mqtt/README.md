@@ -15,7 +15,7 @@
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `enabled` | `false` | 整链路开关 |
-| `uri` | `""` | broker,如 `mqtt://192.168.137.1:1883` |
+| `uri` | `""` | broker,如 `mqtt://192.168.2.66:1883`(上位机所在局域网 IP) |
 | `client_id` | `""` | 空 = `doorguard-<主接口IP 末段>` |
 | `topic_prefix` | `doorguard` | 主题前缀 |
 | `username` / `password` | `""` | broker 认证,可空 |

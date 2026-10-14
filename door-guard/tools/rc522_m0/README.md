@@ -30,8 +30,8 @@ $TC -O2 -Wall -Wextra -static rc522_m0.c -o rc522_m0
 ## 部署与运行
 
 ```bash
-scp rc522_m0 root@192.168.137.100:/root/
-ssh root@192.168.137.100 '/root/rc522_m0 -r 5'
+scp rc522_m0 root@192.168.2.96:/root/
+ssh root@192.168.2.96 '/root/rc522_m0 -r 5'
 ```
 
 `-r 5` 连读 5 次应全一致;虚焊/干扰用 `-r 0` 常驻观察,按住模块轻晃看会不会漂。

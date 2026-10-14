@@ -1,13 +1,13 @@
 /*
  * ws_video_test.mjs — web 监控推流 WS 探针(node ≥22 原生 WebSocket,无依赖)
  *
- * 用法:node ws_video_test.mjs [host] [port]     (默认 192.168.137.100:80)
+ * 用法:node ws_video_test.mjs [host] [port]     (默认 192.168.2.96:80)
  * 流程:admin/admin 登录 → WS ?token= → 发 video_on → 统计 3s 内二进制 JPEG 帧。
  * 判定分两段:①连接后 2s 不订阅,应零帧("平时不跑",用户拍板);
  * ②发 video_on 后 3s 内帧数 ∈ [5,34](10fps×3s≈30 名义值,下限防慢机)。
  * 注意:真机画面内容(门口实景)只能人眼确认,本探针只验链路与节流。
  */
-const host = process.argv[2] || '192.168.137.100'
+const host = process.argv[2] || '192.168.2.96'
 const port = process.argv[3] || '80'
 const user = process.env.DG_WEB_USER || 'admin'
 const pwd = process.env.DG_WEB_PWD || 'admin'

@@ -27,8 +27,9 @@ if [ -z "${DG_TC_ROOT:-}" ]; then
         fi
     done
 fi
-# 板子 IP:dg-deploy 可省参数;换 IP 时 export DOORGUARD_IP=新IP 或改这里
-export DOORGUARD_IP="${DOORGUARD_IP:-192.168.137.100}"
+# 板子 IP:dg-deploy 可省参数。板走路由器 DHCP(2026-10-14 起),地址可能随租约
+# 漂移——Windows 侧 ping doorguard.local(mDNS)拿新地址后 export DOORGUARD_IP 或改这里
+export DOORGUARD_IP="${DOORGUARD_IP:-192.168.2.96}"
 
 # 构建目录(WSL 内默认放 ext4):编译耗时大头是 /mnt/c drvfs 的慢 I/O,不是编译
 # (2026-09-29 实测:盘内空跑 configure 62s + 空跑 build 44s,编译本身仅十几秒;

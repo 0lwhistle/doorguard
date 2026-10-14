@@ -3,7 +3,7 @@
 # 起探针→4s 后 SIGSTOP 冻结(不回 Pong 的半开场景)→8s 后上板取证:
 # ESTABLISHED 连接数(判死=连接应已被服务端关掉)、订阅计数、无响应日志。
 set -u
-HOST=192.168.137.100
+HOST="${DOORGUARD_IP:-192.168.2.96}"
 cd "$(dirname "$0")"
 
 node ws_video_test.mjs "$HOST" 80 > /tmp/p3.log 2>&1 &

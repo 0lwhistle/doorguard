@@ -52,7 +52,8 @@ dg-deploy -app -r         # 日常只升程序;推完跟踪日志(Ctrl-C 退出�
 | `-r` | 推完 tail -f 板上日志 |
 
 验证三件事:输出 `已切槽 X → Y(版本 xxx)` 且版本 = 刚推的 commit;`md5 一致`;
-日志无 ERROR。**板上网络纯静态(192.168.137.100),永远不要切 DHCP。**
+日志无 ERROR。**板上 eth0 已是 DHCP(2026-10-14 起直连路由器)**,地址可能随租约
+漂移;连不上先 Windows 侧 `ping doorguard.local`(mDNS)拿新地址,再同步 DOORGUARD_IP。
 
 ### 改了语言包(ui/lang/*.json)
 
@@ -104,7 +105,7 @@ env.sh 自动作业的(一般不用动):
 | 变量 | 说明 |
 |---|---|
 | `DOORGUARD_ROOT` | 仓库根(source 时自动定位) |
-| `DOORGUARD_IP` | 板 IP,默认 192.168.137.100 |
+| `DOORGUARD_IP` | 板 IP,默认 192.168.2.96(DHCP 租约漂移时用 doorguard.local 重取) |
 | `DG_BUILD_DIR` / `DG_TEST_BUILD_DIR` / `DG_PC_BUILD_DIR` | 构建/测试/模拟器目录。WSL 内默认 `~/dg-build/<类>-<仓库路径哈希>`(ext4——/mnt/c 的 drvfs 慢 I/O 是编译耗时大头);**改回盘内:显式 export 覆盖即可** |
 
 可选覆盖(可写进 `~/.bashrc`):

@@ -8,7 +8,7 @@
 # 首次安装,之后日常改代码再走 dg-deploy。
 #
 # 用法(WSL 侧运行,资产都在 WSL):
-#     bash board/restore-app.sh [板IP]        # 缺省 $DOORGUARD_IP 或 192.168.137.100
+#     bash board/restore-app.sh [板IP]        # 缺省 $DOORGUARD_IP 或 192.168.2.96
 #
 # 可覆盖的环境变量:
 #     DG_BIN          应用二进制(缺省取 ~/dg-build/aarch64-*/door-guard 里最新的)
@@ -20,7 +20,7 @@
 # 幂等:可重复执行;已存在的槽位/资源被覆盖,不会重复建结构。
 set -euo pipefail
 
-IP="${1:-${DOORGUARD_IP:-192.168.137.100}}"
+IP="${1:-${DOORGUARD_IP:-192.168.2.96}}"
 SSHOPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10)
 sshx() { ssh "${SSHOPTS[@]}" "root@$IP" "$@"; }
 
