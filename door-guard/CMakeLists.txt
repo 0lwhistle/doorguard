@@ -154,7 +154,7 @@ target_include_directories(dg_web_stream PUBLIC ${CMAKE_SOURCE_DIR}/services
                                                 ${CMAKE_SOURCE_DIR}/services/web
                                                 ${CMAKE_SOURCE_DIR}/modules/camera
                                                 ${CMAKE_SOURCE_DIR}/proto)
-target_link_libraries(dg_web_stream PUBLIC dg_jpeg dg_config dg_log)
+target_link_libraries(dg_web_stream PUBLIC dg_jpeg dg_config dg_log dg_timeutil)
 
 # ---- LVGL(两代 vendored 源码按 DG_USE_LVGL9 二选一,同一 `lvgl` 目标名,
 # 上层链接点零改动)。OFF = 完整回退 8.3 旧栈(运行期回退通道,必须常绿)。

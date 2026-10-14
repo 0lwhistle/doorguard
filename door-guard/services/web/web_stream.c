@@ -18,6 +18,7 @@
 #include "dg_jpeg.h"
 #include "dg_log.h"
 #include "err.h"
+#include "timeutil.h"
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -92,58 +93,82 @@ static void convert_frame(const uint8_t *xrgb, int sw, int sh,
     }
 }
 
+/* 单拍工作:取帧→降采样→编码→发布(无人看/无新帧直接返回,零成本) */
+static void do_tick(void)
+{
+    pthread_mutex_lock(&s_mtx);
+    int viewers = s_viewers;
+    pthread_mutex_unlock(&s_mtx);
+
+    if (viewers <= 0) {
+        if (s_claimed) {
+            camera_stream_preview_set(false);   /* 无人看:释放 RGA 转换 */
+            s_claimed = false;
+            DG_LOGI(TAG, "无订阅者,推流取帧已停");
+        }
+        return;
+    }
+    if (!s_claimed) {
+        camera_stream_preview_set(true);
+        s_claimed = true;
+        DG_LOGI(TAG, "开始推流取帧(%dfps,长边<=%d,质量 %d)",
+                STREAM_FPS, s_max_side, s_quality);
+    }
+
+    const camera_frame_t *f = camera_latest();
+    if (!f || f->seq == 0 || f->seq == s_last_src_seq)
+        return;                                  /* 无帧/重复帧:跳过 */
+    s_last_src_seq = f->seq;
+
+    int dw, dh;
+    convert_frame(f->pixels, f->w, f->h, &dw, &dh);
+    size_t len = 0;
+    if (dg_jpeg_encode_rgb(s_rgb, dw, dh, s_quality,
+                           s_enc, DG_WEB_STREAM_JPEG_CAP, &len) != DG_OK) {
+        DG_LOGW(TAG, "JPEG 编码失败(%dx%d)", dw, dh);
+        return;
+    }
+
+    pthread_mutex_lock(&s_mtx);
+    memcpy(s_pub, s_enc, len);
+    s_pub_len = len;
+    s_pub_seq++;
+    pthread_mutex_unlock(&s_mtx);
+    /* 发送侧(web_server 的 loop 定时器)按 s_pub_seq 变化自行拉取,
+     * 这里不投递——worker 与 netcore 无反向依赖 */
+}
+
+/* 睡到截止时刻(now_mono_ms 单调域;被调度惊醒则继续睡) */
+static void sleep_to(int64_t deadline)
+{
+    while (true) {
+        int64_t now = now_mono_ms();
+        if (now >= deadline)
+            return;
+        struct timespec ts = {
+            .tv_sec = 0,
+            .tv_nsec = (long)(deadline - now) * 1000000L,
+        };
+        nanosleep(&ts, NULL);
+    }
+}
+
 static void *worker(void *arg)
 {
     (void)arg;
     while (true) {
-        struct timespec ts = { .tv_sec = 0, .tv_nsec = STREAM_PERIOD_MS * 1000000L };
-        nanosleep(&ts, NULL);
+        /* 截止时刻先于工作确定:转换+编码耗时(板上实测 ~15ms/帧)不挤占
+         * 帧率——"固定 10fps"才名副其实(固定睡 100ms 会退化成 ~8.5fps) */
+        int64_t deadline = now_mono_ms() + STREAM_PERIOD_MS;
+
         pthread_mutex_lock(&s_mtx);
         bool quit = !s_running;
         pthread_mutex_unlock(&s_mtx);
         if (quit)
             break;
 
-        pthread_mutex_lock(&s_mtx);
-        int viewers = s_viewers;
-        pthread_mutex_unlock(&s_mtx);
-
-        if (viewers <= 0) {
-            if (s_claimed) {
-                camera_stream_preview_set(false);   /* 无人看:释放 RGA 转换 */
-                s_claimed = false;
-                DG_LOGI(TAG, "无订阅者,推流取帧已停");
-            }
-            continue;
-        }
-        if (!s_claimed) {
-            camera_stream_preview_set(true);
-            s_claimed = true;
-            DG_LOGI(TAG, "开始推流取帧(%dfps,长边<=%d,质量 %d)",
-                    STREAM_FPS, s_max_side, s_quality);
-        }
-
-        const camera_frame_t *f = camera_latest();
-        if (!f || f->seq == 0 || f->seq == s_last_src_seq)
-            continue;                                /* 无帧/重复帧:跳过 */
-        s_last_src_seq = f->seq;
-
-        int dw, dh;
-        convert_frame(f->pixels, f->w, f->h, &dw, &dh);
-        size_t len = 0;
-        if (dg_jpeg_encode_rgb(s_rgb, dw, dh, s_quality,
-                               s_enc, DG_WEB_STREAM_JPEG_CAP, &len) != DG_OK) {
-            DG_LOGW(TAG, "JPEG 编码失败(%dx%d)", dw, dh);
-            continue;
-        }
-
-        pthread_mutex_lock(&s_mtx);
-        memcpy(s_pub, s_enc, len);
-        s_pub_len = len;
-        s_pub_seq++;
-        pthread_mutex_unlock(&s_mtx);
-        /* 发送侧(web_server 的 loop 定时器)按 s_pub_seq 变化自行拉取,
-         * 这里不投递——worker 与 netcore 无反向依赖 */
+        do_tick();
+        sleep_to(deadline);
     }
     if (s_claimed)
         camera_stream_preview_set(false);

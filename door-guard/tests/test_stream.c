@@ -218,6 +218,7 @@ int main(void)
 
     size_t len = 0;
     uint32_t last = 0;
+    msleep(300);               /* 等 worker 排空最后一推,再取基线 seq(时序竞争) */
     grab(&len, &last);
     test_repeat_frame_skipped(last);
     test_unsubscribe_stops();

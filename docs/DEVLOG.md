@@ -17,13 +17,21 @@
   send();events store 管 videoDesired 意图(重连自动重发 video_on)与帧/回执
   两路回调;VideoView 占位换实装(Blob objectURL 刷 img、断流 2s 回等待态、
   截图=存当前帧)。
-- **测试**:`tests/test_stream.c`(sim 相机全链:两张 BMP 喂 camera_sim →
-  降采样 320×160→160×80 实测、SOI/EOI、10fps 节流上限、重复帧跳过、退订即停、
-  配置关闭拒绝订阅);架构只读直调登记(architecture-v2 §1);spec-network §1
-  与 web/README 更新。WS 发送侧与真机画面待板上手验。
+- **测试**:`tests/test_stream.c`(相机桩全链:降采样 320×160→160×80 实测、
+  SOI/EOI、10fps 节流上限、重复帧跳过、退订即停+取帧释放、配置关闭拒绝订阅);
+  架构只读直调登记(architecture-v2 §1);spec-network §1 与 web/README 更新。
+- **板上验收(当晚,05a8025-dirty 槽 B)**:启动日志「监控推流服务就绪」;
+  WS 探针(tests/web/ws_video_test.mjs,node 原生 WebSocket)= 订阅回执 ok、
+  首帧 30KB SOI 合法、3s 29 帧 ≈ **9.7fps**;断开后「无订阅者,推流取帧已停」
+  (零开销释放实机验证);待机态照常推流。真机画面内容(门口实景)待人眼过一眼。
+  首测 8.3fps 根因=固定睡 100ms 被编码耗时(~15ms)挤占 → worker 改按截止
+  时刻补睡(sleep_to/do_tick 重构),9.7fps 达标;探针首版上限写错(15)非设备问题。
 - **教训**:mongoose WS 客户端消息原被"只保持连接"注释占位——上行通道要留
   解析位;浏览器 WS 二进制默认 Blob,`JSON.parse(ev.data)` 对它抛异常被吞,
-  二进制必须在 parse 前分流。
+  二进制必须在 parse 前分流。**CMake tests 分支 return() 截断**:tests 模式要链
+  的库必须定义在 return() 之前(本轮 dg_web_stream 初版定义在后半段,test 目标
+  报 cannot find -l 静默成裸库名);dg-deploy -r 的日志跟踪不自动退出,自动流
+  用 timeout 包或去掉 -r。
 
 ## 2026-10-14(深夜二)读卡业务正式挂起(用户拍板):开关化屏蔽+全链验证
 
