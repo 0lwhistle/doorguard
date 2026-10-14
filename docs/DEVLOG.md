@@ -37,8 +37,12 @@
   0_D5/0_D4/0_C3/3_A0/3_A1。**spi-gpio 方案已实施落地**:SDK 板级 DTS 重写
   ——spi4 disable、pwm2_8ch_6 disable(释放 2_D6)、新 spi-gpio 节点
   SCK=0_D5/MOSI=0_D4/MISO=2_D6/CS=2_D7(MISO/CS 上拉,CS 空闲保持释放)、
-  RST 沿用 0_C3;i2c7 与 vendor leds 引脚全程不碰。defconfig
-  +CONFIG_SPI_GPIO=y(BITBANG 本就=y)。boot.img 重编通过,**md5=38f84fda**,
+  RST 沿用 0_C3;i2c7 与 vendor leds 引脚全程不碰——【v2 勘误:0_D5/0_D4
+  系 debug uart,已弃,见上】defconfig
+  +CONFIG_SPI_GPIO=y(BITBANG 本就=y)。boot.img 重编通过,**md5=7b79e6b0**
+  (v2:首版 0_D5/0_D4 经用户指认是 debug uart TX/RX 被否,改用 GPIO3_A0/A1
+  ——即 40pin i2c7 两根,项目不用,DTS 里 disable i2c7 释放;终版引脚
+  SCK=3_A0/MOSI=3_A1/MISO=2_D6/CS=2_D7(9脚)/RST=0_C3(14脚,不动)),
   已拷 Windows `flash_images/boot-rc522-spigpio-20261014.img`(跨侧 md5 核对
   一致);补丁存 ~/k7-deliverables/0010-spigpio-rc522-dts-defconfig.diff,
   原 DTS 备份同目录。可行性前置全查实:驱动是纯 spi_driver 零总线依赖、
