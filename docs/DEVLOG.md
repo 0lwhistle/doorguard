@@ -19,8 +19,18 @@
   重启后重收 retained 公告正确忽略(无循环)。
 - 固化:env/bin/dg-ota-publish(点分版本硬校验/上传/公告,口令不落开发机);
   DEV_HANDBOOK §7.4 / services/ota/README 生产部署节。
-- 待办:回滚演练(发坏包验 3 次秒退回滚;**公告消费后立即清 retain** 防循环)
-  列入验收;iccard_daemon 等旁路服务升级包不含,重刷仍走 restore-app.sh。
+- **回滚演练 ✅**:发坏包 1.0.2(随机 1KB,sha 匹配公告)→ 公告 1s 被消费后
+  立即清 retain → 下载/暂存/装 B 槽 → 日志实录「OTA 安装 dg_app.B(v=1.0.2)」
+  → 7 秒后「连续 3 次秒退,回滚 → dg_app.A」→ A 槽 sha=v1.0.1 产物、应用稳定、
+  公告全程只消费一次(清 retain 防循环有效)。
+- **测试**:宿主 52/52 绿;tsan 遇 ASLR 熵全挂(unexpected memory mapping),
+  `setarch -R` 后 48/52——遗留 3 处 race 全在 test_stream **假相机桩**
+  (s_claim_on/s_frame 无同步,慢机漏帧挂 n>=2),生产 web_stream 无 race,
+  待办=桩改 atomics。板上验收:MQTT cmd ping/status 往返通、cmd/open 默认拒、
+  WS 视频探针 PASS(10.3fps/SOI 合法)、/api/device 自报 v1.0.1、
+  v1.0.1 启动以来 0 ERROR、4 模型就绪、指纹模组 2/板端 2 一致。
+- 提醒:iccard_daemon 等旁路服务不在升级包内,重刷仍走 restore-app.sh;
+  retain 公告演练后已清空(板上=1.0.1,无待升级)。
 
 ## 2026-10-14 板网络切路由器直连:eth0 DHCP,doorguard.local 为漂移后的稳定入口
 
