@@ -36,16 +36,20 @@
   用户否(debug uart)→ v2 改 3_A0/A1(i2c7 disable 释放)+ MISO=2_D6 被用户
   二次拦截——**指纹 AS608 除 uart8(3_C5/C6)外还有触摸唤醒线
   wak_gpio=94=GPIO2_D6**(应用侧 configs/default.json)→ v3 MISO 改 vendor
-  LED 脚 GPIO0_A5(delete leds 子节点释放);用户再拍板 RST 直连 3V3 轨
-  (ESP32 v4.1 已验证软复位路线),DT 不再声明 reset-gpios,pwm0_2ch_1
-  恢复原状。**v4 终版:SCK=3_A0 / MOSI=3_A1 / MISO=0_A5 / CS=2_D7(9脚) /
-  RST=3V3 轨(1/17)**;占用守则已写入 DT 注释(2_D6=指纹WAK、0_D4/D5=
-  debug uart、0_A0=继电器、3_C5/C6=指纹 uart8)。defconfig +SPI_GPIO=y;
-  boot.img **md5=cec68e43**,已拷 Windows flash_images/(三读一致);补丁与
-  原 DTS 备份在 ~/k7-deliverables/。可行性前置全查实:驱动纯 spi_driver
-  零总线依赖、自限 1MHz、GPIO-IRQ 零依赖。剩余人工步:接线 → 刷
-  boot@0x8000 → dmesg probe 0x92 → /dev/dg_iccard0;⏳GPIO0_A5 的物理脚号
-  与域标注待用户对官方图复核(与 0_C3 同 bank,该 bank 已实测 3.3V)
+  LED 脚 GPIO0_A5;用户再拍板 RST 直连 3V3 轨(ESP32 v4.1 已验证软复位
+  路线),DT 不再声明 reset-gpios。**v5 终版(官方图确认 A5 也是 1.8V,
+  v4 作废——⚠GPIO0 bank 域是分裂的:C3=3.3V 而 A5=1.8V,bank 级推域
+  不可靠,连吃两课)**:SCK=3_A0 / MOSI=3_A1 / **MISO=0_C3(14脚,原 RST
+  线位,物理位置已知)** / CS=2_D7(9脚)/ RST=3V3 轨(1/17);pwm0_2ch_1
+  重新 disable,A5 的 leds delete 撤销。**3.3V 域全景(官方图定版):40pin
+  上仅 2_D7/2_D6/0_D5/0_D4/0_C3/3_A0/3_A1 七根,其余全 1.8V**——扣除
+  debug uart×2 与指纹 WAK,可用空位恰好五根=本轮全用上,一根不多不少;
+  占用守则写入 DT 注释。defconfig +SPI_GPIO=y;boot.img **md5=7b2f9a76**,
+  Windows flash_images/ 三读一致;补丁与原 DTS 备份在 ~/k7-deliverables/。
+  可行性前置:驱动纯 spi_driver 零总线依赖、自限 1MHz、GPIO-IRQ 零依赖。
+  剩余人工步:查图补 3_A0/A1 两个物理脚号 → 接线(原 14 脚线改接模块
+  MISO、原 16 脚线改接 9 脚 CS)→ 刷 boot@0x8000 → dmesg probe 0x92 →
+  /dev/dg_iccard0 → 应用层刷卡+指纹触摸唤醒回归
 - 对拍两篇 RC522 Linux 驱动教程(csdn guet_kite 2017 / cnblogs jiaozhu 2023,
   均厂家例程移植):架构层面无增量——我们 v4 是两者超集;**唯一我们没配的寄存器
   = RFCfgReg=0x7F(接收增益拉满,默认 0x48=38dB→0x7F=48dB)+ RxSelReg=0x86**,
