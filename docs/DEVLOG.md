@@ -31,25 +31,21 @@
   能过(M0 五连读、6/6 单读),协议长链必错。旧「四线可信」验的是回波连通性
   不是电平有效性;RST/轨/驱动全部无罪。**RST→3V3 判决实验作废**(RST 一直是
   好的);DTS 无 io-domains 节点(域=硬件接线),DEVICE TREE 判不了电压域
-- 解法分叉(HANDOFF 已证 40pin 唯一硬件 SPI=spi4,换控制器不可行;defconfig
-  无 SPI_GPIO):①电平位移器 4ch(TXB0104 类,即买即用);②spi-gpio 位拆到
-  3.3V 域引脚。**用户拍板走②**,官方图补读:板上 3.3V 域 GPIO=2_D7/2_D6/
-  0_D5/0_D4/0_C3/3_A0/3_A1。**spi-gpio 方案已实施落地**:SDK 板级 DTS 重写
-  ——spi4 disable、pwm2_8ch_6 disable(释放 2_D6)、新 spi-gpio 节点
-  SCK=0_D5/MOSI=0_D4/MISO=2_D6/CS=2_D7(MISO/CS 上拉,CS 空闲保持释放)、
-  RST 沿用 0_C3;i2c7 与 vendor leds 引脚全程不碰——【v2 勘误:0_D5/0_D4
-  系 debug uart,已弃,见上】defconfig
-  +CONFIG_SPI_GPIO=y(BITBANG 本就=y)。boot.img 重编通过,**md5=7b79e6b0**
-  (v2:首版 0_D5/0_D4 经用户指认是 debug uart TX/RX 被否,改用 GPIO3_A0/A1
-  ——即 40pin i2c7 两根,项目不用,DTS 里 disable i2c7 释放;终版引脚
-  SCK=3_A0/MOSI=3_A1/MISO=2_D6/CS=2_D7(9脚)/RST=0_C3(14脚,不动)),
-  已拷 Windows `flash_images/boot-rc522-spigpio-20261014.img`(跨侧 md5 核对
-  一致);补丁存 ~/k7-deliverables/0010-spigpio-rc522-dts-defconfig.diff,
-  原 DTS 备份同目录。可行性前置全查实:驱动是纯 spi_driver 零总线依赖、
-  probe 自限 1MHz、**GPIO-IRQ 零依赖**(旧 DT 的 interrupts 属性是摆设);
-  GPIO0_D4/D5 全树零消费者。剩余人工步:对照官方图把四根线挪到新脚号 →
-  RKDevTool 刷 boot@0x8000 → dmesg 应见 probe 读 0x92 → /dev/dg_iccard0;
-  .ko 用 025ece76 版(S60 自载,claim_rst 默认 0)
+- 解法分叉(40pin 唯一硬件 SPI=spi4,换控制器不可行;defconfig 缺 SPI_GPIO):
+  **用户拍板软 SPI,已落地 v4 终版**。迭代:首版 SCK/MOSI 选 0_D5/0_D4 被
+  用户否(debug uart)→ v2 改 3_A0/A1(i2c7 disable 释放)+ MISO=2_D6 被用户
+  二次拦截——**指纹 AS608 除 uart8(3_C5/C6)外还有触摸唤醒线
+  wak_gpio=94=GPIO2_D6**(应用侧 configs/default.json)→ v3 MISO 改 vendor
+  LED 脚 GPIO0_A5(delete leds 子节点释放);用户再拍板 RST 直连 3V3 轨
+  (ESP32 v4.1 已验证软复位路线),DT 不再声明 reset-gpios,pwm0_2ch_1
+  恢复原状。**v4 终版:SCK=3_A0 / MOSI=3_A1 / MISO=0_A5 / CS=2_D7(9脚) /
+  RST=3V3 轨(1/17)**;占用守则已写入 DT 注释(2_D6=指纹WAK、0_D4/D5=
+  debug uart、0_A0=继电器、3_C5/C6=指纹 uart8)。defconfig +SPI_GPIO=y;
+  boot.img **md5=cec68e43**,已拷 Windows flash_images/(三读一致);补丁与
+  原 DTS 备份在 ~/k7-deliverables/。可行性前置全查实:驱动纯 spi_driver
+  零总线依赖、自限 1MHz、GPIO-IRQ 零依赖。剩余人工步:接线 → 刷
+  boot@0x8000 → dmesg probe 0x92 → /dev/dg_iccard0;⏳GPIO0_A5 的物理脚号
+  与域标注待用户对官方图复核(与 0_C3 同 bank,该 bank 已实测 3.3V)
 - 对拍两篇 RC522 Linux 驱动教程(csdn guet_kite 2017 / cnblogs jiaozhu 2023,
   均厂家例程移植):架构层面无增量——我们 v4 是两者超集;**唯一我们没配的寄存器
   = RFCfgReg=0x7F(接收增益拉满,默认 0x48=38dB→0x7F=48dB)+ RxSelReg=0x86**,
