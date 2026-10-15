@@ -551,6 +551,11 @@ int main(void)
     release();                            /* 重采前须真抬手(2026-10-15 抬手门:
                                              不放行则按着的错指会被电平兜底
                                              静默重拍,提示与行为矛盾) */
+    usleep(350 * 1000);                   /* 抬手门 = 释放指示后成像复核一次:
+                                             抬与按落在同一瞬间(如本用例此前
+                                             的背靠背 release+press)会被复核
+                                             否决后等下一个指示——人手抬按
+                                             必有间隔,假人也要给 */
     press();                              /* 重采② */
     wait_ge(&s_result_finger_cnt, 7, 5000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_OK);

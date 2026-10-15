@@ -5,9 +5,10 @@
  * 一次按压一次判定:RELEASED 前不再触发新流程(§6 边界);判定前有按压
  * 确认窗(press_confirmed):WAK 保持按下电平满 finger.press_hold_ms 才算
  * 真按,短保持按假按压丢弃留痕(2026-10-13 用户口径:短于 500ms 都是假按)。
- * 录入是两次按压,两次按压之间等「真释放」用模组成像确认(enroll_wait_lift:
- * WAK 在克隆模组上持续按压中会自行掉回静息,手指没抬就提示「请再按一次」
- * 的根因,2026-10-15),查重插在确认释放之后,同指校验在按压②后,按压②
+ * 录入是两次按压,两次按压之间等「真释放」用「WAK 释放指示 + 成像复核」
+ * 双道闸确认(enroll_wait_lift:克隆模组持续按压中 WAK 会自行掉回静息,
+ * 只认电平会手指没抬就提示「请再按一次」,2026-10-15),查重插在确认释放
+ * 之后,同指校验在按压②后,按压②
  * 采到即发 PROCESS(UI 停「5s 无按压」计时),取消/退出回滚已 Store 模板。
  */
 #include "fp_provider.h"
@@ -58,7 +59,8 @@ static int  s_short_press_cnt;            /* 确认窗丢弃的假按压累计(�
 static int64_t s_short_press_log_ms;      /* 假按压日志节拍(1s 一条防刷屏) */
 
 static int wait_press_once(int active);   /* 前置:定义在"按压沿与释放"段 */
-static void wait_release(void);           /* 前置:LIFT 确认在录入序列先于定义使用 */
+static void wait_release(void);           /* 前置:验证/待机路径先于定义使用 */
+static bool wait_release_indication(int64_t deadline_ms); /* 前置:录入抬手门用 */
 
 static int wak_active_level(void)
 {
@@ -524,17 +526,17 @@ static int enroll_wait_press(void)
     }
 }
 
-#define FP_LIFT_PROBE_MS 300               /* 抬手探测周期(手指还在时两次
-                                              GetImage 的间隔;真实抬手在
-                                              1~2 个周期内必然被看到) */
-
-/** 录入内等「真释放」。WAK 不可信:克隆模组的触摸前端在持续按压中会自行
- *  掉回静息电平(同 press_hold_ms 过滤的悬停误触发一个来源),wait_release
- *  只认电平 → 手指没抬就放行,查重跑完立刻提示「请再按一次」(2026-10-15
- *  用户板上反馈)。改用模组成像作真值:手指贴着传感器 GetImage 必回 OK
- *  (拍得到图),离开后回 NO_FINGER 类质量码——模组自己的"有没有指纹"
- *  判断,不吃 WAK 的亏。uid0/seq0 入参快照:apply_cmd 可能中途换命令把
- *  s_cur 覆盖掉,超时回执必须用进入时的请求身份。
+/** 录入内等「真释放」,双道闸:
+ *  ① WAK 释放指示(wait_release_indication:沿为主 + 1s 电平兜底);
+ *  ② 成像复核——手指贴着传感器 GetImage 必回 OK(拍到图),离开后回
+ *     无指纹类码。单看电平不可信:克隆模组触摸前端持续按压中自行掉回
+ *     静息,旧 wait_release 在此提前放行,查重一跑完立刻提示「请再按
+ *     一次」而手指未抬(2026-10-15 用户板上反馈)。
+ *  为什么不纯成像轮询:采样有盲窗——抬手与再按落在两个探测周期之间则
+ *  永远探不到抬起,快速点按卡到超时;带指示的复核把采样点钉在指示之后
+ *  一次,抬手事件本身无盲窗(指示后极快回按被复核否决,回环等下次指示,
+ *  超时兜底封顶)。uid0/seq0 入参快照:apply_cmd 可能中途换命令把 s_cur
+ *  覆盖掉,超时回执必须用进入时的请求身份。
  *  返回:1=确认释放;0=已取消(模式切走,调用方走 cancel 收尾);
  *  -1=链路错(link_err);-2=抬手超时(fp_lift_timeout_ms,函数内已回滚+
  *  回执 TIMEOUT+回 IDLE,调用方直接 return——UI 没发过 CANCEL,不发回执
@@ -555,13 +557,15 @@ static int enroll_wait_lift(const char *uid0, uint32_t seq0)
         apply_cmd();
         if (s_mode != DG_FMODE_ENROLL)
             return 0;
-        if (now_mono_ms() >= deadline) {
-            enroll_rollback();
-            DG_LOGI(TAG, "抬手超时(%dms),录入收口(未落库已回滚)", hold);
-            pub_enroll_result(DG_ENROLL_FINGER, uid0, seq0, DG_ERR_TIMEOUT);
-            s_mode = DG_FMODE_IDLE;
-            return -2;
-        }
+        if (now_mono_ms() >= deadline)
+            goto timeout;
+        bool ind = wait_release_indication(deadline);
+        atomic_store(&s_hb_ms, now_mono_ms());
+        apply_cmd();
+        if (s_mode != DG_FMODE_ENROLL)
+            return 0;
+        if (!ind || now_mono_ms() >= deadline)
+            goto timeout;
         size_t n = fp_as608_get_image(b, sizeof(b));
         if (cmd_xchg(b, n, &ack, &c, 2000) != DG_OK)
             return -1;
@@ -572,9 +576,14 @@ static int enroll_wait_lift(const char *uid0, uint32_t seq0)
         }
         if (c != FP_ACK_OK)
             return -1;                    /* 非预期确认码:按链路错收口 */
-        struct timespec ts = { 0, FP_LIFT_PROBE_MS * 1000 * 1000 };
-        nanosleep(&ts, NULL);             /* 手指还在:隔一拍再探 */
+        /* 复核否决:电平指示是假释放(克隆模组),回环等下一个指示 */
     }
+timeout:
+    enroll_rollback();
+    DG_LOGI(TAG, "抬手超时(%dms),录入收口(未落库已回滚)", hold);
+    pub_enroll_result(DG_ENROLL_FINGER, uid0, seq0, DG_ERR_TIMEOUT);
+    s_mode = DG_FMODE_IDLE;
+    return -2;
 }
 
 static void seq_enroll(void)
@@ -644,7 +653,8 @@ static void seq_enroll(void)
         /* 先提示放开手指(2026-10-04 用户口径):查重耗时与抬手动作重叠,
          * 提示在查重前发;确认「真释放」后才提示第二按——否则「手指还
          * 按着却提示请再按一次」自相矛盾,第二按边沿也要等释放后才可能
-         * 出现。真释放用成像确认(enroll_wait_lift),WAK 掉电平不算数 */
+         * 出现。真释放走双道闸(enroll_wait_lift):电平指示后成像复核,
+         * 克隆模组的 WAK 假掉电平不算数 */
         pub_progress(DG_ENROLL_FINGER, uid, s_cur.seq, 30, DG_ENROLL_FP_STEP_LIFT);
         {
             int lr = enroll_wait_lift(uid, s_cur.seq);
@@ -1145,11 +1155,14 @@ static int wait_press_once(int active)
     return 0;
 }
 
-/* 等释放期间也要按步应用模式命令:命令在信箱里等抬手 = 模式切换响应性
- * 丢失(2026-10-04 宿主测试暴露:上一流程残留的按压电平把 IDLE 分支带进
- * 本函数,后续 ENROLL 命令全被无视,整条录入链饿死)。模式一变立即让位,
- * 由主循环 switch 重新分派;正常释放照旧发 RELEASED 状态 */
-static void wait_release(void)
+/* 等释放指示(按下电平 → 非按下电平):沿为主,连续约 1s 边沿超时后补一次
+ * 电平直读兜底(sysfs 边沿依赖内核 edge 事件,极性配置错/边沿丢失/引脚悬空
+ * 读数恒静息时,纯边沿等待 = 永远等不到,2026-10-03 板上"无法录入"主嫌疑)。
+ * 环内按步应用模式命令:命令在信箱里等抬手 = 模式切换响应性丢失(2026-10-04
+ * 宿主测试暴露的整条录入链饿死);模式一变立即返回 true 让位,由调用方模式
+ * 检查收口。deadline_ms 非 0 且到点返回 false(录入抬手门的兜底上限,防
+ * 「永不释放」悬挂);0 = 无限期(验证/待机路径语义不变) */
+static bool wait_release_indication(int64_t deadline_ms)
 {
     int active = wak_active_level();
     const dg_finger_mode_t mode0 = s_mode;
@@ -1158,11 +1171,13 @@ static void wait_release(void)
         atomic_store(&s_hb_ms, now_mono_ms());          /* 等释放同 wait_press_once:按步刷心跳 */
         apply_cmd();
         if (s_mode != mode0)
-            return;                       /* 命令切走:让位,不吞 RELEASED 状态 */
+            return true;                  /* 命令切走:让位,不吞 RELEASED 状态 */
+        if (deadline_ms && now_mono_ms() >= deadline_ms)
+            return false;
         int rc = s_link->wak_wait(200, &lvl);
         if (rc == DG_OK && lvl != active) {
             if (debounce_press(lvl))
-                break;
+                return true;
             continue;
         }
         if (rc == DG_ERR_TIMEOUT) {
@@ -1171,13 +1186,18 @@ static void wait_release(void)
                 s_edge_miss = 0;
                 if (s_link->wak_level(&lv2) == DG_OK && lv2 != active &&
                     debounce_press(lv2))
-                    break;
+                    return true;
             }
             continue;
         }
         if (rc != DG_OK)
-            return;                       /* 链路坏:上层降级兜底 */
+            return true;                  /* 链路坏:上层降级兜底 */
     }
+}
+
+static void wait_release(void)
+{
+    (void)wait_release_indication(0);
     pub_status(DG_FINGER_RELEASED);
 }
 
