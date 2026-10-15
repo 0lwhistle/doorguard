@@ -33,7 +33,8 @@
   校验闭环 → S60 装非活动槽 → 重启 v1.0.1;活动槽 A sha256 与产物一致;
   重启后重收 retained 公告正确忽略(无循环)。
 - 固化:env/bin/dg-ota-publish(点分版本硬校验/上传/公告,口令不落开发机);
-  DEV_HANDBOOK §7.4 / services/ota/README 生产部署节。
+  DEV_HANDBOOK §7.4 / services/ota/README 生产部署节;env/README 补「生产
+  发版」教程与示例(与 dg-deploy 双路径对照)+ tsan ASLR 跑法。
 - **回滚演练 ✅**:发坏包 1.0.2(随机 1KB,sha 匹配公告)→ 公告 1s 被消费后
   立即清 retain → 下载/暂存/装 B 槽 → 日志实录「OTA 安装 dg_app.B(v=1.0.2)」
   → 7 秒后「连续 3 次秒退,回滚 → dg_app.A」→ A 槽 sha=v1.0.1 产物、应用稳定、
