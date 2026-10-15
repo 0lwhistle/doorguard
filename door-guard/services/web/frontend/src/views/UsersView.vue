@@ -1,5 +1,6 @@
 <!--
-  UsersView.vue — 用户管理(列表 / 添加 / 编辑 / 删除 / 改密 / 人脸与 IC 卡录入)
+  UsersView.vue — 用户管理(列表 / 添加 / 编辑 / 删除 / 改密 / 人脸录入;IC 卡
+  录入 UI 由 IC_UI_ENABLED 门控,业务挂起期间隐藏,API 不受影响)
 
   与设备端同一套业务规则:字段校验 JS 版先反馈,服务端(storage 层权威)
   兜底,错误文案直接呈现服务端 msg。删除/清人脸/人脸录入是受理制(经
@@ -25,15 +26,25 @@ import {
 } from '../api/users'
 import { toast } from '../stores/toast'
 
+/* IC 卡业务挂起(2026-10):只屏蔽上位机 UI,users.js API 与服务端原样保留;
+ * 恢复业务时改回 true,列表列/验证方式勾选/绑定块随开关一起回来 */
+const IC_UI_ENABLED = false
+
 const COLUMNS = [
   { key: 'uid', label: '用户 ID', width: '18%' },
   { key: 'name', label: '姓名' },
   { key: 'roleText', label: '权限', width: '10%' },
   { key: 'authText', label: '验证方式' },
   { key: 'faceText', label: '人脸', width: '9%' },
-  { key: 'icText', label: 'IC 卡', width: '12%' },
+  ...(IC_UI_ENABLED ? [{ key: 'icText', label: 'IC 卡', width: '12%' }] : []),
   { key: 'ops', label: '操作', width: '24%' },
 ]
+
+/* UI 可见的验证方式位:IC 挂起时不渲染(勾选与验证方式列都不出现);
+ * openEdit 初值仍按全集 AUTH_FLAGS 算,老用户已勾的 IC 位保存时原样保留 */
+const UI_AUTH_FLAGS = IC_UI_ENABLED
+  ? AUTH_FLAGS
+  : AUTH_FLAGS.filter((a) => a.bit !== 8)
 
 const rows = ref([])
 const loading = ref(false)
@@ -55,8 +66,6 @@ const previewUrl = ref('')
 const uploading = ref(false)
 let pendingSeq = null
 
-const FLAGS_BIT_TEXT = { 1: '人脸', 2: '指纹', 4: '密码', 8: 'IC 卡' }
-
 /* 各方式位是否可勾:编辑 = 对应凭据已录;添加 = 仅密码(密码必填恒有) */
 function bitEnabled(bit) {
   if (!form.value) return false
@@ -69,7 +78,7 @@ function bitEnabled(bit) {
 }
 
 function authText(row) {
-  return AUTH_FLAGS.filter((a) => row.auth_flags & a.bit).map((a) => a.label).join('/') || '—'
+  return UI_AUTH_FLAGS.filter((a) => row.auth_flags & a.bit).map((a) => a.label).join('/') || '—'
 }
 
 function decorate(row) {
@@ -309,7 +318,7 @@ onUnmounted(() => {
 
     <AppCard v-if="!form" title="用户管理" :index="0">
       <div class="bar">
-        <span class="muted small">共 {{ total }} 人;人脸可编辑页上传,IC 卡编辑页直输卡号或设备端刷卡录入,指纹在设备端录入</span>
+        <span class="muted small">共 {{ total }} 人;人脸可编辑页上传{{ IC_UI_ENABLED ? ',IC 卡编辑页直输卡号或设备端刷卡录入' : '' }},指纹在设备端录入</span>
         <AppButton icon="check" size="sm" @click="openAdd">添加用户</AppButton>
       </div>
       <DataTable :columns="COLUMNS" :rows="rows" row-key="uid" :loading="loading">
@@ -347,7 +356,7 @@ onUnmounted(() => {
         <div class="flags">
           <span class="small muted">验证方式</span>
           <label
-            v-for="a in AUTH_FLAGS"
+            v-for="a in UI_AUTH_FLAGS"
             :key="a.bit"
             class="flags__item"
             :class="{ disabled: !bitEnabled(a.bit) }"
@@ -383,7 +392,7 @@ onUnmounted(() => {
           </div>
           <span class="small muted">选图后自动降采样(最长边 1024)上传;提取在设备端后台进行,完成后提示结果</span>
         </div>
-        <div v-if="form.mode === 'edit'" class="ic-bind">
+        <div v-if="form.mode === 'edit' && IC_UI_ENABLED" class="ic-bind">
           <span class="small muted">
             IC 卡({{ form.creds.ic_mask ? `已绑定 ${form.creds.ic_mask}` : '尚未绑定' }})
           </span>
@@ -402,7 +411,7 @@ onUnmounted(() => {
         <AppButton icon="check" :loading="busy" @click="onSave">保存</AppButton>
         <AppButton variant="ghost" @click="closeForm">取消</AppButton>
       </div>
-      <p class="muted small">新用户必须设密码;未录入的方式不能勾选(人脸可本页上传、IC 卡本页直输卡号,指纹在设备端录入)。</p>
+      <p class="muted small">新用户必须设密码;未录入的方式不能勾选(人脸可本页上传{{ IC_UI_ENABLED ? '、IC 卡本页直输卡号' : '' }},指纹在设备端录入)。</p>
     </AppCard>
 
   </div>

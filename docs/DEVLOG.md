@@ -2,6 +2,21 @@
 
 > 记录约定:每次会话/每个工作日**追加**新条目(最新在最上),写清"做了什么 / 结论 / 踩了什么坑"。
 
+## 2026-10-15 web 上位机 IC 卡 UI 屏蔽:单开关门控,业务挂起 API 保留
+
+- 背景:IC 读卡硬件接入已挂起(10-14,iccard.enabled=0),上位机先把刷卡
+  相关 UI 撤下,业务后续再推进。
+- 做法:UsersView.vue 加 `IC_UI_ENABLED = false` 单开关——列表「IC 卡」列、
+  验证方式勾选项(bit 8)、「录入/重绑/解绑 IC 卡」块、顶部与底部提示文案
+  全部随开关隐藏;authText 改用 UI_AUTH_FLAGS,验证方式列不再出现「IC 卡」。
+- 刻意保留:api/users.js 全部封装与校验、onBindIc/onUnbindIc 函数、openEdit
+  按全集 AUTH_FLAGS 算勾选初值(老用户已勾的 IC 位保存时原样保留,不丢
+  数据);服务端 API 零改动。恢复业务 = 开关改回 true 重建前端即可。
+- 顺带删未引用死代码 FLAGS_BIT_TEXT。
+- 环境结论:Windows 侧无 node,前端 vitest/vite 构建只能在 WSL(nvm node24
+  显式 source)+ python3 跑;产物 pages/ 与 web_pages.c 由 WSL 生成后随
+  git 提交。
+
 ## 2026-10-15 MQTT 固件自动升级生产部署:全链跑通(公告→下载→装槽→回滚保护待演练)
 
 - 服务端(homeserver 192.168.2.150,docker,unless-stopped):Mosquitto 1883
