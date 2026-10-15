@@ -33,6 +33,18 @@ WAK 沿后须保持按下电平满 `finger.press_hold_ms`(默认 500,钳 30~2000
 (「假按压丢弃:WAK 有效 Nms」,1s 节流带累计)。IDLE 待机亮屏、1:N/1:1、录入
 等所有按压路径同点生效。配置置 0 只剩 30ms 电气消抖下限。
 
+## 录入抬手确认(成像判释放,2026-10-15)
+
+同一克隆模组触摸前端还有反向缺陷:持续按压中 WAK 会**自行掉回静息电平**,
+按电平判释放会在手指未抬时提前放行——「请抬起手指」还没抬就提示「请再按一次」
+(用户板上反馈的根因)。录入两次按压之间与 RETRY2 重采前,释放判定改用
+`enroll_wait_lift`:隔 300ms 探一次 GetImage,回无指纹类确认码(NO_FINGER/
+DRY_IMAGE/ENROLL_FAIL)才认离开,手指贴着必回 OK;WAK 完全不参与。
+`finger.lift_timeout_ms`(默认 10000)为兜底:超时回滚未落库模板、回执
+DG_ERR_TIMEOUT(UI 弹「未检测到手指抬起,已退出录入」)并回 IDLE——UI 在
+LIFT 阶段停了按压计时,provider 不自收口则 UI 死亡后 ENROLL 模式悬挂、
+指纹验证被锁死。
+
 ## 降级(模组没接/串口不通 ≠ 系统坏)
 
 open/握手(VerifyPSW)连续失败 ≥3 → `EV_SYS_SERVICE_STATE("finger", ERROR)` 一次,

@@ -245,7 +245,10 @@ typedef enum {
     DG_ENROLL_FP_STEP_RETRY2 = 3,         /**< 两次按压不一致,请用同一手指 */
     DG_ENROLL_FP_STEP_QUALITY = 4,        /**< 模组未读到指纹/成像差,调整手指重按 */
     DG_ENROLL_FP_STEP_LIFT = 5,           /**< 按压①已采到,请先抬起手指(2026-10-04
-                                              用户口径:先提示放开,再提示第二按) */
+                                              用户口径:先提示放开,再提示第二按;
+                                              2026-10-15:provider 以模组成像确认
+                                              真释放后才发 PRESS2——WAK 在克隆
+                                              模组持续按压中会自行掉电平不算数) */
     DG_ENROLL_FP_STEP_PROCESS = 6,        /**< 按压②已采到,合成/落库进行中,不再等
                                               按压(UI 停 5s 计时器:处理慢≠没按压) */
 } dg_enroll_fp_step_t;

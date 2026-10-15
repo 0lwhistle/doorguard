@@ -53,7 +53,8 @@ cur_config.json(现用配置,稀疏覆盖;板上 /userdata/doorguard/cur_config.
 
 指纹模组(json-only;细则见 docs/tech/FINGERPRINT_AS608.md §8):
 `finger.uart_dev`(/dev/ttyS8)、`finger.baud`(57600)、`finger.wak_gpio`(94)、
-`finger.wak_active_level`(-1=自动极性校准)。
+`finger.wak_active_level`(-1=自动极性校准)、`finger.press_hold_ms`(500,
+按压确认窗)、`finger.lift_timeout_ms`(10000,录入抬手确认兜底)。
 
 IC 读卡器(json-only):`iccard.dev_path`(/dev/dg_iccard0,"sim"=宿主模拟)。
 

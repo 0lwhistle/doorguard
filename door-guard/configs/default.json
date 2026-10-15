@@ -25,7 +25,8 @@
     "baud": 57600,
     "wak_gpio": 94,
     "wak_active_level": -1,
-    "press_hold_ms": 500
+    "press_hold_ms": 500,
+    "lift_timeout_ms": 10000
   },
   "iccard": {
     "enabled": false,

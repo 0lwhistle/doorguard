@@ -6,11 +6,14 @@
  * → EV_FINGER_SET_MODE(ENROLL) → provider 两次按压序列(查重/同指校验/
  * 合成/Store/UpChar)→ EV_ENROLL_RESULT + fingerprints 落库 + 方式位。
  *
- * 覆盖:happy path(两按中间 LIFT 抬手确认+PROCESS 处理步;落库+方式位+
+ * 覆盖:happy path(两按中间 LIFT 成像确认抬手+PROCESS 处理步;落库+方式位+
  * PageID 分配)/ UpChar 无数据包仍录入成功(无副本降级行)/ 与他人重复
  * DUP_FINGER / 同用户重复自己已有枚 DUP_FINGER / 单用户超 3 枚
- * FINGER_LIMIT / 模组库满 FINGER_FULL / 两次不一致 RETRY2 重采后成功 /
- * 按压①成像差(capture_retry 未松连拍拍不出)QUALITY 提示重按走完全程 /
+ * FINGER_LIMIT / 模组库满 FINGER_FULL / 两次不一致 RETRY2 重采(须先真抬手)
+ * 后成功 / 按压①成像差(capture_retry 未松连拍拍不出)QUALITY 提示重按走
+ * 完全程 / **WAK 谎报释放回归(2026-10-15)**:手指未抬 WAK 自行掉静息
+ * (克隆模组触摸前端)不得跳 PRESS2,成像见无指纹才放行 / 抬手超时:
+ * fp_lift_timeout_ms 兜底回执 TIMEOUT + 回 IDLE(防 ENROLL 悬挂)/
  * 取消回滚(无 Store 不留孤儿)/ 等按压期间心跳按步刷新(看门狗误杀
  * 回归)/ DeletChar 单枚删除。
  */
@@ -50,8 +53,10 @@ typedef struct {
     atomic_int delet_page;
     atomic_int store_page;
     /* WAK 电平模型:press_req 置 1 → 下次 wak_wait 返回按下沿;
-     * release_req 同理释放沿;level 是消抖直读值 */
-    atomic_int press_req, release_req, level;
+     * release_req 同理释放沿;level 是消抖直读值。
+     * finger_on 是图像层真值(手指是否真在传感器上),独立于 WAK——
+     * 2026-10-15 起录入抬手判定吃这个字段(WAK 在克隆模组上会谎报) */
+    atomic_int press_req, release_req, level, finger_on;
     /* 应答字节流(锁内) */
     pthread_mutex_t mtx;
     uint8_t  rx[4096];
@@ -84,6 +89,7 @@ static void fake_reset(void)
     atomic_store(&F.press_req, 0);
     atomic_store(&F.release_req, 0);
     atomic_store(&F.level, 0);
+    atomic_store(&F.finger_on, 0);
 }
 
 static void put_be16(uint8_t *p, uint16_t v)
@@ -155,8 +161,15 @@ static void fake_respond(uint8_t cmd, const uint8_t *params)
         fake_push(b, n);
         break;
     }
-    case 0x01: {                          /* GetImage */
-        size_t n = mk_ack(b, F.getimage_ack);
+    case 0x01: {                          /* GetImage:场景强制码优先(QUALITY
+                                           * 注入),否则按 finger_on 真值派生
+                                           * (手指贴着 = 拍得到 = OK;离开 =
+                                           * NO_FINGER)——2026-10-15 起录入
+                                           * 抬手判定吃这个真值 */
+        uint16_t code = F.getimage_ack;
+        if (!code)
+            code = atomic_load(&F.finger_on) ? FP_ACK_OK : FP_ACK_NO_FINGER;
+        size_t n = mk_ack(b, code);
         fake_push(b, n);
         break;
     }
@@ -335,11 +348,13 @@ static void wait_step(int32_t step)
 
 static void press(void)
 {
+    atomic_store(&F.finger_on, 1);        /* 按下 = 手指在传感器上 */
     atomic_store(&F.press_req, 1);
 }
 
 static void release(void)
 {
+    atomic_store(&F.finger_on, 0);        /* 抬起 = 图像层也见不到指纹 */
     atomic_store(&F.release_req, 1);
 }
 
@@ -392,6 +407,7 @@ int main(void)
     snprintf(key, sizeof(key), "%s/dg.key", dir);
     DG_CHECK(storage_init(db, key) == DG_OK);
     DG_CHECK(cfg_load(NULL, NULL) == DG_OK);    /* 纯默认(wak_active=-1 自动极性) */
+    FILE *fp;                             /* P6d 短抬手窗的 json 覆盖文件用 */
 
     event_bus_subscribe(EV_ENROLL_PROGRESS, on_progress, NULL);
     event_bus_subscribe(EV_ENROLL_RESULT, on_result, NULL);
@@ -532,6 +548,9 @@ int main(void)
         usleep(5000);
     DG_CHECK(atomic_load(&s_progress_step) == DG_ENROLL_FP_STEP_RETRY2);
     F.match_ack = FP_ACK_OK;
+    release();                            /* 重采前须真抬手(2026-10-15 抬手门:
+                                             不放行则按着的错指会被电平兜底
+                                             静默重拍,提示与行为矛盾) */
     press();                              /* 重采② */
     wait_ge(&s_result_finger_cnt, 7, 5000);
     DG_CHECK(atomic_load(&s_result_finger_err) == DG_OK);
@@ -596,6 +615,76 @@ int main(void)
     usleep(300 * 1000);
     atomic_store(&F.release_req, 1);      /* 同 P6:补释放沿防 join 挂死 */
     usleep(300 * 1000);
+
+    printf("[P6c] WAK 谎报释放回归:手指未抬(WAK 自行掉静息)不得跳 PRESS2\n");
+    /* 2026-10-15 用户板上反馈:「请抬起手指」还没抬就「请再按一次」。
+     * 根因 = 旧 wait_release 只认 WAK 电平,克隆模组触摸前端在持续按压中
+     * 自行掉回静息。修复后 LIFT 判定只吃成像真值:GetImage 回无指纹码
+     * 才放行,WAK 怎么翻不影响 */
+    fake_reset();
+    atomic_store(&s_progress_cnt, 0);
+    publish_req("30003", DG_ENROLL_FINGER, 0);
+    wait_ge(&s_progress_cnt, 1, 3000);    /* PRESS1 */
+    press();
+    wait_step(DG_ENROLL_FP_STEP_LIFT);
+    atomic_store(&F.level, 0);            /* WAK 谎报:掉回静息;手指未抬
+                                             (finger_on 仍 1,无释放沿) */
+    usleep(1500 * 1000);                  /* 旧实现此处早已进 PRESS2 */
+    DG_CHECK(atomic_load(&s_progress_step) == DG_ENROLL_FP_STEP_LIFT);
+    release();                            /* 真抬起:成像见无指纹才放行 */
+    wait_step(DG_ENROLL_FP_STEP_PRESS2);
+    DG_CHECK(atomic_load(&s_progress_step) == DG_ENROLL_FP_STEP_PRESS2);
+    press();
+    int rc_before = atomic_load(&s_result_finger_cnt);
+    wait_ge(&s_result_finger_cnt, rc_before + 1, 5000);
+    DG_CHECK(atomic_load(&s_result_finger_err) == DG_OK);
+    cnt = 99;
+    DG_CHECK(db_finger_count_user("30003", &cnt) == DG_OK && cnt == 2);
+
+    printf("[P6d] 抬手超时:fp_lift_timeout_ms 兜底回执 TIMEOUT + 回 IDLE\n");
+    /* UI 在 LIFT 阶段停了 5s 计时(等输入≠等抬手),provider 侧必须自带
+     * 收口:超时回执让 UI 浮层关闭,模式回 IDLE 防 ENROLL 悬挂锁死验证。
+     * finger.* 是 json-only 键(不走 cfg_set META),与 press_gate P4 同路:
+     * 文件覆盖加载短窗 */
+    fake_reset();
+    char jpath2[160], cpath2[160];
+    snprintf(jpath2, sizeof(jpath2), "%s/lift.json", dir);
+    snprintf(cpath2, sizeof(cpath2), "%s/cur_lift.json", dir);
+    fp = fopen(jpath2, "w");
+    DG_CHECK(fp != NULL);
+    fputs("{\"finger\":{\"lift_timeout_ms\":600}}", fp);
+    fclose(fp);
+    fp = fopen(cpath2, "w");
+    DG_CHECK(fp != NULL);
+    fputs("{}", fp);
+    fclose(fp);
+    DG_CHECK(cfg_load(jpath2, cpath2) == DG_OK);
+    DG_CHECK(cfg_get()->fp_lift_timeout_ms == 600);
+    atomic_store(&s_progress_cnt, 0);
+    rc_before = atomic_load(&s_result_finger_cnt);
+    publish_req("30003", DG_ENROLL_FINGER, 0);
+    wait_ge(&s_progress_cnt, 1, 3000);    /* PRESS1 */
+    press();
+    wait_step(DG_ENROLL_FP_STEP_LIFT);    /* 到 LIFT 后不再抬手 */
+    wait_ge(&s_result_finger_cnt, rc_before + 1, 5000);
+    DG_CHECK(atomic_load(&s_result_finger_err) == DG_ERR_TIMEOUT);
+    DG_CHECK(atomic_load(&F.delet_calls) == 0);   /* 未 Store,无回滚 */
+    cnt = 99;
+    DG_CHECK(db_finger_count_user("30003", &cnt) == DG_OK && cnt == 2);
+    /* 回 IDLE 证明:新请求能重新进录入(卡死即收不到 PRESS1);随后取消
+     * 收尾,并补释放沿防 join 挂死(stale level=1 会被 IDLE 电平兜底吃成
+     * 假按压,同 P6 口径) */
+    atomic_store(&s_progress_cnt, 0);
+    publish_req("30003", DG_ENROLL_FINGER, 0);
+    wait_ge(&s_progress_cnt, 1, 3000);
+    publish_req("30003", DG_ENROLL_FINGER_CANCEL, 0);
+    usleep(300 * 1000);
+    atomic_store(&F.level, 0);
+    atomic_store(&F.finger_on, 0);
+    atomic_store(&F.release_req, 1);
+    usleep(300 * 1000);
+    DG_CHECK(cfg_load(NULL, NULL) == DG_OK);      /* 恢复纯默认(短窗不外溢) */
+    DG_CHECK(cfg_get()->fp_lift_timeout_ms == 10000);
 
     printf("[P7] 逐枚删除:DeletChar + 删行 + 末枚收方式位\n");
     fake_reset();

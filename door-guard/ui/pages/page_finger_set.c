@@ -11,8 +11,10 @@
  * 「等按压」阶段 5s 无按压自动退出(超时发 CANCEL,provider 在检查点
  * 回滚未落库模板),过程文案映射 EV_ENROLL_PROGRESS 的 step;LIFT/PROCESS
  * 两个「不等输入」阶段停表(处理尾巴慢 ≠ 没按压,计时不停会在真终态前
- * 误弹「已退出录入」= 成功却先见失败窗,2026-10-04);终态 EV_ENROLL_RESULT
- * 关窗。页面销毁(返回/被盖)一律撤消进行中的录入流,防流程悬挂。
+ * 误弹「已退出录入」= 成功却先见失败窗,2026-10-04)——LIFT 的兜底在
+ * provider 侧(成像确认真释放 + fp_lift_timeout_ms 超时回执,2026-10-15);
+ * 终态 EV_ENROLL_RESULT 关窗。页面销毁(返回/被盖)一律撤消进行中的录入流,
+ * 防流程悬挂。
  *
  * 浮层在显示期间经 bridge_busy(true/false) 申请/释放「前台耗时操作保持」:
  * 用户按传感器的那几十秒没在摸屏,不保持就会被菜单超时当成「无人操作」
@@ -313,6 +315,10 @@ void page_finger_set_evt(const ui_evt_t *evt)
         dg_popup_success(_("指纹已录入"), 1200, NULL, NULL);
     else if (r->err == DG_ERR_DUP_FINGER)
         dg_popup_fail(_("该指纹已录入过，请更换手指"), 2000, NULL, NULL);
+    else if (r->err == DG_ERR_TIMEOUT)
+        /* 抬手超时(provider 收口,2026-10-15):与页内 5s 无按压退出的中性
+         * 提示同口径,不按「验证失败」语义弹 */
+        dg_popup_fail(_("未检测到手指抬起，已退出录入"), 2000, NULL, NULL);
     else
         dg_popup_fail(dg_ui_enroll_err_text(r->err), 2000, NULL, NULL);
 }

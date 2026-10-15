@@ -5,9 +5,10 @@
  * 一次按压一次判定:RELEASED 前不再触发新流程(§6 边界);判定前有按压
  * 确认窗(press_confirmed):WAK 保持按下电平满 finger.press_hold_ms 才算
  * 真按,短保持按假按压丢弃留痕(2026-10-13 用户口径:短于 500ms 都是假按)。
- * 录入是两次按压,
- * 查重插在按压①(采到即提示抬手、确认释放)之后,同指校验在按压②后,
- * 按压②采到即发 PROCESS(UI 停「5s 无按压」计时),取消/退出回滚已 Store 模板。
+ * 录入是两次按压,两次按压之间等「真释放」用模组成像确认(enroll_wait_lift:
+ * WAK 在克隆模组上持续按压中会自行掉回静息,手指没抬就提示「请再按一次」
+ * 的根因,2026-10-15),查重插在确认释放之后,同指校验在按压②后,按压②
+ * 采到即发 PROCESS(UI 停「5s 无按压」计时),取消/退出回滚已 Store 模板。
  */
 #include "fp_provider.h"
 #include "cfg.h"
@@ -523,6 +524,59 @@ static int enroll_wait_press(void)
     }
 }
 
+#define FP_LIFT_PROBE_MS 300               /* 抬手探测周期(手指还在时两次
+                                              GetImage 的间隔;真实抬手在
+                                              1~2 个周期内必然被看到) */
+
+/** 录入内等「真释放」。WAK 不可信:克隆模组的触摸前端在持续按压中会自行
+ *  掉回静息电平(同 press_hold_ms 过滤的悬停误触发一个来源),wait_release
+ *  只认电平 → 手指没抬就放行,查重跑完立刻提示「请再按一次」(2026-10-15
+ *  用户板上反馈)。改用模组成像作真值:手指贴着传感器 GetImage 必回 OK
+ *  (拍得到图),离开后回 NO_FINGER 类质量码——模组自己的"有没有指纹"
+ *  判断,不吃 WAK 的亏。uid0/seq0 入参快照:apply_cmd 可能中途换命令把
+ *  s_cur 覆盖掉,超时回执必须用进入时的请求身份。
+ *  返回:1=确认释放;0=已取消(模式切走,调用方走 cancel 收尾);
+ *  -1=链路错(link_err);-2=抬手超时(fp_lift_timeout_ms,函数内已回滚+
+ *  回执 TIMEOUT+回 IDLE,调用方直接 return——UI 没发过 CANCEL,不发回执
+ *  其浮层会永远挂在「请抬起手指」上) */
+static int enroll_wait_lift(const char *uid0, uint32_t seq0)
+{
+    int hold = cfg_get()->fp_lift_timeout_ms;
+    if (hold < 100)
+        hold = 100;
+    if (hold > 120000)
+        hold = 120000;
+    const int64_t deadline = now_mono_ms() + hold;
+    uint8_t b[FP_A608_FRAME_MAX];
+    fp_frame_t ack;
+    uint16_t c = 0xFFFF;   /* 失败路径也打日志:确认码给"无效"哨兵 */
+    for (;;) {
+        atomic_store(&s_hb_ms, now_mono_ms());   /* 等抬手=活着在等输入 */
+        apply_cmd();
+        if (s_mode != DG_FMODE_ENROLL)
+            return 0;
+        if (now_mono_ms() >= deadline) {
+            enroll_rollback();
+            DG_LOGI(TAG, "抬手超时(%dms),录入收口(未落库已回滚)", hold);
+            pub_enroll_result(DG_ENROLL_FINGER, uid0, seq0, DG_ERR_TIMEOUT);
+            s_mode = DG_FMODE_IDLE;
+            return -2;
+        }
+        size_t n = fp_as608_get_image(b, sizeof(b));
+        if (cmd_xchg(b, n, &ack, &c, 2000) != DG_OK)
+            return -1;
+        if (c == FP_ACK_NO_FINGER || c == FP_ACK_DRY_IMAGE ||
+            c == FP_ACK_ENROLL_FAIL) {
+            pub_status(DG_FINGER_RELEASED);      /* 语义同 wait_release 收尾 */
+            return 1;
+        }
+        if (c != FP_ACK_OK)
+            return -1;                    /* 非预期确认码:按链路错收口 */
+        struct timespec ts = { 0, FP_LIFT_PROBE_MS * 1000 * 1000 };
+        nanosleep(&ts, NULL);             /* 手指还在:隔一拍再探 */
+    }
+}
+
 static void seq_enroll(void)
 {
     const char *uid = s_cur.user_id;
@@ -588,12 +642,19 @@ static void seq_enroll(void)
         }
 
         /* 先提示放开手指(2026-10-04 用户口径):查重耗时与抬手动作重叠,
-         * 提示在查重前发;确认释放后才提示第二按——否则「手指还按着却
-         * 提示请再按一次」自相矛盾,第二按边沿也要等释放后才可能出现 */
+         * 提示在查重前发;确认「真释放」后才提示第二按——否则「手指还
+         * 按着却提示请再按一次」自相矛盾,第二按边沿也要等释放后才可能
+         * 出现。真释放用成像确认(enroll_wait_lift),WAK 掉电平不算数 */
         pub_progress(DG_ENROLL_FINGER, uid, s_cur.seq, 30, DG_ENROLL_FP_STEP_LIFT);
-        wait_release();
-        if (enroll_canceled())            /* 等释放期间的取消检查点 */
-            goto cancel;
+        {
+            int lr = enroll_wait_lift(uid, s_cur.seq);
+            if (lr == 0)
+                goto cancel;
+            if (lr == -1)
+                goto link_err;
+            if (lr != 1)
+                return;                   /* -2:抬手超时,函数内已回执收口 */
+        }
 
         uint16_t page = 0, score = 0;
         rc = search_all(&page, &score);
@@ -650,9 +711,19 @@ static void seq_enroll(void)
         if (rc == DG_ERR_IO)
             goto link_err;
         if (c != FP_ACK_OK) {
-            /* 两次不同手指/差异过大:明确文案重采(§5.3);B1 仍有效 */
+            /* 两次不同手指/差异过大:明确文案重采(§5.3);B1 仍有效。
+             * 重采前等「真释放」:换指必先离手,且不放行则按着的旧指会在
+             * 等按压的 1s 电平兜底里被静默重拍——提示「请再按一次」的同时
+             * 系统自己拿同一根错指反复重试,提示与行为自相矛盾 */
             pub_progress(DG_ENROLL_FINGER, uid, s_cur.seq, 50,
                          DG_ENROLL_FP_STEP_RETRY2);
+            int lr = enroll_wait_lift(uid, s_cur.seq);
+            if (lr == 0)
+                goto cancel;
+            if (lr == -1)
+                goto link_err;
+            if (lr != 1)
+                return;                   /* -2:抬手超时,函数内已回执收口 */
             continue;
         }
 
@@ -663,6 +734,13 @@ static void seq_enroll(void)
         if (c != FP_ACK_OK) {             /* 合成失败兜底:回②重采(§6) */
             pub_progress(DG_ENROLL_FINGER, uid, s_cur.seq, 50,
                          DG_ENROLL_FP_STEP_RETRY2);
+            int lr = enroll_wait_lift(uid, s_cur.seq);
+            if (lr == 0)
+                goto cancel;
+            if (lr == -1)
+                goto link_err;
+            if (lr != 1)
+                return;                   /* -2:抬手超时,函数内已回执收口 */
             continue;
         }
         break;

@@ -98,6 +98,13 @@ typedef struct {
                                     30~2000)。2026-10-13 用户拍板:短于 500ms
                                     的都是假按压——克隆模组触摸感应前置(悬停/
                                     掠过即翻转)+ 干扰毛刺;默认 500 */
+    int  fp_lift_timeout_ms;   /**< 抬手确认超时 ms:录入 LIFT 阶段等「真释放」
+                                    的兜底上限(fp_provider enroll_wait_lift,
+                                    钳 100~120000)。释放判定用模组成像
+                                    (GetImage 无指纹码)而非 WAK——克隆模组
+                                    持续按压中 WAK 会自行掉回静息;超时按取消
+                                    收口并回执,防 UI 死亡后 ENROLL 模式悬挂。
+                                    默认 10000 */
     /* IC 读卡器(json-only;ICCARD_PROTOCOL §8;最终节点名由驱动定,只改配置) */
     char iccard_dev_path[32];  /**< 读卡器节点,默认 /dev/dg_iccard0;"sim"=宿主模拟后端 */
     int  iccard_enabled;       /**< 0=屏蔽读卡业务(2026-10-14 起,K7 链路问题挂起:
