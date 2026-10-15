@@ -32,6 +32,7 @@
 | 板上可用工具 | 有 `sqlite3`;**没有 python3**(板端脚本一律用 shell/sqlite3) |
 | 板上时钟(2026-10-03 实测) | **RTC=2021-01-01,SNTP 未通,REALTIME 与 MONOTONIC 差 ~1.6e12ms**。健康/心跳/超时/帧新鲜度比较**必须 MONOTONIC**(now_mono_ms);混用 REALTIME 会把开机十几秒内全部健康服务误判为断流/心跳超龄(白屏+看门狗连环误伤已实锤,DEVLOG 2026-10-03 晚)。NTP 校时步进后结论不变 |
 | 指纹 WAK(2026-10-03 实测) | GPIO 94 sysfs 可读,**静息=0**,应用启动自校准得按下=1(采样 12:0);`finger.wak_active_level` 默认 **-1=自动**(fp_provider wak_calibrate),产线已知极性可写 0/1 强制。按压→电平相关性仍待真人复测;等待已带 ~1s 电平直读兜底,边沿丢失不再卡死 |
+| 指纹 WAK 双向不可信(2026-10-15 定性) | 克隆模组触摸前端两个方向都会说谎:①**未按压即翻转**(悬停/掠过,press_hold_ms=500 确认窗过滤);②**持续按压中自行掉回静息**——录入抬手只认电平会「未抬手即提示请再按一次」,已改双道闸(释放指示+GetImage 成像复核,`finger.lift_timeout_ms=10s` 兜底)。结论:**WAK 只能当唤醒沿用,「手指在不在传感器上」的事实源是 GetImage 确认码** |
 | 显示/渲染硬件(2026-09-22 实测) | **VOP2**:6 plane(3 Primary+3 Overlay),crtc 100(720×1280 DSI)上空闲 Overlay 132(Esmart3)/148(Cluster0)均支持 **NV12+缩放**,zpos 0..7 可写、alpha/CSC 齐;**Esmart/Cluster 均无 90° 硬件旋转**(仅 rotate-0/reflect)→ 旋转靠 RGA。**GPU**:Mali-G52(libmali-bifrost blob,EGL/GLES/OpenCL 可用,**无 Vulkan**),当前未使用。**dma_heap**:/dev/dma_heap/reserved(CMA)+ system,可导 dmabuf 给 DRM |
 | LVGL8 透明陷阱(实测) | ①`screen_transp` 运行时开关被编译宏 **LV_COLOR_SCREEN_TRANSP**(lv_conf.h)门控,宏不开则渲染脏区前被 bg_color(白)预填,ARGB fb 永不透明;②页容器 `remove_style_all` 本透明,页面"白底"实为 screen/display 层自带(lv_disp bg_opa 默认 COVER)——透明化须三层同改(ui.c scr+disp、navigator 页容器、dg_preview 透明页) |
 
