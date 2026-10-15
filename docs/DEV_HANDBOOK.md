@@ -279,6 +279,8 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 
 ### 7.4 固件自动升级(MQTT OTA)生产部署(2026-10-15 定版,板上全链实测)
 
+> 完整技术细节(两侧实现/硬契约/验收成果/运维手册)= `docs/tech/MQTT_OTA.md`;本节只留部署速查。
+
 - **服务器组件**(homeserver 192.168.2.150,docker,`--restart unless-stopped`):
   - `mosquitto-doorguard`:eclipse-mosquitto:2,端口 1883,账号 `doorguard`,
     口令只在服务器 `/opt/mosquitto/config/dg.pass`(600 root);配置/数据/日志
