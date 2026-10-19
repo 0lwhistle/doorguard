@@ -109,7 +109,8 @@ typedef struct {
     char iccard_dev_path[32];  /**< 读卡器节点,默认 /dev/dg_iccard0;"sim"=宿主模拟后端 */
     int  iccard_enabled;       /**< 0=屏蔽读卡业务(2026-10-14 起,K7 链路问题挂起:
                                     provider 不启动/FSM ic_ready=false/录卡入口拒);
-                                    后续恢复置 1 即可,默认 1 */
+                                    2026-10-19 起默认 0(缺配置段的老配置也不复活,
+                                    设备端 IC UI 同步隐藏);恢复置 1 即可 */
     /* MQTT 通道(json-only;services/mqtt。默认关:broker 地址属部署参数,
      * 硬接好之前不留对外连接面) */
     int  mqtt_enabled;         /**< 0/1,默认 0;开启后连 broker、订阅 cmd、转发验证事件 */

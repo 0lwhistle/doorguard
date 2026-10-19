@@ -287,7 +287,9 @@ static void defaults_apply(dg_cfg_t *c)
     c->fp_lift_timeout_ms = 10000;  /* 抬手确认兜底:成像判释放的等待上限(见 cfg.h) */
     snprintf(c->fp_uart_dev, sizeof(c->fp_uart_dev), "/dev/ttyS8");
     snprintf(c->iccard_dev_path, sizeof(c->iccard_dev_path), "/dev/dg_iccard0");
-    c->iccard_enabled = 1;
+    /* 2026-10-19 起默认 0:读卡链路挂起,业务与 UI 同关。旧配置缺此段时
+     * 若默认 1,IC 入口会「复活」(板上实测 cur_config.json 无 iccard 段) */
+    c->iccard_enabled = 0;
     /* MQTT:默认整链路关(见 cfg.h 注;broker 未定,先立配置面与服务骨架) */
     c->mqtt_enabled = 0;
     c->mqtt_uri[0] = '\0';
