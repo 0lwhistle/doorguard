@@ -31,6 +31,7 @@
 #include "presenters/presenter_capture.h"
 #include "theme.h"
 #include "types.h"
+#include "ui_features.h"
 #include "valid_ui.h"
 #include "widgets/dg_avatar.h"
 #include "widgets/dg_btn.h"
@@ -216,6 +217,8 @@ static void flags_text(uint32_t flags, char *buf, size_t cap)
     for (int i = 0; i < 4 && off < cap; i++) {
         if (!(flags & nm[i].bit))
             continue;
+        if (nm[i].bit == DG_AUTH_IC && !dg_ui_ic_enabled())
+            continue;                /* IC UI 挂起:旧数据里的位不展示 */
         const int n = snprintf(buf + off, cap - off, "%s%s", off ? "/" : "",
                                nm[i].name);
         if (n < 0)
@@ -321,16 +324,18 @@ static void refresh(void)
         val_set(s_val_finger, _("无"));
     dg_btn_set_label(s_btn_finger, dg_ui_finger_btn_text(s_fp_cnt));
 
-    /* IC 行:卡号展示一律掩码(spec-database §3) */
-    if (s_ic_enrolling)
-        val_set(s_val_ic, _("请刷卡..."));
-    else if (rec.ic_card[0]) {
-        char masked[16];
-        mask_card(rec.ic_card, masked, sizeof(masked));
-        val_set(s_val_ic, masked);
-    } else
-        val_set(s_val_ic, _("无"));
-    dg_btn_set_label(s_btn_ic, dg_ui_ic_btn_text(rec.ic_card[0] != '\0'));
+    /* IC 行:卡号展示一律掩码(spec-database §3);UI 挂起时整行未建 */
+    if (s_val_ic) {
+        if (s_ic_enrolling)
+            val_set(s_val_ic, _("请刷卡..."));
+        else if (rec.ic_card[0]) {
+            char masked[16];
+            mask_card(rec.ic_card, masked, sizeof(masked));
+            val_set(s_val_ic, masked);
+        } else
+            val_set(s_val_ic, _("无"));
+        dg_btn_set_label(s_btn_ic, dg_ui_ic_btn_text(rec.ic_card[0] != '\0'));
+    }
 
     /* 头像预览:草稿期用内存图(dg_avatar_decode),已落库才走 DB 缓存。
      * 人脸行加高到 128,预览 96×96 */
@@ -440,6 +445,10 @@ static void on_role(lv_event_t *e)
 static void apply_flags_multi(void *ud, uint32_t mask)
 {
     (void)ud;
+    /* IC 项被 UI 挂起时不在弹窗里,保存不得顺手清掉库里的旧位
+     * (恢复 IC 后用户无需重开方式) */
+    if (!dg_ui_ic_enabled())
+        mask |= s_flags_draft & DG_AUTH_IC;
     if (mask != s_flags_draft) {
         s_flags_draft = mask;
         s_dirty = true;
@@ -487,7 +496,10 @@ static void on_auth(lv_event_t *e)
     };
     const uint32_t cur = s_add_mode ? s_flags_draft : eff_flags();
 
-    for (int i = 0; i < 4; i++) {
+    /* IC 固定为第 4 项:挂起时只截短计数,前 3 项顺序不变——
+     * multi 弹窗回传的 mask 按 1<<序号,截尾不会打乱位序 */
+    const int cnt = dg_ui_ic_enabled() ? 4 : 3;
+    for (int i = 0; i < cnt; i++) {
         if (avail[i])
             snprintf(items[i], sizeof(items[i]), "%s", names[i]);
         else
@@ -503,7 +515,7 @@ static void on_auth(lv_event_t *e)
         .items = item_p,
         .enabled = enabled,
         .checked = checked,
-        .cnt = 4,
+        .cnt = cnt,
         .on_confirm = apply_flags_multi,
     };
     dg_popup_multi(&cfg);
@@ -601,6 +613,8 @@ static void apply_ic_unbind(void *ud, int idx)
 static void on_ic(lv_event_t *e)
 {
     (void)e;
+    if (!dg_ui_ic_enabled())
+        return;                          /* 入口本就不建,防御未来复用 */
     if (s_add_mode) {
         dg_popup_fail(_("请先保存用户"), 1500, NULL, NULL);
         return;
@@ -889,8 +903,14 @@ void page_user_edit_create(lv_obj_t *parent)
     row = row_create(col, _("指纹"), &s_val_finger, NULL);
     s_btn_finger = row_action_btn_label(row, _("录入"), on_finger);
 
-    row = row_create(col, _("IC卡"), &s_val_ic, NULL);
-    s_btn_ic = row_action_btn_label(row, _("录入"), on_ic);
+    /* IC 行:读卡链路挂起期间整行不建(见 ui_features.h) */
+    if (dg_ui_ic_enabled()) {
+        row = row_create(col, _("IC卡"), &s_val_ic, NULL);
+        s_btn_ic = row_action_btn_label(row, _("录入"), on_ic);
+    } else {
+        s_val_ic = NULL;
+        s_btn_ic = NULL;
+    }
 
     /* 删除用户:编辑列表最下一项(仅 EDIT;ADD 无此选项)。删除类操作=红 */
     s_row_del = dg_btn_create_danger(col, LV_SYMBOL_TRASH, _("删除用户"));

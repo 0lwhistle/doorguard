@@ -11,6 +11,7 @@
 #include "bridge/bridge.h"
 #include "i18n.h"
 #include "ui_events.h"
+#include "ui_features.h"
 #include "widgets/dg_popup.h"
 #include "valid_ui.h"
 #include "dg_log.h"
@@ -95,7 +96,7 @@ static void show_method_picker(uint32_t flags)
         labels[n] = _("密码");
         s_pick_methods[n++] = DG_METHOD_PWD;
     }
-    if (flags & DG_AUTH_IC) {
+    if (dg_ui_ic_enabled() && (flags & DG_AUTH_IC)) {
         labels[n] = _("IC卡");
         s_pick_methods[n++] = DG_METHOD_IC;
     }
@@ -199,7 +200,7 @@ static void home_on_evt(const ui_evt_t *evt)
             text = _("请按指纹");
         else if (h->method == DG_METHOD_PWD)
             text = _("请输入密码");
-        else if (h->method == DG_METHOD_IC)
+        else if (h->method == DG_METHOD_IC && dg_ui_ic_enabled())
             text = _("请刷卡");
         page_home_set_hint(text);
         break;
