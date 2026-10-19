@@ -28,6 +28,11 @@ __pycache__/
 # 走查取证临时输出(DG_WALK_DUMP_DIR 截屏 bmp,见 display 后端)
 tmp_walk/
 
+# 开发文档与环境教程(2026-10-19 起不随公开仓库分发,本地保留)
+# 公开仓库只留根 README 与代码旁各模块 README
+docs/
+env/README.md
+
 # 内部工作流文档与简历材料(公开仓库不展示,本地保留,历史可取回)
 PROJECT_PLAN.md
 docs/RESUME_PROJECT.md

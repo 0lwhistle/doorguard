@@ -2,7 +2,6 @@
 
 RK3576 K7 人脸识别门禁主应用。业务规格唯一权威:仓库根 `.agents/skills/door-guard-dev/references/`
 (五份:spec-database / spec-auth-business / spec-ui / spec-network / architecture)。
-架构 v2 方案与迁移映射:仓库根 `docs/architecture-v2-proposal.md`(2026-09-20 评审通过)。
 
 ## 构建/测试/部署
 
@@ -40,7 +39,7 @@ tests/web/web_test.sh        # web 上位机功能验收
 | `services/liveness/` | 活体占位(接口预留;认证管线强制阶段) | — |
 | `services/verify/` | 各验证方式 provider:face(vision)/ fingerprint(fp_provider)/ ic(card_provider);认证判定经事件总线走 FSM,无统一 provider 抽象(v2 草案 auth_provider.h 已废) | services/verify/ic/README.md |
 | `services/web/` | web 上位机(mongoose 统一事件循环 + Vue 前端 `frontend/`,产物内嵌) | services/web/README.md |
-| `services/ota/` | OTA(流式+sha256,方案 docs/tech/OTA_PLAN.md) | — |
+| `services/ota/` | OTA(流式+sha256,A/B 换槽) | — |
 | `services/ntp/` `services/mdns/` | 时间同步 / mDNS 服务通告 | — |
 | `services/mqtt/` | MQTT 上位机通道(mg_mqtt on netcore,默认关;命令订阅/事件上报/扩展口) | services/mqtt/README.md |
 | `modules/net/` | 网络模块(net_info 网口信息 + **netcore** 统一事件循环:web/OTA/NTP/mDNS/MQTT 的唯一传输层) | modules/net/README.md |
@@ -55,6 +54,6 @@ tests/web/web_test.sh        # web 上位机功能验收
 - 规格与边界用例:`services/access/README.md` + `tests/test_auth_fsm.c`
 - 模拟器全流程走查步骤:`services/access/README.md` 底部
 
-## 待硬件确认清单(动态,详见 docs/DEVLOG.md)
+## 待硬件确认清单(动态)
 
 继电器引脚/类型 · 指纹与读卡协议(UART) · 摄像头 rkaiq+V4L2 链路(B6/B7) · 触摸 GT9xx(待 B5 固件)
