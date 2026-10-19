@@ -169,6 +169,10 @@ static lv_obj_t *row_create(lv_obj_t *parent, const char *title,
 
 static void val_set(lv_obj_t *lbl, const char *text)
 {
+    /* 功能门控会整行不建(如 IC 行),对应值指针为 NULL;刷新路径统一判空,
+     * 避免某一分支漏判把 NULL 送进 LVGL(2026-10-19 添加用户页实测挂死) */
+    if (!lbl || !text)
+        return;
     lv_label_set_text(lbl, text);
     lv_obj_set_style_text_color(lbl, DG_COL_TEXT(), 0);
     /* 「无」是占位不是数据:降透明度,与「已录入/已设置」拉开层级 */
