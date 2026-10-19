@@ -463,8 +463,11 @@ void dg_popup_multi(const dg_popup_multi_cfg_t *cfg)
         lv_obj_t *row = dg_btn_create_light(card, NULL, cfg->items[i]);
         lv_obj_set_size(row, LV_PCT(100), 76);
         if (cfg->enabled[i]) {
-            lv_obj_set_user_data(row, (void *)(intptr_t)i);
-            lv_obj_add_event_cb(row, multi_toggle, LV_EVENT_CLICKED, NULL);
+            /* 行号必须走事件 user_data:lv_event_get_user_data() 取的是注册
+             * 回调时传入的指针,不是 lv_obj_set_user_data() 的控件数据。
+             * 此前回调传 NULL ⇒ idx 恒为 0,点「指纹」实际切换的是「人脸」 */
+            lv_obj_add_event_cb(row, multi_toggle, LV_EVENT_CLICKED,
+                                (void *)(intptr_t)i);
         } else {
             lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_set_style_text_opa(row, DG_OPA_TEXT_DIM, 0);
@@ -474,6 +477,9 @@ void dg_popup_multi(const dg_popup_multi_cfg_t *cfg)
          * 直接改其文本会破坏轻量按钮语义,这里另立一个浮层 label) */
         lv_obj_t *sym = lv_label_create(row);
         lv_label_set_text(sym, LV_SYMBOL_OK);
+        /* 全局默认字体 dg_font_cn_16 只含 ASCII+汉字,不含 LVGL 符号字形;
+         * 勾选标记须显式挂 montserrat,否则渲染成缺字方框(同 dg_btn 图标槽) */
+        lv_obj_set_style_text_font(sym, &lv_font_montserrat_28, 0);
         lv_obj_set_style_text_color(sym, DG_COL_OK(), 0);
         lv_obj_align(sym, LV_ALIGN_LEFT_MID, 20, 0);
         if (!cfg->checked[i])
