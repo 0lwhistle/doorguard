@@ -59,3 +59,6 @@ sdk-guide/docs/
 # 本地一次性脚本与前端开发构建产物
 stage_cmake_hunk.py
 door-guard/services/web/frontend/dist-dev/
+
+# archify 图表产物(本地保留,2026-10-20 起不随公开仓库分发)
+.archify/
