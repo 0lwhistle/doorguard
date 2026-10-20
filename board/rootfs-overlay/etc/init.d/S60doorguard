@@ -33,6 +33,52 @@ export DG_UI_PLANE="${DG_UI_PLANE:-1}"
 
 log() { echo "$(date '+%F %T') $*" >>"$LOG"; }
 
+# ---- 网络单客户端治理(2026-10-20)----
+# 病根(buildroot 默认装配,板上实证):S40 ifup 起的 busybox udhcpc 与 S41
+# 的 dhcpcd 同时对 eth0 跑 DHCP,client-id 不同(MAC vs DUID)在路由器侧是
+# 两个租户,互踢 + 双地址/双默认路由打架,偶发"重启后连不上";且两边租约
+# 都不持久,每次上电全新 DISCOVER,地址逐次漂移(.96→.98→.95)。
+# 收敛:eth0 归 udhcpc 独管(ifup 那份实测能绑定续租,dhcpcd 在此板从未绑定
+# 成功),每次 start 换成本脚本的受管实例:地址记入 /userdata/doorguard/
+# last_ip,下次以 -r 请求同址对抗漂移。-9 杀(不给机会发 RELEASE/删地址;
+# 断电重启本来也没有 ifdown)。S60 在 S41 之后跑,治理结果即开机终态。
+net_govern() {
+    if [ -f /var/run/dhcpcd/pid ]; then
+        kill -9 "$(cat /var/run/dhcpcd/pid)" 2>/dev/null
+        rm -f /var/run/dhcpcd/pid
+    fi
+    killall -9 dhcpcd 2>/dev/null
+    ip link set eth0 up 2>/dev/null
+    # eth0 的 udhcpc 一律换受管实例(restart 场景同参重建:-r 同址秒级重绑)。
+    # -S 让租约事件进 syslog 便于排障;其余参数与 ifup 模板一致
+    [ -f /var/run/udhcpc.eth0.pid ] && kill -9 "$(cat /var/run/udhcpc.eth0.pid)" 2>/dev/null
+    lastip="$(cat /userdata/doorguard/last_ip 2>/dev/null)"
+    if [ -n "$lastip" ]; then
+        udhcpc -t1 -A3 -b -R -S -r "$lastip" -O search -O staticroutes \
+            -p /var/run/udhcpc.eth0.pid -i eth0 >/dev/null 2>&1 &
+    else
+        udhcpc -t1 -A3 -b -R -S -O search -O staticroutes \
+            -p /var/run/udhcpc.eth0.pid -i eth0 >/dev/null 2>&1 &
+    fi
+    # eth1 无线缆:ifup 起的那份 udhcpc 纯空转,停掉
+    [ -f /var/run/udhcpc.eth1.pid ] && kill -9 "$(cat /var/run/udhcpc.eth1.pid)" 2>/dev/null
+    # 后台记录本次拿到的地址(等 DHCP 落地,60s 上限;链路协商 ~5s,不拖慢启动)
+    (
+        n=0
+        while [ "$n" -lt 60 ]; do
+            ip="$(ip -4 addr show dev eth0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)"
+            case "$ip" in
+                ""|169.254.*) sleep 1; n=$((n + 1)); continue ;;
+            esac
+            mkdir -p /userdata/doorguard
+            [ "$(cat /userdata/doorguard/last_ip 2>/dev/null)" = "$ip" ] || \
+                echo "$ip" > /userdata/doorguard/last_ip
+            break
+        done
+    ) &
+    log "网络治理:udhcpc 独管 eth0(上次地址 ${lastip:-无})"
+}
+
 aiq_restart() {
     killall rkaiq_3A_server 2>/dev/null
     start-stop-daemon -K -p /tmp/.rkaiq_3A 2>/dev/null
@@ -136,6 +182,7 @@ case "$1" in
     { [ -f "$SLOT_A" ] || [ -f "$SLOT_B" ] || [ -f "$DAEMON" ]; } || {
         echo "door-guard 不存在,跳过"; exit 0; }
     mkdir -p "$STATE"
+    net_govern                                  # 网络单客户端治理(见函数头注释)
     # IC 读卡 A 路方案(2026-10-14):内核 k7_rc522 退役(spi-gpio 总线上 probe
     # 必败且 rmmod 有段错误风险),用户态 iccard_daemon 经 spidev 直驱 RC522,
     # 帧进 FIFO(/tmp/dg_iccard.fifo)交付应用,应用侧配置 iccard.dev_path 已
