@@ -3,7 +3,8 @@
  *
  * 定位:设备 ↔ 平台的消息干道,跑在 netcore 统一事件循环(与 web/NTP/mDNS
  * 同一传输层,mongoose mg_mqtt)。默认关闭(cfg mqtt.enabled),broker 地址
- * 属部署参数;开启后自动重连、掉线遗嘱(LWT)、验证事件上报、远程命令订阅。
+ * 属部署参数;开启后按网络门控(标志位+EV_NET_ADDR 回调,不轮询联网)自动
+ * 重连、掉线遗嘱(LWT)、验证事件上报、远程命令订阅。
  *
  * 主题方案(<prefix> = cfg mqtt.topic_prefix,默认 doorguard):
  *   <prefix>/status        retain,设备在线状态("online"/"offline" LWT)
@@ -37,7 +38,10 @@ extern "C" {
 #endif
 
 /** 启动服务。cfg mqtt.enabled=0 → 空转(记一条日志即返回,不建连接);
- *  幂等。netcore 须已启动(依赖声明在装配层)。 */
+ *  幂等。netcore 须已启动(依赖声明在装配层)。
+ *  网络门控:主接口有 IPv4 才允许建连——初值取启动瞬间快照,此后跟随
+ *  EV_NET_ADDR(地址丢失挂起并主动告别,就绪立即补连;本机 IP 变更强制
+ *  重连)。broker 暂不可达仍走内部退避重连,与门控无关。 */
 int mqtt_service_start(void);
 
 /** 停服:断开连接、撤重连定时器、注销总线订阅。幂等。 */

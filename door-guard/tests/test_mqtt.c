@@ -7,7 +7,9 @@
  * 覆盖:未启用空转(start 仍 OK、不建连接)/ 连接握手(CONNECT+订阅
  * cmd/+ + status retain 上线发布)/ 内置命令 ping 往返(rsp/pong)/
  * 未知命令回 unknown-cmd / 自定义命令注册(mqtt_cmd_register 扩展口)/
- * 业务上报 mqtt_publish_json / 验证事件转发 event/auth / 停服发 offline。
+ * 业务上报 mqtt_publish_json / 验证事件转发 event/auth / 停服发 offline /
+ * 网络门控(EV_NET_ADDR 无地址不建连、就绪立即补连、断网显式 offline、
+ * 恢复重连)。
  */
 #include "dg_test.h"
 
@@ -187,6 +189,12 @@ static void t_enabled(void)
     DG_CHECK(mqtt_sub_register("ota/version", sub_capture) == DG_ERR_PARAM); /* 重名拒 */
     DG_CHECK(mqtt_cmd_register("ping", cmd_echo) == DG_ERR_PARAM);  /* 重名拒 */
     DG_CHECK(mqtt_service_start() == DG_OK);
+    /* 网络门控:宿主可能无非回环 IPv4,显式通告就绪(已就绪则无转移),
+     * 保证后续建连断言与宿主网络环境无关 */
+    ev_net_addr_t ev0;
+    memset(&ev0, 0, sizeof(ev0));
+    ev0.have_ip = true;
+    EVENT_BUS_PUBLISH(EV_NET_ADDR, &ev0);
 
     for (int i = 0; i < 100 && !mqtt_service_connected(); i++) {
         br_pump(20);
@@ -268,6 +276,60 @@ static void t_enabled(void)
     DG_CHECK(mqtt_service_connected() == false);
 }
 
+/* EV_NET_ADDR 通告助手(bus 同步派发 → 处理器 netcore_post → loop 转移) */
+static void pub_net(bool have_ip)
+{
+    ev_net_addr_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.have_ip = have_ip;
+    EVENT_BUS_PUBLISH(EV_NET_ADDR, &ev);
+}
+
+/* 等到 connected==want(最多 ~4s),期间泵 broker */
+static int wait_connected(bool want)
+{
+    for (int i = 0; i < 100; i++) {
+        if (mqtt_service_connected() == want)
+            return 1;
+        br_pump(20);
+        usleep(20 * 1000);
+    }
+    return mqtt_service_connected() == want;
+}
+
+static void t_net_gate(void)
+{
+    printf("[M7] 网络门控:无地址不建连(broker 可达也不连)\n");
+    cfg_write(true, s_port);
+    atomic_store(&s_br_connects, 0);          /* t_enabled 的握手计数清零 */
+    atomic_store(&s_br_subscribes, 0);
+    DG_CHECK(mqtt_service_start() == DG_OK);
+
+    pub_net(false);                           /* 丢失沿:挂起 */
+    br_pump(300);
+    usleep(100 * 1000);
+    br_pump(200);
+    DG_CHECK(mqtt_service_connected() == false);
+    DG_CHECK(atomic_load(&s_br_connects) == 0);   /* 门控:一次 CONNECT 都没有 */
+
+    printf("[M8] 地址就绪立即补连;运行中断网显式 offline;恢复重连\n");
+    pub_net(true);
+    DG_CHECK(wait_connected(true));           /* 就绪沿:退避复位立即补连 */
+    DG_CHECK(atomic_load(&s_br_connects) == 1);
+
+    atomic_store(&s_br_pub_cnt, 0);
+    pub_net(false);
+    DG_CHECK(wait_connected(false));          /* 断网挂起 */
+    const br_pub_t *st = br_find("dgtest/status");
+    DG_CHECK(st != NULL && strcmp(st->payload, "{\"state\":\"offline\"}") == 0);
+
+    pub_net(true);
+    DG_CHECK(wait_connected(true));           /* 恢复:重连 */
+    DG_CHECK(atomic_load(&s_br_connects) == 2);
+
+    mqtt_service_stop();
+}
+
 int main(void)
 {
     DG_CHECK(event_bus_init() == EVENT_BUS_OK);
@@ -295,6 +357,7 @@ int main(void)
 
     t_disabled();
     t_enabled();
+    t_net_gate();
 
     netcore_stop();
     mg_mgr_free(&s_br_mgr);

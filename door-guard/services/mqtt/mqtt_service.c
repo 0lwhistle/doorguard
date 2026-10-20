@@ -3,8 +3,14 @@
  *
  * 状态机(loop 线程内):IDLE → CONNECTING(TCP+CONNECT) → CONNECTED
  * (CONNACK ack==0)→ 断开/失败 → 退避重连(5/10/20/60s 封顶,连上即复位)。
+ * 网络门控(2026-10-20):订阅 EV_NET_ADDR 维护 s_net_ready 标志——主接口无
+ * IPv4 时不发起任何连接(不再拿连接尝试当探测),就绪沿退避复位立即补连;
+ * 丢失沿显式发 offline 告别后挂起。已连接时本机 IP 变更 → 强制重连(不等
+ * keepalive 半开超时)。broker 级退避重连保留:"有地址但 broker 暂不可达"
+ * 不叫断网,仍由连接状态机自己管。
+ *
  * 遗嘱(LWT)<prefix>/status="offline" retain:设备异常掉线,平台靠 retain
- * 拿到终态;正常停服主动发 offline 覆盖。
+ * 拿到终态;正常停服/断网挂起主动发 offline 覆盖。
  *
  * 命令应答协议:<prefix>/cmd/<name> 收到 → 查注册表(内置 ping/status/open)
  * → 处理 → <prefix>/rsp/<name> 回 {"ok":true[,…]} 或 {"ok":false,"err":"…"};
@@ -51,6 +57,9 @@ static int     s_backoff_s = MQTT_BACKOFF_MIN_S;
 static int64_t s_last_rx_ms = 0;
 static bool    s_ping_out = false;          /* PINGREQ 已发未答 */
 static char    s_prefix[32];                /* 主题前缀副本(启动时定格) */
+static bool    s_net_ready = false;         /* 主接口有 IPv4(无地址不建连) */
+static char    s_conn_ip[16];               /* 本次连接的本机 IP(EV_NET_ADDR 比对变更) */
+static bool    s_reconnect_fast = false;    /* IP 变更强制重连:CLOSE 时跳过退避 */
 
 typedef struct {
     char name[MQTT_CMD_NAME_MAX];
@@ -344,9 +353,14 @@ static void mqtt_cb(struct mg_connection *c, int ev, void *ev_data)
         s_conn = NULL;
         atomic_store(&s_connected, false);
         if (atomic_load(&s_running) && enabled_now()) {
-            s_next_retry_ms = (int64_t)mg_millis() + s_backoff_s * 1000;
-            s_backoff_s = s_backoff_s * 2 > MQTT_BACKOFF_MAX_S
-                              ? MQTT_BACKOFF_MAX_S : s_backoff_s * 2;
+            if (s_reconnect_fast) {          /* 本机 IP 变更强制重连:不退避 */
+                s_reconnect_fast = false;
+                s_next_retry_ms = (int64_t)mg_millis();
+            } else {
+                s_next_retry_ms = (int64_t)mg_millis() + s_backoff_s * 1000;
+                s_backoff_s = s_backoff_s * 2 > MQTT_BACKOFF_MAX_S
+                                  ? MQTT_BACKOFF_MAX_S : s_backoff_s * 2;
+            }
             if (was_conn) {
                 DG_LOGW(TAG, "连接断开,退避后重连");
                 pub_state(false, DG_ERR_NETWORK);
@@ -355,11 +369,11 @@ static void mqtt_cb(struct mg_connection *c, int ev, void *ev_data)
     }
 }
 
-/* loop 线程:发起连接 */
+/* loop 线程:发起连接(网络门控:主接口无 IPv4 直接返回,定时器也不会放行) */
 static void connect_once(void *arg)
 {
     (void)arg;
-    if (!atomic_load(&s_running) || !enabled_now() || s_conn)
+    if (!atomic_load(&s_running) || !enabled_now() || !s_net_ready || s_conn)
         return;
     const dg_cfg_t *cfg = cfg_get();
     if (!cfg->mqtt_uri[0]) {
@@ -367,16 +381,17 @@ static void connect_once(void *arg)
         return;
     }
 
+    char cid_ip[16] = "0.0.0.0";                /* IPv4 点分最长 15+NUL */
+    net_info_primary_ipv4(cid_ip, sizeof(cid_ip));      /* 失败保持 0.0.0.0 */
+    snprintf(s_conn_ip, sizeof(s_conn_ip), "%s", cid_ip);
+
     char client_id[64];
     if (cfg->mqtt_client_id[0]) {
         snprintf(client_id, sizeof(client_id), "%s", cfg->mqtt_client_id);
     } else {
-        char ip[64] = "0.0.0.0";
-        if (net_info_primary_ipv4(ip, sizeof(ip)) != DG_OK)
-            snprintf(ip, sizeof(ip), "0.0.0.0");
-        const char *dot = strrchr(ip, '.');
+        const char *dot = strrchr(cid_ip, '.');
         snprintf(client_id, sizeof(client_id), "doorguard-%s",
-                 dot ? dot + 1 : ip);
+                 dot ? dot + 1 : cid_ip);
     }
 
     char will_topic[64];
@@ -414,7 +429,7 @@ static void drain_mailbox(void *arg)
 static void timer_fn(void *arg)
 {
     (void)arg;
-    if (!atomic_load(&s_running) || !enabled_now())
+    if (!atomic_load(&s_running) || !enabled_now() || !s_net_ready)
         return;
 
     const int64_t now = (int64_t)mg_millis();
@@ -442,6 +457,22 @@ static void timer_start(void *arg)
     s_next_retry_ms = (int64_t)mg_millis();   /* 立即首连 */
 }
 
+/* loop 线程:对在途连接发 status=offline retain 告别。直发不经 pub_now——
+ * 调用点已把(或将把)s_connected 置 false,经它会被"未连接"守卫拦掉。
+ * is_draining 而非 is_closing:轮询循环对 is_closing 连接跳过写阶段直接关,
+ * 待发的告别包会被吞掉;draining = 排空 send 后才关(mongoose 优雅收尾语义)。
+ * 调用方负责置 is_draining / 清 s_conn。 */
+static void conn_announce_offline(struct mg_connection *c)
+{
+    struct mg_mqtt_opts o = { 0 };
+    char topic[96];   /* prefix(31)+suffix(47)+分隔,64 会截断 */
+    topic_full(topic, sizeof(topic), "status");
+    o.topic = mg_str(topic);
+    o.message = mg_str("{\"state\":\"offline\"}");
+    o.retain = true;
+    mg_mqtt_pub(c, &o);
+}
+
 static void timer_stop(void *arg)
 {
     (void)arg;
@@ -450,21 +481,70 @@ static void timer_stop(void *arg)
         s_timer = NULL;
     }
     if (s_conn) {
-        /* 主动告别覆盖 LWT;直发不经 pub_now——stop() 已把 s_connected
-         * 置 false,经它会被"未连接"守卫拦掉。is_draining 而非 is_closing:
-         * 轮询循环对 is_closing 连接跳过写阶段直接关,待发的告别包会被
-         * 吞掉;draining = 排空 send 后才关(mongoose 的优雅收尾语义) */
-        struct mg_mqtt_opts o = { 0 };
-        char topic[96];   /* prefix(31)+suffix(47)+分隔,64 会截断 */
-        topic_full(topic, sizeof(topic), "status");
-        o.topic = mg_str(topic);
-        o.message = mg_str("{\"state\":\"offline\"}");
-        o.retain = true;
-        mg_mqtt_pub(s_conn, &o);
+        conn_announce_offline(s_conn);        /* 主动告别覆盖 LWT */
         s_conn->is_draining = 1;
         s_conn = NULL;
     }
     atomic_store(&s_connected, false);
+}
+
+/* ---- 网络门控(标志位状态机:EV_NET_ADDR → loop 线程转移) ---- */
+
+/* loop 线程:主接口地址丢失。冻结重连;连接中则显式告别后挂起——平台侧
+ * 立刻拿到 offline 终态,不等 broker LWT(拔线场景没有 DISCONNECT,LWT
+ * 要等 keepalive 判死)或本端 90s 半开检测。 */
+static void net_down_apply(void *arg)
+{
+    (void)arg;
+    if (!s_net_ready)
+        return;
+    s_net_ready = false;
+    if (!atomic_load(&s_running) || !enabled_now())
+        return;
+    DG_LOGW(TAG, "主接口地址丢失,MQTT 连接挂起(就绪后自动补连)");
+    if (s_conn) {
+        conn_announce_offline(s_conn);
+        s_conn->is_draining = 1;
+        s_conn = NULL;
+        if (atomic_exchange(&s_connected, false))
+            pub_state(false, DG_ERR_NETWORK);
+    }
+}
+
+/* loop 线程:主接口就绪。退避复位、立即补连(经 1s 定时器)。已连接时只
+ * 处理"本机 IP 变更":换址后旧 TCP 迟早是死的,主动强制重连,不等半开
+ * 检测兜底。 */
+static void net_up_apply(void *arg)
+{
+    (void)arg;
+    if (s_net_ready) {
+        if (!s_conn || !s_conn_ip[0])
+            return;
+        char ip[16] = "0.0.0.0";
+        if (net_info_primary_ipv4(ip, sizeof(ip)) != DG_OK ||
+            !strcmp(ip, s_conn_ip))
+            return;
+        DG_LOGW(TAG, "本机 IP 变更(%s → %s),强制重连", s_conn_ip, ip);
+        snprintf(s_conn_ip, sizeof(s_conn_ip), "%s", ip);
+        s_reconnect_fast = true;
+        s_conn->is_closing = 1;               /* CLOSE → 立即补连(跳过退避) */
+        return;
+    }
+    s_net_ready = true;
+    if (!atomic_load(&s_running) || !enabled_now())
+        return;                               /* 标志已记账;启停动作留给 start/stop */
+    s_backoff_s = MQTT_BACKOFF_MIN_S;
+    s_next_retry_ms = (int64_t)mg_millis();
+    DG_LOGI(TAG, "主接口就绪,恢复 MQTT 连接");
+}
+
+/* 总线线程(EV_NET_ADDR 发布者线程):只投递,状态转移全部落到 loop 线程 */
+static int on_net_addr(const event_t *e, void *ud)
+{
+    (void)ud;
+    const ev_net_addr_t *a = (const ev_net_addr_t *)e->data;
+    netcore_post(a->have_ip ? net_up_apply : net_down_apply, NULL);
+    return 0;
 }
 
 /* ---- 总线订阅(总线线程):验证事件/看门狗处置 → 邮箱 ---- */
@@ -507,6 +587,7 @@ static int on_service_state(const event_t *e, void *ud)
 
 static event_subscription_t *s_sub_auth;
 static event_subscription_t *s_sub_svc;
+static event_subscription_t *s_sub_net;
 
 /* ---- 公共 API ---- */
 
@@ -532,10 +613,19 @@ int mqtt_service_start(void)
     }
 
     s_backoff_s = MQTT_BACKOFF_MIN_S;
+    /* 网络门控初值:启动瞬间如实快照(此时地址已在 → 立即首连;还没有 →
+     * 挂起等 EV_NET_ADDR,不空转重试)。事件在 web 停发/错过也无损:盲连
+     * 兜底虽已撤,但 web 每 5s 巡检地址变化,启动序无论谁先谁后总能对齐 */
+    net_info_addr_t ia;
+    s_net_ready = (net_info_read(&ia) == DG_OK && ia.have_ip);
+    if (!s_net_ready)
+        DG_LOGI(TAG, "开机尚无网络地址,挂起待 EV_NET_ADDR 门控放行");
     s_sub_auth = event_bus_subscribe(EV_AUTH_RESULT, on_auth_result, NULL);
     s_sub_svc = event_bus_subscribe(EV_SYS_SERVICE_STATE, on_service_state, NULL);
+    s_sub_net = event_bus_subscribe(EV_NET_ADDR, on_net_addr, NULL);
     netcore_post(timer_start, NULL);
-    DG_LOGI(TAG, "mqtt 服务启动(%s,前缀 %s)", cfg->mqtt_uri, s_prefix);
+    DG_LOGI(TAG, "mqtt 服务启动(%s,前缀 %s,网络%s)",
+            cfg->mqtt_uri, s_prefix, s_net_ready ? "就绪" : "未就绪");
     return DG_OK;
 }
 
@@ -556,6 +646,10 @@ void mqtt_service_stop(void)
     if (s_sub_svc) {
         event_bus_unsubscribe(s_sub_svc);
         s_sub_svc = NULL;
+    }
+    if (s_sub_net) {
+        event_bus_unsubscribe(s_sub_net);
+        s_sub_net = NULL;
     }
     DG_LOGI(TAG, "mqtt 服务停止(邮箱丢弃累计 %d)", s_mbox_dropped);
 }
