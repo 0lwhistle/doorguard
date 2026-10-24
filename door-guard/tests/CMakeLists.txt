@@ -114,7 +114,7 @@ add_executable(test_web_auth test_web_auth.c
     ${CMAKE_SOURCE_DIR}/services/web/web_auth.c
     ${CMAKE_SOURCE_DIR}/services/web/web_session.c)
 target_include_directories(test_web_auth PRIVATE ${CMAKE_SOURCE_DIR}/services/web)
-target_link_libraries(test_web_auth PRIVATE dg_storage dg_proto crypto pthread)
+target_link_libraries(test_web_auth PRIVATE dg_storage dg_proto dg_timeutil crypto pthread)
 add_test(NAME test_web_auth COMMAND test_web_auth)
 set_tests_properties(test_web_auth PROPERTIES TIMEOUT 60)
 
@@ -137,7 +137,7 @@ add_executable(test_net_info test_net_info.c
 target_include_directories(test_net_info PRIVATE
     ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto ${CMAKE_SOURCE_DIR}/services/config
     ${CMAKE_SOURCE_DIR}/modules/net)
-target_link_libraries(test_net_info PRIVATE dg_log dg_config)
+target_link_libraries(test_net_info PRIVATE dg_log dg_config dg_timeutil)
 add_test(NAME test_net_info COMMAND test_net_info)
 set_tests_properties(test_net_info PROPERTIES TIMEOUT 30)
 
