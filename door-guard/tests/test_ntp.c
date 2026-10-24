@@ -50,7 +50,7 @@ static void *srv_thread(void *arg)
         uint64_t frac = (uint64_t)((double)ts.tv_nsec / 1e9 * 4294967296.0);
         uint8_t rep[48] = { 0 };
         rep[0] = 0x24;                       /* LI=0 VN=4 Mode=4(server) */
-        rep[1] = 0;                          /* stratum */
+        rep[1] = 1;                          /* stratum(0=KISS-OF-DEATH,mg_sntp 拒收) */
         for (int i = 0; i < 8; i++)
             rep[40 + i] = (uint8_t)(sec >> (56 - 8 * i));   /* transmit sec */
         for (int i = 0; i < 8; i++)
