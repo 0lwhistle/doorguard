@@ -7,7 +7,9 @@
  *   重定向超环数拒绝。零外部依赖。
  */
 #include "dg_test.h"
-#include "ota_http.h"
+/* ota_http 无独立头(唯一消费方 ota_update 经 ota_update.h 的原型):
+ * 本测试复用同一组声明 */
+#include "ota_update.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
