@@ -17,7 +17,12 @@
 
 static lv_obj_t *s_popup = NULL;      /* 当前弹窗遮罩(单实例) */
 
-static result_ctx_t s_result;        /* 结果弹窗的关闭回调(超时/手动关闭共用) */
+/* 结果弹窗的关闭回调(超时/手动关闭共用;C6-9) */
+typedef struct {
+    void (*on_close)(void *);
+    void *ud;
+} result_ctx_t;
+static result_ctx_t s_result;
 
 static void close_internal(void)
 {
@@ -100,11 +105,6 @@ static lv_obj_t *icon_create(lv_obj_t *card, const char *sym, lv_color_t color)
 }
 
 /* ---- 结果弹窗(成功/失败共用) ---- */
-
-typedef struct {
-    void (*on_close)(void *);
-    void *ud;
-} result_ctx_t;
 
 static void result_timer_cb(lv_timer_t *t)
 {
