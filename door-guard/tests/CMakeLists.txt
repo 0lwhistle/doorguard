@@ -151,7 +151,11 @@ add_test(NAME test_ota COMMAND test_ota)
 set_tests_properties(test_ota PROPERTIES TIMEOUT 120)
 
 # OTA HTTP 客户端(手写协议层):回环假源(2026-10-25 B8-4)
-dg_add_test(test_ota_http dg_ota)
+add_executable(test_ota_http test_ota_http.c)
+target_include_directories(test_ota_http PRIVATE
+    ${CMAKE_SOURCE_DIR}/services/ota ${CMAKE_SOURCE_DIR}/proto)
+target_link_libraries(test_ota_http PRIVATE dg_ota)
+add_test(NAME test_ota_http COMMAND test_ota_http)
 set_tests_properties(test_ota_http PROPERTIES TIMEOUT 30)
 
 # NTP 服务 socket 层:回环 SNTP 假源(2026-10-25 B8-5;离线环境 SKIP)
