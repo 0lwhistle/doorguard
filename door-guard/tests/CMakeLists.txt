@@ -161,7 +161,8 @@ set_tests_properties(test_ota_http PROPERTIES TIMEOUT 30)
 # NTP 服务 socket 层:回环 SNTP 假源(2026-10-25 B8-5;离线环境 SKIP)
 add_executable(test_ntp test_ntp.c)
 target_include_directories(test_ntp PRIVATE
-    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto ${CMAKE_SOURCE_DIR}/services)
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
+    ${CMAKE_SOURCE_DIR}/services/ntp ${CMAKE_SOURCE_DIR}/services/config)
 target_link_libraries(test_ntp PRIVATE dg_net dg_config dg_timeutil dg_event_bus dg_log)
 add_test(NAME test_ntp COMMAND test_ntp)
 set_tests_properties(test_ntp PROPERTIES TIMEOUT 60)
@@ -169,7 +170,8 @@ set_tests_properties(test_ntp PROPERTIES TIMEOUT 60)
 # mDNS 应答器 socket 层:回环单播查询(2026-10-25 B8-5;非 root/无组播 SKIP)
 add_executable(test_mdns_resp test_mdns_resp.c)
 target_include_directories(test_mdns_resp PRIVATE
-    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto ${CMAKE_SOURCE_DIR}/services)
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
+    ${CMAKE_SOURCE_DIR}/services/mdns ${CMAKE_SOURCE_DIR}/services/config)
 target_link_libraries(test_mdns_resp PRIVATE dg_net dg_storage dg_config dg_log)
 add_test(NAME test_mdns_resp COMMAND test_mdns_resp)
 set_tests_properties(test_mdns_resp PROPERTIES TIMEOUT 30)
