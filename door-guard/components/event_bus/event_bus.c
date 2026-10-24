@@ -435,7 +435,7 @@ event_bus_err_t event_bus_get_stats(uint32_t *events_published, uint32_t *events
     if (events_dropped != NULL)
         *events_dropped = atomic_load(&ctx->stats.events_dropped);
     if (handler_errors != NULL)
-        *events_handler_errors = atomic_load(&ctx->stats.handler_errors);
+        *handler_errors = atomic_load(&ctx->stats.handler_errors);
     return EVENT_BUS_OK;
 }
 
