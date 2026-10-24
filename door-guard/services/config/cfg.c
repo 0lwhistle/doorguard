@@ -633,11 +633,26 @@ static cJSON *parse_file(const char *path)
     FILE *f = fopen(path, "rb");
     if (!f)
         return NULL;
-    char buf[4096];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    /* 全量读入:固定 4KB 会把超长配置静默截断 → 解析失败按空重建 → 下次
+     * set 把用户配置整份覆盖丢失(B2-1);上限 4MB 兜住损坏/异常文件防 OOM */
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz <= 0 || sz > 4 * 1024 * 1024) {
+        fclose(f);
+        return NULL;
+    }
+    char *buf = malloc((size_t)sz + 1);
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
+    size_t n = fread(buf, 1, (size_t)sz, f);
     fclose(f);
     buf[n] = '\0';
-    return cJSON_Parse(buf);
+    cJSON *root = cJSON_Parse(buf);
+    free(buf);
+    return root;
 }
 
 int cfg_load(const char *default_path, const char *cur_path)
@@ -681,6 +696,10 @@ int cfg_load(const char *default_path, const char *cur_path)
     if (!s_cur_root) {
         FILE *probe = fopen(cur_path, "rb");
         if (probe) {                        /* 文件在但解析失败:视为空并 WARN */
+            fclose(probe);
+            DG_LOGW(TAG, "现用配置 %s 解析失败,按空处理(下次改动覆盖)", cur_path);
+            /* 解析失败绝不置 s_dirty:脏标记会让空配置先一步落盘,
+             * 用户还没动过就被整份清掉(B2-1) */
             fclose(probe);
             DG_LOGW(TAG, "现用配置 %s 解析失败,按空处理(下次改动覆盖)", cur_path);
         } else {

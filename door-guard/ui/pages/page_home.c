@@ -111,7 +111,6 @@ void page_home_create(lv_obj_t *parent)
     /* 透明根:video-plane 下未画区域透出下层视频(plane 模式);fb 先清,
      * 清掉导航上一页的不透明残留。软渲染回退模式 LVGL 画不透明预览,无关 */
     lv_obj_set_style_bg_opa(parent, LV_OPA_TRANSP, 0);
-    display_clear_fbs();
 
     s_preview = dg_preview_create(parent, "HOME");
 

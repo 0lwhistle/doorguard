@@ -53,10 +53,6 @@ int display_video_plane_show(int slot, int dmabuf_fd, int32_t w, int32_t h,
 /** 停止视频 plane 显示(离开预览页时调用) */
 void display_video_plane_hide(void);
 
-/** 双 dumb fb 清 0(ARGB 下=全透明)。透明底页面(主页)创建时先调,
- *  清掉上一页不透明残留;之后 partial 刷新只画控件,未画区保持透明 */
-void display_clear_fbs(void);
-
 #ifdef __cplusplus
 }
 #endif

@@ -267,16 +267,20 @@ int enroll_service_user_page(enroll_user_row_t *rows, uint32_t cap,
     int rc = db_user_list_ids(ids, cap, &n);
     if (rc != DG_OK)
         return rc;
+    uint32_t out = 0;                     /* 紧凑写入(B2-2):跳行不得留
+                                              未初始化条目混进 out_n */
     for (uint32_t i = 0; i < n; i++) {
         user_rec_t rec;
         memset(&rec, 0, sizeof(rec));
         if (db_user_get(ids[i], &rec) != DG_OK)
             continue;                /* 枚举与读取间被并发删除:跳过该行 */
-        snprintf(rows[i].user_id, sizeof(rows[i].user_id), "%s", rec.user_id);
-        snprintf(rows[i].user_name, sizeof(rows[i].user_name), "%s", rec.user_name);
-        rows[i].role = rec.role;
+        snprintf(rows[out].user_id, sizeof(rows[out].user_id), "%s", rec.user_id);
+        snprintf(rows[out].user_name, sizeof(rows[out].user_name), "%s",
+                 rec.user_name);
+        rows[out].role = rec.role;
+        out++;
     }
-    *out_n = n;
+    *out_n = out;
     return db_user_count(out_total);
 }
 

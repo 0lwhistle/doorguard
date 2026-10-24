@@ -107,10 +107,11 @@ static bool backend_ensure(void)
 
 /* ---- 渲染原语(播放线程) ---- */
 
-/* 音量+淡入出包络:src(立体声交错)→ dst;total_frames = 本作业总帧数,
- * pos = 当前 chunk 首帧绝对号;mono=1 时 src 单声道按 L 扩展 */
-static void chunk_apply(int16_t *dst, const int16_t *src_l, const int16_t *src_r,
-                        size_t n, int64_t pos, int64_t total, int vol_q15)
+/* 音量+淡入出包络:src 为交错帧(L0,R0,L1,R1…;channels=1 时 R=L 同源),
+ * dst 交错立体声。原先把「交错输入」当平面消费——提示音降八度(880 实播
+ * 440)、立体声 WAV 的 L/R 错位皆由此来(B5-1) */
+static void chunk_apply(int16_t *dst, const int16_t *src, size_t n, int channels,
+                        int64_t pos, int64_t total, int vol_q15)
 {
     for (size_t i = 0; i < n; i++) {
         int64_t t = pos + (int64_t)i;
@@ -121,8 +122,11 @@ static void chunk_apply(int16_t *dst, const int16_t *src_l, const int16_t *src_r
             env = (int)(32767 * (total - t) / AUDIO_FADE_FR);
         if (env < 0)
             env = 0;
-        int32_t l = (int32_t)((int64_t)src_l[i] * vol_q15 >> 15) * env >> 15;
-        int32_t r = (int32_t)((int64_t)src_r[i] * vol_q15 >> 15) * env >> 15;
+        int32_t l = (int32_t)((int64_t)src[i * (size_t)channels] * vol_q15 >> 15) *
+                    env >> 15;
+        int32_t r = (channels == 2)
+                        ? (int32_t)((int64_t)src[i * 2 + 1] * vol_q15 >> 15) * env >> 15
+                        : l;
         dst[i * 2] = (int16_t)l;
         dst[i * 2 + 1] = (int16_t)r;
     }
@@ -134,14 +138,14 @@ static void play_tone_job(double freq_hz, uint32_t dur_ms, int vol_q15)
         dur_ms = 1;
     const int64_t total = (int64_t)AUDIO_RATE * dur_ms / 1000;
     double phase = 0.0;
-    static int16_t tone[AUDIO_CHUNK_FR * AUDIO_CHANNELS];  /* 播放线程独占 */
+    static int16_t tone[AUDIO_CHUNK_FR];   /* 单声道渲染,R 通道由 chunk_apply 同源扩展 */
     int16_t out[AUDIO_CHUNK_FR * AUDIO_CHANNELS];
     for (int64_t pos = 0; pos < total;) {
         s_hb_ms = now_mono_ms();
         const size_t n = (size_t)((total - pos) < AUDIO_CHUNK_FR
                                       ? (total - pos) : AUDIO_CHUNK_FR);
-        tone_render(tone, n, AUDIO_RATE, AUDIO_CHANNELS, freq_hz, 1.0, &phase);
-        chunk_apply(out, tone, tone, n, pos, total, vol_q15);
+        tone_render(tone, n, AUDIO_RATE, 1, freq_hz, 1.0, &phase);
+        chunk_apply(out, tone, n, 1, pos, total, vol_q15);
         if (hw()->write(out, n) != DG_OK)
             return;                           /* 写败:后端下次 ensure 重开 */
         pos += (int64_t)n;
@@ -198,10 +202,9 @@ static void play_file_job(const char *path, int vol_q15)
         const size_t n = (size_t)((total - pos) < AUDIO_CHUNK_FR
                                       ? (total - pos) : AUDIO_CHUNK_FR);
         if (wi.channels == 2)
-            chunk_apply(out, pcm + pos * 2, pcm + pos * 2 + 1, n, pos, total,
-                        vol_q15);
+            chunk_apply(out, pcm + pos * 2, n, 2, pos, total, vol_q15);
         else                                  /* 单声道:左右同源 */
-            chunk_apply(out, pcm + pos, pcm + pos, n, pos, total, vol_q15);
+            chunk_apply(out, pcm + pos, n, 1, pos, total, vol_q15);
         if (hw()->write(out, n) != DG_OK)
             break;
         pos += (int64_t)n;

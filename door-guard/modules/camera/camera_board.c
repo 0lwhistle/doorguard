@@ -217,6 +217,24 @@ static int v4l2_setup(void)
     return DG_OK;
 }
 
+/* 输出缓冲分配:必须在 v4l2_setup 之后调用——S_FMT 才给出真实采集宽高,
+ * rot=0/180 时 out 尺寸=采集尺寸,提前分配会拿到 s_cap_w=0 → RGA 恒败、
+ * camera_latest 吐 0×0 帧(B5-2) */
+static int alloc_out_bufs(void)
+{
+    s_out_w = (s_rot == 90 || s_rot == 270) ? CAM_OUT_W : s_cap_w;
+    s_out_h = (s_rot == 90 || s_rot == 270) ? CAM_OUT_H : s_cap_h;
+    for (int i = 0; i < 3; i++) {
+        free(s_out[i]);                       /* 幂等:重试路径不泄漏 */
+        s_out[i] = malloc((size_t)s_out_w * s_out_h * 4);
+        if (!s_out[i]) {
+            DG_LOGE(CAM_TAG, "输出缓冲分配失败");
+            return DG_ERR_NO_MEMORY;
+        }
+    }
+    return DG_OK;
+}
+
 /* 取流线程:延迟后 S_FMT+STREAMON。与 aiq prepare 并发会合——
  * server 在 prepare 里配置完 ISP 统计节点后持 aiq2.lock 等"流启动事件",
  * 提前量给 server 留配置时间;流起 → server 放锁 → prepare 返回 */
@@ -229,6 +247,10 @@ static void *stream_thread(void *arg)
         DG_LOGE(CAM_TAG, "取流线程:V4L2 初始化失败(相机未就绪,不影响 UI)");
         /* init 是异步的,holder 里 camera 的 READY 是"模块装上了";
          * 流真正起来/失败在这里才见分晓,同步给 holder 供运行期健康查询 */
+        holder_set_module_state("camera", HOLDER_MODULE_STATE_ERROR);
+        return NULL;
+    }
+    if (alloc_out_bufs() != DG_OK) {
         holder_set_module_state("camera", HOLDER_MODULE_STATE_ERROR);
         return NULL;
     }
@@ -303,15 +325,8 @@ int camera_init(const char *res_path, camera_frame_fn cb, void *ud)
     DG_LOGI(CAM_TAG, "camera_init(后台线程): sensor=%s", sensor);
 
     s_rot = rot_from_env();
-    s_out_w = (s_rot == 90 || s_rot == 270) ? CAM_OUT_W : s_cap_w;
-    s_out_h = (s_rot == 90 || s_rot == 270) ? CAM_OUT_H : s_cap_h;
-    for (int i = 0; i < 3; i++) {
-        s_out[i] = malloc((size_t)s_out_w * s_out_h * 4);
-        if (!s_out[i]) {
-            DG_LOGE(CAM_TAG, "输出缓冲分配失败");
-            return DG_ERR_NO_MEMORY;
-        }
-    }
+    /* 输出缓冲分配挪到取流线程 v4l2_setup 之后(见 alloc_out_bufs 注释):
+     * rot=0/180 的输出宽高=采集宽高,S_FMT 前是未知的 */
 
     /* 全部可能阻塞的初始化放后台线程;camera_init 本身立即返回,
      * 主循环(渲染/触摸/认证)零等待 */

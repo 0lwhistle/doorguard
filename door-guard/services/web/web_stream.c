@@ -110,8 +110,11 @@ static void do_tick(void)
     }
 
     const camera_frame_t *f = camera_latest();
-    if (!f || f->seq == 0 || f->seq == s_last_src_seq)
-        return;                                  /* 无帧/重复帧:跳过 */
+    /* 无帧/重复帧/未就绪的 0×0 帧(rot=0/180 输出缓冲未分配时):跳过——
+     * pixels 与宽高都要判,下游 dg_jpeg_encode_rgb 不防 0 尺寸(B5-2) */
+    if (!f || !f->pixels || f->w == 0 || f->h == 0 || f->seq == 0 ||
+        f->seq == s_last_src_seq)
+        return;
     s_last_src_seq = f->seq;
 
     int dw, dh;

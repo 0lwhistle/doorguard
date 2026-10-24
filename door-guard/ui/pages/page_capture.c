@@ -289,7 +289,6 @@ void page_capture_create(lv_obj_t *parent)
 
     /* 透明根 + 清 fb:与主页同理(plane 模式下未画区域透出下层视频) */
     lv_obj_set_style_bg_opa(parent, LV_OPA_TRANSP, 0);
-    display_clear_fbs();
 
     s_preview = dg_preview_create(parent, "CAPTURE");
 

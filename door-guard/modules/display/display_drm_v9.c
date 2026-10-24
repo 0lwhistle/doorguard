@@ -354,6 +354,3 @@ void display_video_plane_hide(void)
     drmModeAtomicFree(req);
 }
 
-void display_clear_fbs(void)
-{
-}

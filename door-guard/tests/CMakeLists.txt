@@ -154,11 +154,7 @@ set_tests_properties(test_ota PROPERTIES TIMEOUT 120)
 # (C3:随 LVGL9 编译,lv_font_get_glyph_dsc 两代同签名;头路径按代际切换)
 add_executable(test_i18n test_i18n.c)
 target_compile_definitions(test_i18n PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-if(DG_USE_LVGL9)
-    target_include_directories(test_i18n PRIVATE ${CMAKE_SOURCE_DIR}/third_party/lvgl9)
-else()
-    target_include_directories(test_i18n PRIVATE ${CMAKE_SOURCE_DIR}/third_party/lvgl)
-endif()
+target_include_directories(test_i18n PRIVATE ${CMAKE_SOURCE_DIR}/third_party/lvgl9)
 target_link_libraries(test_i18n PRIVATE lvgl dg_ui dg_net cjson)
 add_test(NAME test_i18n COMMAND test_i18n)
 set_tests_properties(test_i18n PROPERTIES TIMEOUT 60)
@@ -184,24 +180,14 @@ dg_add_demo(demo_tasker ${CMAKE_SOURCE_DIR}/components/tasker/demo_tasker.c dg_t
 dg_add_demo(demo_holder ${CMAKE_SOURCE_DIR}/components/holder/demo_holder.c dg_holder)
 
 # 触摸 evdev 解析纯逻辑(板上 fts_ts/goodix 事件协议;宿主无设备直测解析)
-# 被测源 touch_evdev.c 含 v8/v9 双栈注册(#ifdef DG_USE_LVGL9),按构建代际
-# 切头文件路径与编译定义;测试内容两个代际完全同一份
 add_executable(test_touch_evdev test_touch_evdev.c
                ${CMAKE_SOURCE_DIR}/modules/display/touch_evdev.c
                ${CMAKE_SOURCE_DIR}/modules/display/touch_activity.c)
-if(DG_USE_LVGL9)
-    target_compile_definitions(test_touch_evdev PRIVATE DG_USE_LVGL9=1)
-    target_include_directories(test_touch_evdev PRIVATE
-        ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
-        ${CMAKE_SOURCE_DIR}/third_party/lvgl9)
-    # dg_ui:lv_conf9 的 LV_FONT_DEFAULT=dg_font_cn_16,lvgl 核心引用该符号
-    target_link_libraries(test_touch_evdev PRIVATE lvgl dg_ui dg_net dg_log)
-else()
-    target_include_directories(test_touch_evdev PRIVATE
-        ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
-        ${CMAKE_SOURCE_DIR}/third_party/lvgl)
-    target_link_libraries(test_touch_evdev PRIVATE lvgl dg_ui dg_net dg_log)
-endif()
+target_include_directories(test_touch_evdev PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto
+    ${CMAKE_SOURCE_DIR}/third_party/lvgl9)
+# dg_ui:lv_conf9 的 LV_FONT_DEFAULT=dg_font_cn_16,lvgl 核心引用该符号
+target_link_libraries(test_touch_evdev PRIVATE lvgl dg_ui dg_net dg_log)
 add_test(NAME test_touch_evdev COMMAND test_touch_evdev)
 set_tests_properties(test_touch_evdev PROPERTIES TIMEOUT 60)
 

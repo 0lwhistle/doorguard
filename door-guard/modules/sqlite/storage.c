@@ -384,7 +384,11 @@ int storage_init(const char *db_path, const char *key_path)
      * 由装配层"必需模块失败拒绝启动"接管 */
     int crc = cache_load_locked();
     if (crc != DG_OK) {
-        DG_LOGE(TAG, "特征缓存装载失败(%d)", crc);
+        /* 装载失败属致命(1:N 恒空):必须关库置 NULL——留着句柄,重试
+         * storage_init 会被「s_db 已开即 DG_OK」短路,1:N 瘫痪被掩盖(B2-5) */
+        DG_LOGE(TAG, "特征缓存装载失败(%d):关库,拒绝启动", crc);
+        sqlite3_close(s_db);
+        s_db = NULL;
         pthread_mutex_unlock(&s_mtx);
         return crc;
     }
@@ -539,6 +543,22 @@ static int row_to_user(sqlite3_stmt *st, user_rec_t *out)
     out->created_at = sqlite3_column_int64(st, 10);
     out->updated_at = sqlite3_column_int64(st, 11);
     return DG_OK;
+}
+
+/* ---- 显式事务(B2-4):级联/清空多条 SQL 包成原子单元;storage.h 宣称的
+ *  「一个事务语义」原先只是 autocommit 逐句提交,中途失败留半截状态 ---- */
+static int tx_begin(void)
+{
+    return sqlite3_exec(s_db, "BEGIN IMMEDIATE;", NULL, NULL, NULL) == SQLITE_OK
+               ? DG_OK : DG_ERR_DB;
+}
+static void tx_commit(void)
+{
+    sqlite3_exec(s_db, "COMMIT;", NULL, NULL, NULL);
+}
+static void tx_rollback(void)
+{
+    sqlite3_exec(s_db, "ROLLBACK;", NULL, NULL, NULL);
 }
 
 /* ---- 唯一性预检(调用方须持 s_mtx) ---- */
@@ -874,9 +894,14 @@ int db_user_add(const user_rec_t *in)
         sqlite3_bind_int64(st, 11, now);
 
         if (sqlite3_step(st) != SQLITE_DONE) {
-            /* UNIQUE 冲突兜底(预检遗漏时映射为业务码而非裸 DB 错) */
+            /* UNIQUE 冲突兜底(预检遗漏时映射为业务码而非裸 DB 错);
+             * 其它失败(磁盘满/IOERR)如实回 DG_ERR_DB——谎报「ID 重复」
+             * 会把存储故障伪装成业务冲突(B2-3) */
+            int ec = sqlite3_extended_errcode(s_db);
             DG_LOGE(TAG, "user add: %s", sqlite3_errmsg(s_db));
-            rc = DG_ERR_DUP_UID;
+            rc = (ec == SQLITE_CONSTRAINT_UNIQUE ||
+                  ec == SQLITE_CONSTRAINT_PRIMARYKEY) ? DG_ERR_DUP_UID
+                                                      : DG_ERR_DB;
         }
     }
     sqlite3_finalize(st);
@@ -1055,10 +1080,15 @@ int db_user_del(const char *user_id)
         return DG_ERR_PARAM;
 
     pthread_mutex_lock(&s_mtx);
+    if (tx_begin() != DG_OK) {
+        pthread_mutex_unlock(&s_mtx);
+        return DG_ERR_DB;
+    }
     sqlite3_stmt *st;
     int rc = DG_OK;
     if (sqlite3_prepare_v2(s_db, "DELETE FROM users WHERE user_id=?1", -1, &st, NULL)
         != SQLITE_OK) {
+        tx_rollback();
         pthread_mutex_unlock(&s_mtx);
         return DG_ERR_DB;
     }
@@ -1083,6 +1113,10 @@ int db_user_del(const char *user_id)
         }
     }
     sqlite3_finalize(st);
+    if (rc == DG_OK)
+        tx_commit();
+    else
+        tx_rollback();
     if (rc == DG_OK && cache_del_locked(user_id) != DG_OK) {
         DG_LOGE(TAG, "特征缓存增量更新失败(del),触发全量重载");
         cache_recover_locked();
@@ -1107,13 +1141,19 @@ int db_user_del_all(uint32_t *out_n)
         n = (uint32_t)sqlite3_column_int(st, 0);
     sqlite3_finalize(st);
 
-    int rc = DG_OK;
-    if (sqlite3_exec(s_db, "DELETE FROM fingerprints;", NULL, NULL, NULL)
-        != SQLITE_OK ||
-        sqlite3_exec(s_db, "DELETE FROM users;", NULL, NULL, NULL) != SQLITE_OK) {
+    int rc = tx_begin();
+    if (rc == DG_OK &&
+        (sqlite3_exec(s_db, "DELETE FROM fingerprints;", NULL, NULL, NULL)
+             != SQLITE_OK ||
+         sqlite3_exec(s_db, "DELETE FROM users;", NULL, NULL, NULL)
+             != SQLITE_OK)) {
         DG_LOGE(TAG, "清空用户失败: %s", sqlite3_errmsg(s_db));
         rc = DG_ERR_DB;
     }
+    if (rc == DG_OK)
+        tx_commit();
+    else
+        tx_rollback();
     if (rc == DG_OK)
         cache_recover_locked();       /* 内存特征库整表重载(= 清空) */
     pthread_mutex_unlock(&s_mtx);
@@ -1505,9 +1545,10 @@ int db_finger_clear_all(uint32_t auth_mask)
         return DG_ERR_PARAM;
 
     pthread_mutex_lock(&s_mtx);
-    int rc = DG_OK;
-    if (sqlite3_exec(s_db, "DELETE FROM fingerprints;", NULL, NULL, NULL)
-        != SQLITE_OK) {
+    int rc = tx_begin();
+    if (rc == DG_OK &&
+        sqlite3_exec(s_db, "DELETE FROM fingerprints;", NULL, NULL, NULL)
+            != SQLITE_OK) {
         DG_LOGE(TAG, "清空指纹表失败: %s", sqlite3_errmsg(s_db));
         rc = DG_ERR_DB;
     }
@@ -1524,6 +1565,10 @@ int db_finger_clear_all(uint32_t auth_mask)
             rc = DG_ERR_DB;
         }
     }
+    if (rc == DG_OK)
+        tx_commit();
+    else
+        tx_rollback();
     if (rc == DG_OK)
         cache_recover_locked();   /* 缓存里也存 auth_flags:不刷新则方式选择仍亮指纹 */
     pthread_mutex_unlock(&s_mtx);
