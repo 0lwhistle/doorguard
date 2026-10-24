@@ -51,10 +51,10 @@ static void *srv_thread(void *arg)
         uint8_t rep[48] = { 0 };
         rep[0] = 0x24;                       /* LI=0 VN=4 Mode=4(server) */
         rep[1] = 1;                          /* stratum(0=KISS-OF-DEATH,mg_sntp 拒收) */
-        for (int i = 0; i < 8; i++)
-            rep[40 + i] = (uint8_t)(sec >> (56 - 8 * i));   /* transmit sec */
-        for (int i = 0; i < 8; i++)
-            rep[44 + 4 + i] = (uint8_t)(frac >> (56 - 8 * i)); /* transmit frac */
+        for (int i = 0; i < 4; i++)
+            rep[40 + i] = (uint8_t)(sec >> (24 - 8 * i));   /* transmit sec(40..43) */
+        for (int i = 0; i < 4; i++)
+            rep[44 + i] = (uint8_t)(frac >> (24 - 8 * i));  /* transmit frac(44..47) */
         (void)!sendto(s_srv, rep, sizeof(rep), 0,
                       (struct sockaddr *)&from, flen);
     }
