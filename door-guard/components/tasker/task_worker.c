@@ -5,6 +5,7 @@
  * malloc/free,logger 换 dg_log。5.2 修复(cond 超时等待/熔断/失败释放)
  * 全部保留,注释即"为什么"。
  */
+#define _GNU_SOURCE  /* pthread_cond_clockwait:等待时钟切 MONOTONIC(与 tasker_now_ms 同域) */
 #include "task_worker.h"
 #include <errno.h>
 
@@ -394,7 +395,7 @@ void* worker_sched_handler(void* arg){
 			}
 			if (deadline > now){
 				struct timespec ts;
-				clock_gettime(CLOCK_REALTIME, &ts);   /* 与 cond 默认时钟一致 */
+				clock_gettime(CLOCK_MONOTONIC, &ts);  /* 与 tasker_now_ms 同域 */
 				uint64_t delta_ms = deadline - now;   /* 已被 SCHED_MAX_SLEEP_MS 封顶 */
 				ts.tv_sec += (time_t)(delta_ms / 1000u);
 				ts.tv_nsec += (long)(delta_ms % 1000u) * 1000000L;
@@ -402,7 +403,8 @@ void* worker_sched_handler(void* arg){
 					ts.tv_sec += 1;
 					ts.tv_nsec -= 1000000000L;
 				}
-				int rc = pthread_cond_timedwait(&worker->cond, &worker->mtx, &ts);
+				int rc = pthread_cond_clockwait(&worker->cond, &worker->mtx,
+				                                CLOCK_MONOTONIC, &ts);
 				if (rc != 0 && rc != ETIMEDOUT){
 					/* 时钟/参数异常兜底：绝对等待失效时保底睡 2ms，绝不自旋 */
 					s_spin_fallback_usleeps++;

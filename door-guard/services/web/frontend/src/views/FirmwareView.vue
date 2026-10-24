@@ -111,13 +111,32 @@ async function startUpload() {
       onProgress: (pct) => { up.pct = pct },
       signal: abortCtl.signal,
     })
-    up.phase = 'done'
     up.pct = 100
     up.offset = 0
-    slot.present = true
-    slot.version = resp.version || up.meta.version
-    slot.date = resp.date || up.meta.date
-    slot.size = resp.size || up.meta.payloadSize
+    /* 收包成功 ≠ 复核完成(整包摘要复核在板端后台线程,2026-10-25 起):
+     * 轮询 finalizing 至收敛,失败向上抛进 error 态 */
+    if (resp.finalizing) {
+      up.phase = 'checking'
+      let st = null
+      const t0 = Date.now()
+      while (Date.now() - t0 < 60000) {
+        await new Promise((r) => setTimeout(r, 500))
+        st = await getFwSlot()
+        if (!st.finalizing) break
+      }
+      if (!st || st.finalizing) throw new Error('复核超时,请刷新页面查看槽位状态')
+      if (st.finalize_err) throw new Error('包校验失败(非 .ota 包/结构损坏/摘要不符/接收不完整),请重传或续传')
+      slot.present = true
+      slot.version = st.version || up.meta.version
+      slot.date = st.date || up.meta.date
+      slot.size = st.size || up.meta.payloadSize
+    } else {
+      slot.present = true
+      slot.version = resp.version || up.meta.version
+      slot.date = resp.date || up.meta.date
+      slot.size = resp.size || up.meta.payloadSize
+    }
+    up.phase = 'done'
     clearFile()
   } catch (err) {
     if (err instanceof ApiError && err.payload && err.payload.aborted) {

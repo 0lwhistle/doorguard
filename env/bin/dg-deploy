@@ -56,7 +56,11 @@ if [ "$mode" != app ]; then
     # S60 必须先于"监听检查"上板:旧版脚本的 stop 有自毁 bug,restart/stop+start
     # 都靠它;先换新脚本,后面的服务重建才可靠(-app 模式跳过:假定 S60 已就位)
     sshx 'mkdir -p /root/ui/lang'
-    scp -q "${scpp[@]}" "$DOORGUARD_ROOT"/door-guard/ui/lang/*.json "root@$ip:/root/ui/lang/" 2>/dev/null || true
+    # 语言包直推失败必须炸出来(B8-2):吞掉后「部署完成」照报,板上还是旧翻译
+    if ! scp -q "${scpp[@]}" "$DOORGUARD_ROOT"/door-guard/ui/lang/*.json "root@$ip:/root/ui/lang/"; then
+        echo "语言包直推失败($ip:/root/ui/lang/)——修网络/凭据后重试" >&2
+        exit 1
+    fi
     if [ -f "$DOORGUARD_ROOT/board/rootfs-overlay/etc/init.d/S60doorguard" ]; then
         # 防坑(2026-09-27):Windows 工作区 autocrlf 会把脚本 checkout 成 CRLF,
         # shebang 带 \r 上板即无法执行("required file not found")。上传前强制转 LF

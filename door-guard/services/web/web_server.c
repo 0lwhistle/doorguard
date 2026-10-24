@@ -60,6 +60,7 @@
 #include "valid.h"
 
 #include <cJSON.h>
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -200,9 +201,11 @@ static const char *reason_phrase(int code)
     case 404: return "Not Found";
     case 405: return "Method Not Allowed";
     case 409: return "Conflict";
+    case 413: return "Payload Too Large";
     case 422: return "Unprocessable Entity";
     case 429: return "Too Many Requests";
     case 500: return "Internal Server Error";
+    case 501: return "Not Implemented";
     default:  return "OK";
     }
 }
@@ -983,6 +986,24 @@ static void ota_retry_cb(void *arg)
         ota_feed_from(s_ota_c);
 }
 
+/* X-OTA-Size/Offset 数值头:严格十进制 + 溢出/尾随字符拒绝——
+ * 裸 strtoul 对 ">4GiB" 静默截断,可骗过 64MB 预检(C3-7) */
+static bool parse_u32_hdr(const struct mg_str *h, uint32_t *out)
+{
+    if (!h || h->len == 0 || h->len >= 24)
+        return false;
+    char buf[24];
+    memcpy(buf, h->buf, h->len);
+    buf[h->len] = '\0';
+    errno = 0;
+    char *end = NULL;
+    unsigned long long v = strtoull(buf, &end, 10);
+    if (errno != 0 || end == buf || *end != '\0' || v > 0xFFFFFFFFull)
+        return false;
+    *out = (uint32_t)v;
+    return true;
+}
+
 /* MG_EV_HTTP_HDRS:/api/ota/upload 的头部先至——校验并起会话,正文走 READ。
  * 摘除头部块会让 mongoose 卸载本连接的 HTTP 解析器(官方大包上传约定):
  * 此后正文按原始字节经 MG_EV_READ 到达,不再有 MG_EV_HTTP_MSG,整包不进内存 */
@@ -997,31 +1018,32 @@ static void ota_start(struct mg_connection *c, struct mg_http_message *hm)
         return;
     }
     const char *names[] = { "X-OTA-Version", "X-OTA-Size", "X-OTA-SHA256" };
-    char ver[32] = "", size_s[24] = "", sha[65] = "";
+    char ver[32] = "", sha[65] = "";
+    uint32_t size = 0;
+    bool has_size = false;
     struct mg_str *h;
     if ((h = mg_http_get_header(hm, names[0])) != NULL && h->len < sizeof(ver))
         memcpy(ver, h->buf, h->len);
-    if ((h = mg_http_get_header(hm, names[1])) != NULL && h->len < sizeof(size_s))
-        memcpy(size_s, h->buf, h->len);
+    if ((h = mg_http_get_header(hm, names[1])) != NULL)
+        has_size = parse_u32_hdr(h, &size);
     if ((h = mg_http_get_header(hm, names[2])) != NULL && h->len < sizeof(sha))
         memcpy(sha, h->buf, h->len);
-    if (!ver[0] || !size_s[0] || !sha[0]) {
-        json_msg(c, 400, "缺少 manifest 头(X-OTA-Version/-Size/-SHA256)");
+    if (!ver[0] || !has_size || !sha[0]) {
+        json_msg(c, 400, "缺少 manifest 头(X-OTA-Version/-Size/-SHA256)或 Size 非法");
         return;
     }
 
     ota_manifest_t m;
     memset(&m, 0, sizeof(m));
     snprintf(m.version, sizeof(m.version), "%s", ver);
-    m.size = (uint32_t)strtoul(size_s, NULL, 10);
+    m.size = size;
     snprintf(m.sha256, sizeof(m.sha256), "%s", sha);
 
-    char off_s[24] = "";
     uint32_t offset = 0;
     if ((h = mg_http_get_header(hm, "X-OTA-Offset")) != NULL &&
-        h->len < sizeof(off_s)) {
-        memcpy(off_s, h->buf, h->len);
-        offset = (uint32_t)strtoul(off_s, NULL, 10);
+        !parse_u32_hdr(h, &offset)) {
+        json_msg(c, 400, "X-OTA-Offset 非法");
+        return;
     }
 
     bool resumed = false;
@@ -1059,6 +1081,8 @@ static void ota_start(struct mg_connection *c, struct mg_http_message *hm)
 
 static struct mg_connection *s_fw_c = NULL;    /* 槽位上传连接(loop 私有) */
 static int64_t s_fw_remain = 0;
+static atomic_bool s_fw_finalizing = false;    /* 收包复核线程在途(B1-3) */
+static atomic_int  s_fw_finalize_err = 0;      /* 最近一次复核结果(0=成功) */
 static atomic_bool s_fw_applying = false;      /* 提取线程在途 */
 static atomic_int  s_fw_apply_err = false;     /* 最近一次提取结果(0=成功) */
 
@@ -1077,47 +1101,60 @@ static void fw_fail(struct mg_connection *c, int code, const char *msg)
     json_msg(c, code, msg);
 }
 
-/* 收完:finish_slot → 解析复核(结构+载荷摘要)→ meta 落盘 → 应答 */
+/* 收包复核线程:finish(等写线程终态,慢盘可达秒级)→ 整包读盘+载荷摘要
+ * 复核(最高 64MB)→ meta 落盘——全部移出 netcore loop(与 fw_apply 同款
+ * 纪律);结果经 GET /api/ota/fw 的 finalizing/finalize_err 轮询(B1-3) */
+static void *fw_finalize_thread(void *arg)
+{
+    (void)arg;
+    char slot[192] = "";
+    int rc = ota_finish_slot(slot, sizeof(slot), NULL, 0);
+    if (rc == DG_OK) {
+        ota_pkg_meta_t m;
+        rc = ota_package_parse_file(slot, &m);
+        if (rc == DG_OK) {
+            char meta[256];
+            fw_meta_path(meta, sizeof(meta));
+            FILE *f = fopen(meta, "w");
+            if (f) {
+                /* received_at 用墙钟(展示用;板时钟未同步时值不代表真实时刻) */
+                fprintf(f,
+                        "{\"version\":\"%s\",\"date\":\"%s\",\"size\":%u,"
+                        "\"sha256\":\"%s\",\"received_at\":%lld}",
+                        m.version, m.date, m.payload_size, m.sha256_hex,
+                        (long long)time(NULL));
+                fclose(f);
+            }
+            DG_LOGI(TAG, "升级包入槽 v=%s(%uB)", m.version, m.payload_size);
+        } else {
+            remove(slot);                    /* 坏包不占槽 */
+        }
+    }
+    atomic_store(&s_fw_finalize_err, rc);
+    atomic_store(&s_fw_finalizing, false);
+    return NULL;
+}
+
+/* 收完:复核挪线程,应答先行(收包成功 ≠ 复核完成) */
 static void fw_complete(void)
 {
     struct mg_connection *c = s_fw_c;
     s_fw_c = NULL;
     if (!c)
         return;
-    char slot[192] = "", sha[65] = "";
-    int rc = ota_finish_slot(slot, sizeof(slot), sha, sizeof(sha));
-    if (rc != DG_OK) {
-        json_msg(c, 422, "接收不完整(大小不符),请重传或续传");
+    atomic_store(&s_fw_finalizing, true);
+    atomic_store(&s_fw_finalize_err, 0);
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, fw_finalize_thread, NULL) != 0) {
+        atomic_store(&s_fw_finalizing, false);
+        ota_abort();                         /* 复核没起成:清会话让用户重传 */
+        json_msg(c, 500, "复核线程创建失败,请重试上传");
         return;
     }
-
-    ota_pkg_meta_t m;
-    rc = ota_package_parse_file(slot, &m);
-    if (rc != DG_OK) {
-        remove(slot);                        /* 坏包不占槽 */
-        json_msg(c, 422, "包校验失败(非 .ota 包/结构损坏/摘要不符)");
-        return;
-    }
-
-    char meta[256];
-    fw_meta_path(meta, sizeof(meta));
-    FILE *f = fopen(meta, "w");
-    if (f) {
-        /* received_at 用墙钟(展示用;板时钟未同步时值不代表真实时刻) */
-        fprintf(f,
-                "{\"version\":\"%s\",\"date\":\"%s\",\"size\":%u,"
-                "\"sha256\":\"%s\",\"received_at\":%lld}",
-                m.version, m.date, m.payload_size, m.sha256_hex,
-                (long long)time(NULL));
-        fclose(f);
-    }
-    DG_LOGI(TAG, "升级包入槽 v=%s(%uB)", m.version, m.payload_size);
-
+    pthread_detach(tid);
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "ok", true);
-    cJSON_AddStringToObject(root, "version", m.version);
-    cJSON_AddStringToObject(root, "date", m.date);
-    cJSON_AddNumberToObject(root, "size", (double)m.payload_size);
+    cJSON_AddBoolToObject(root, "finalizing", true);
     json_reply(c, 200, root);
     cJSON_Delete(root);
 }
@@ -1156,31 +1193,33 @@ static void fw_retry_cb(void *arg)
  * X-OTA-Offset 续传) */
 static void fw_start(struct mg_connection *c, struct mg_http_message *hm)
 {
+    if (!method_is(hm, "POST")) {
+        json_msg(c, 405, "OTA 槽位上传只接受 POST");
+        return;
+    }
     if (!check_token(hm)) {
         reply_unauthorized(c);
         return;
     }
-    char size_s[24] = "";
+    uint32_t size = 0;
     struct mg_str *h;
-    if ((h = mg_http_get_header(hm, "X-OTA-Size")) != NULL &&
-        h->len < sizeof(size_s))
-        memcpy(size_s, h->buf, h->len);
-    if (!size_s[0]) {
-        json_msg(c, 400, "缺少 X-OTA-Size 头");
+    bool has_size = false;
+    if ((h = mg_http_get_header(hm, "X-OTA-Size")) != NULL)
+        has_size = parse_u32_hdr(h, &size);
+    if (!has_size) {
+        json_msg(c, 400, "缺少 X-OTA-Size 头或值非法");
         return;
     }
-    const uint32_t size = (uint32_t)strtoul(size_s, NULL, 10);
     if (size <= OTA_PKG_HEADER_LEN) {
         json_msg(c, 400, "文件比 .ota 包头还小");
         return;
     }
 
     uint32_t offset = 0;
-    char off_s[24] = "";
     if ((h = mg_http_get_header(hm, "X-OTA-Offset")) != NULL &&
-        h->len < sizeof(off_s)) {
-        memcpy(off_s, h->buf, h->len);
-        offset = (uint32_t)strtoul(off_s, NULL, 10);
+        !parse_u32_hdr(h, &offset)) {
+        json_msg(c, 400, "X-OTA-Offset 非法");
+        return;
     }
 
     bool resumed = false;
@@ -1221,6 +1260,8 @@ static void handle_ota_fw_get(struct mg_connection *c, struct mg_http_message *h
     cJSON_AddBoolToObject(root, "staged", ota_staged_present());
     cJSON_AddBoolToObject(root, "applying", atomic_load(&s_fw_applying));
     cJSON_AddBoolToObject(root, "uploading", s_fw_c != NULL);
+    cJSON_AddBoolToObject(root, "finalizing", atomic_load(&s_fw_finalizing));
+    cJSON_AddNumberToObject(root, "finalize_err", atomic_load(&s_fw_finalize_err));
     cJSON_AddNumberToObject(root, "apply_err", atomic_load(&s_fw_apply_err));
 
     char slot[192];
@@ -1256,13 +1297,16 @@ static void handle_ota_fw_get(struct mg_connection *c, struct mg_http_message *h
             }
         }
     }
-    /* 续传:在途会话的已收字节(web 刷新后对拍偏移) */
+    /* 续传:在途会话的已收字节(web 刷新后对拍偏移);非会话态探测
+     * fw_slot.part——槽位续传的真值在它,不是裸包暂存(B1-2) */
     cJSON *partial = cJSON_AddObjectToObject(root, "partial");
     if (s_fw_c) {
         cJSON_AddBoolToObject(partial, "active", true);
         cJSON_AddNumberToObject(partial, "received", (double)ota_staged_bytes());
     } else {
         cJSON_AddBoolToObject(partial, "active", false);
+        cJSON_AddNumberToObject(partial, "received",
+                                (double)ota_slot_part_bytes());
     }
     json_reply(c, 200, root);
     cJSON_Delete(root);
@@ -1273,6 +1317,10 @@ static void handle_ota_fw_delete(struct mg_connection *c, struct mg_http_message
 {
     if (!check_token(hm)) {
         reply_unauthorized(c);
+        return;
+    }
+    if (atomic_load(&s_fw_finalizing)) {
+        json_msg(c, 409, "收包复核中,请稍后再试");
         return;
     }
     if (atomic_load(&s_fw_applying)) {
@@ -1316,6 +1364,10 @@ static void handle_ota_fw_apply(struct mg_connection *c, struct mg_http_message 
 {
     if (!check_token(hm)) {
         reply_unauthorized(c);
+        return;
+    }
+    if (atomic_load(&s_fw_finalizing)) {
+        json_msg(c, 409, "收包复核中,请稍后再试");
         return;
     }
     if (atomic_load(&s_fw_applying)) {

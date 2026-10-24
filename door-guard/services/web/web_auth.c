@@ -14,6 +14,7 @@
 #include "web_session.h"
 #include "dg_log.h"
 #include "storage.h"
+#include "timeutil.h"
 #include "valid.h"
 #include "modules/sqlite/crypto.h"
 
@@ -41,7 +42,8 @@ static const char *TAG = "[WEB.AUTH]";
 typedef struct {
     char    ip[WEB_AUTH_IP_MAX];
     int     fails;
-    time_t  locked_until;
+    int64_t locked_until_ms;   /* 单调毫秒(now_mono_ms):SNTP 步进不得提前
+                                    解锁/异常延长锁定——web 会话过期才用墙钟 */
     bool    used;
 } lock_entry_t;
 
@@ -194,7 +196,7 @@ static lock_entry_t *lock_slot(const char *ip, bool create)
             return &s_locks[i];
         if (!s_locks[i].used && !free_slot)
             free_slot = &s_locks[i];
-        if (s_locks[i].locked_until < oldest->locked_until)
+        if (s_locks[i].locked_until_ms < oldest->locked_until_ms)
             oldest = &s_locks[i];
     }
     if (!create)
@@ -211,12 +213,13 @@ bool web_auth_login_blocked(const char *ip, int *retry_after_s)
     if (!ip)
         ip = "-";
     bool blocked = false;
+    int64_t now = now_mono_ms();
     pthread_mutex_lock(&s_mtx);
     lock_entry_t *e = lock_slot(ip, false);
-    if (e && e->locked_until > time(NULL)) {
+    if (e && e->locked_until_ms > now) {
         blocked = true;
         if (retry_after_s)
-            *retry_after_s = (int)(e->locked_until - time(NULL));
+            *retry_after_s = (int)((e->locked_until_ms - now + 999) / 1000);
     }
     pthread_mutex_unlock(&s_mtx);
     return blocked;
@@ -227,16 +230,17 @@ bool web_auth_login_fail(const char *ip)
     if (!ip)
         ip = "-";
     bool just_locked = false;
+    int64_t now = now_mono_ms();
     pthread_mutex_lock(&s_mtx);
     lock_entry_t *e = lock_slot(ip, true);
     /* 锁定期已过:计数从头开始(否则解锁后一次失败就被重新锁死) */
-    if (e->locked_until != 0 && e->locked_until <= time(NULL)) {
+    if (e->locked_until_ms != 0 && e->locked_until_ms <= now) {
         e->fails = 0;
-        e->locked_until = 0;
+        e->locked_until_ms = 0;
     }
     e->fails++;
     if (e->fails >= FAIL_LIMIT) {
-        e->locked_until = time(NULL) + LOCK_SECONDS;
+        e->locked_until_ms = now + (int64_t)LOCK_SECONDS * 1000;
         e->fails = 0;
         just_locked = true;
     }
@@ -255,7 +259,7 @@ void web_auth_login_ok(const char *ip)
     lock_entry_t *e = lock_slot(ip, false);
     if (e) {
         e->fails = 0;
-        e->locked_until = 0;
+        e->locked_until_ms = 0;
     }
     pthread_mutex_unlock(&s_mtx);
 }

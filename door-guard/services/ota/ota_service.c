@@ -11,6 +11,7 @@
  *   进度经 EV_NET_OTA_PROGRESS 广播(≥5% 一拍 + 终态),上位机实时可见。
  * 测试可用 DG_OTA_DIR 覆盖暂存目录(默认 /var/lib/door-guard)。
  */
+#define _GNU_SOURCE  /* pthread_cond_clockwait:等待时钟切 MONOTONIC */
 #include "ota_service.h"
 #include "dg_log.h"
 #include "event_bus.h"
@@ -121,9 +122,10 @@ static void *writer_thread(void *arg)
     int rc = DG_OK;
     uint32_t last_reported = 0;                  /* 锁外发布用的进度快照 */
 
-    /* 续传:先把已暂存字节重放进摘要(与收包同一摘要流) */
+    /* 续传:先把已暂存字节重放进摘要(与收包同一摘要流);槽位会话的
+     * 暂存是 fw_slot.part,不能读裸包的 ota_staging.part */
     if (s_ctx.received > 0) {
-        FILE *f = fopen(s_staging, "rb");
+        FILE *f = fopen(s_ctx.slot_mode ? s_slot_staging : s_staging, "rb");
         if (!f) {
             rc = DG_ERR_IO;
             goto finish;
@@ -134,6 +136,13 @@ static void *writer_thread(void *arg)
             EVP_DigestUpdate(s_ctx.md, rb, n);
         fclose(f);
     }
+
+    /* 会话内持有 FILE*:按 16KB 块开关文件在 64MB 包上是 4096 次无谓的
+     * open/close(dentry 风暴);每块后 fflush 保留「落盘进度可查」语义 */
+    FILE *out = fopen(s_ctx.slot_mode ? s_slot_staging : s_staging,
+                      s_ctx.received ? "ab" : "wb");
+    if (!out)
+        rc = DG_ERR_IO;
 
     while (rc == DG_OK) {
         pthread_mutex_lock(&s_ctx.mu);
@@ -150,15 +159,8 @@ static void *writer_thread(void *arg)
             break;
         }
         if (have) {
-            FILE *f = fopen(s_ctx.slot_mode ? s_slot_staging : s_staging,
-                            s_ctx.received ? "ab" : "wb");
-            if (!f) {
-                rc = DG_ERR_IO;
-                break;
-            }
-            size_t w = fwrite(buf, 1, got, f);
-            fclose(f);
-            if (w != got) {
+            size_t w = fwrite(buf, 1, got, out);
+            if (w != got || fflush(out) != 0) {
                 rc = DG_ERR_IO;
                 break;
             }
@@ -180,6 +182,8 @@ static void *writer_thread(void *arg)
         if (eof_drained)
             break;
     }
+    if (out)
+        fclose(out);
 
     /* 终态校验 + 落位(仅正常收满才做;abort/写失败直接判负) */
     if (rc == DG_OK) {
@@ -308,8 +312,20 @@ static int begin_common(const ota_manifest_t *m, uint32_t offset, bool *resumed,
 {
     if (!m || !resumed)
         return DG_ERR_PARAM;
-    if (s_ctx.active)
-        return DG_ERR_BUSY;
+    if (s_ctx.active) {
+        /* 超时收场的会话:写线程事后自证 done 后在此补收尸——收尾路径
+         * 保持 active 到 done 的另一半,否则补收尸无处发生(拒新会话直到
+         * 重启)。done 后线程只剩退栈,清 active/tid 安全 */
+        pthread_mutex_lock(&s_ctx.mu);
+        bool reaped = s_ctx.done;
+        if (reaped) {
+            s_ctx.active = false;
+            s_ctx.tid_valid = false;
+        }
+        pthread_mutex_unlock(&s_ctx.mu);
+        if (!reaped)
+            return DG_ERR_BUSY;
+    }
     if (m->size == 0 || m->size > OTA_MAX_SIZE) {
         DG_LOGW(TAG, "包大小 %u 超限[%d,%u],开始前拒绝", m->size, 0, OTA_MAX_SIZE);
         return DG_ERR_PARAM;                /* 超目标大小:开始前拒绝 */
@@ -385,9 +401,9 @@ int ota_write_chunk(const uint8_t *data, size_t len, size_t *received)
     while (s_ctx.count == OTA_PIPE_CAP && !s_ctx.abort && !s_ctx.done) {
         /* 慢盘背压:等写线程腾空间(超时兜底防永久挂死) */
         struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
+        clock_gettime(CLOCK_MONOTONIC, &ts);
         ts.tv_sec += 10;
-        pthread_cond_timedwait(&s_ctx.cv_space, &s_ctx.mu, &ts);
+        pthread_cond_clockwait(&s_ctx.cv_space, &s_ctx.mu, CLOCK_MONOTONIC, &ts);
     }
     if (s_ctx.done || s_ctx.abort) {        /* 写线程已终态:把它的错误带回去 */
         int rc = s_ctx.result != DG_OK ? s_ctx.result : DG_ERR_STATE;
@@ -427,10 +443,11 @@ size_t ota_can_accept(void)
 static int wait_writer_done(uint32_t timeout_s)
 {
     struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
     ts.tv_sec += (time_t)timeout_s;
     while (!s_ctx.done) {
-        int rc = pthread_cond_timedwait(&s_ctx.cv_data, &s_ctx.mu, &ts);
+        int rc = pthread_cond_clockwait(&s_ctx.cv_data, &s_ctx.mu,
+                                        CLOCK_MONOTONIC, &ts);
         if (rc != 0) {
             DG_LOGE(TAG, "等待写线程超时(%us),按失败收场", timeout_s);
             return DG_ERR_TIMEOUT;
@@ -448,6 +465,13 @@ int ota_finish(char *stage_path, size_t path_cap)
     s_ctx.eof = true;                       /* 投递完毕:写线程排空后裁决 */
     pthread_cond_broadcast(&s_ctx.cv_data);
     int rc = wait_writer_done(60);
+    if (rc == DG_ERR_TIMEOUT) {
+        /* 写线程仍在旧上传上下文里跑:保持 active 拒新会话(贸然复位会让
+         * 下一会话 memset 同一 pipe/manifest、与旧线程同写一个 .part);
+         * 它 done 后由 begin_common 补收尸 */
+        pthread_mutex_unlock(&s_ctx.mu);
+        return rc;
+    }
     s_ctx.tid_valid = false;
     s_ctx.active = false;
     pthread_mutex_unlock(&s_ctx.mu);
@@ -468,6 +492,11 @@ int ota_finish_slot(char *path, size_t path_cap, char *sha_hex, size_t sha_cap)
     s_ctx.eof = true;
     pthread_cond_broadcast(&s_ctx.cv_data);
     int rc = wait_writer_done(60);
+    if (rc == DG_ERR_TIMEOUT) {
+        /* 同 ota_finish:保持 active 到写线程 done,防双写者混流 */
+        pthread_mutex_unlock(&s_ctx.mu);
+        return rc;
+    }
     s_ctx.tid_valid = false;
     s_ctx.active = false;
     char sha[65];
@@ -490,11 +519,29 @@ void ota_abort(void)
     pthread_mutex_lock(&s_ctx.mu);
     s_ctx.abort = true;                     /* 写线程丢弃残余并退出 */
     pthread_cond_broadcast(&s_ctx.cv_data);
-    (void)wait_writer_done(10);
+    int wrc = wait_writer_done(10);
+    if (wrc == DG_ERR_TIMEOUT) {
+        /* 同 ota_finish:写线程还没退就别动会话态,done 后 begin 补收尸 */
+        pthread_mutex_unlock(&s_ctx.mu);
+        DG_LOGW(TAG, "取消等待超时:会话保持占位至写线程退出");
+        return;
+    }
     s_ctx.tid_valid = false;
     s_ctx.active = false;
     pthread_mutex_unlock(&s_ctx.mu);
     DG_LOGW(TAG, "上传取消,暂存清理");
+}
+
+/* 非会话态探测暂存文件字节数(续传对拍的真值) */
+static size_t probe_file_bytes(const char *path)
+{
+    FILE *probe = fopen(path, "rb");
+    if (!probe)
+        return 0;
+    fseek(probe, 0, SEEK_END);
+    long n = ftell(probe);
+    fclose(probe);
+    return n > 0 ? (size_t)n : 0;
 }
 
 size_t ota_staged_bytes(void)
@@ -506,13 +553,13 @@ size_t ota_staged_bytes(void)
         return n;
     }
     pthread_mutex_unlock(&s_ctx.mu);
-    /* 非会话态:读暂存文件(续传对拍的真值) */
     paths_init();
-    FILE *probe = fopen(s_staging, "rb");
-    if (!probe)
-        return 0;
-    fseek(probe, 0, SEEK_END);
-    long n = ftell(probe);
-    fclose(probe);
-    return n > 0 ? (size_t)n : 0;
+    return probe_file_bytes(s_staging);
+}
+
+size_t ota_slot_part_bytes(void)
+{
+    /* 非会话态的槽位续传对拍:探测 fw_slot.part(裸包暂存是另一个文件) */
+    paths_init();
+    return probe_file_bytes(s_slot_staging);
 }

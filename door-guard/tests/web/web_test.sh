@@ -272,6 +272,43 @@ code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "X-Auth-Token: $TOKEN" 
     --data-binary "x" "$BASE/api/ota/upload")
 chk "OTA 超大小 → 400" "[ '$code' = '400' ]"
 
+echo "== 10b. OTA 槽位上传全链(.ota 包 → 后台复核 → meta → 删除) =="
+code=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/ota/fw/upload")
+chk "槽位上传 GET → 405(方法门禁)" "[ '$code' = '405' ]"
+# 构造合法 .ota 包:96B 头(magic/头长/载荷大小/版本/日期/载荷 sha256)+ 载荷
+FWPAY="FW-SLOT-PAYLOAD-$(date +%s)"
+FWSHA=$(printf %s "$FWPAY" | sha256sum | cut -d' ' -f1)
+python3 - "$FWPAY" "$FWSHA" > /tmp/dg_webtest/fw_slot.ota << 'PYEOF'
+import hashlib, struct, sys
+payload = sys.argv[1].encode()
+sha = bytes.fromhex(sys.argv[2])
+hdr = b"DGOTA1\0\0" + struct.pack(">II", 96, len(payload))
+hdr += b"9.9.7-slot".ljust(32, b"\0") + b"2026-10-25".ljust(16, b"\0") + sha
+assert len(hdr) == 96
+sys.stdout.buffer.write(hdr + payload)
+PYEOF
+FWSIZE=$(wc -c < /tmp/dg_webtest/fw_slot.ota)
+resp=$(curl -s -X POST -H "X-Auth-Token: $TOKEN" -H "X-OTA-Size: $FWSIZE" \
+    --data-binary @/tmp/dg_webtest/fw_slot.ota "$BASE/api/ota/fw/upload")
+chk "槽位上传 → 200 且 finalizing(复核挪线程)" "echo '$resp' | grep -q finalizing"
+# 轮询复核收敛(≤10s),校验 meta 落盘
+fwok=""
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 1
+    fwstate=$(curl -s -H "X-Auth-Token: $TOKEN" "$BASE/api/ota/fw")
+    echo "$fwstate" | grep -q '"finalizing":false' && { fwok="$fwstate"; break; }
+done
+chk "复核收敛且包入槽" "[ -n '$fwok' ] && echo '$fwok' | grep -q '\"present\":true'"
+chk "复核结果零错误" "[ -n '$fwok' ] && echo '$fwok' | grep -q '\"finalize_err\":0'"
+chk "槽位版本出自包内公告" "[ -n '$fwok' ] && echo '$fwok' | grep -q '9.9.7-slot'"
+code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE -H "X-Auth-Token: $TOKEN" "$BASE/api/ota/fw")
+chk "删除槽内包 → 200" "[ '$code' = '200' ]"
+fwstate=$(curl -s -H "X-Auth-Token: $TOKEN" "$BASE/api/ota/fw")
+chk "删除后槽位已空" "echo '$fwstate' | grep -q '\"present\":false'"
+code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "X-Auth-Token: $TOKEN" \
+    -H "X-OTA-Size: 99999999999999" --data-binary "x" "$BASE/api/ota/fw/upload")
+chk "槽位上传 Size 溢出 → 400(不静默截断)" "[ '$code' = '400' ]"
+
 echo "== 11. mDNS:局域网按名字可解析(报文级) =="
 if python3 tests/web/mdns_query_test.py "$HOST" 5353 "$(curl -s -H "X-Auth-Token: $TOKEN" "$BASE/api/device" | jget mdns_host)" "$(curl -s -H "X-Auth-Token: $TOKEN" "$BASE/api/device" | jget web_port)" \
         > /tmp/dg_webtest/mdns.out 2>&1; then

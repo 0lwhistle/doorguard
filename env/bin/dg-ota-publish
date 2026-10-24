@@ -76,8 +76,16 @@ HOSTONLY="${FW_HOST#*@}"
 
 echo "发布:$(basename "$BIN")  版本 $VER  $SIZE B"
 echo "  sha256 $SHA"
-scp -q "$BIN" "$FW_HOST:$FW_DIR/door-guard.bin" || { echo "上传失败($FW_HOST:$FW_DIR)" >&2; exit 1; }
-ssh -o BatchMode=yes "$FW_HOST" "docker exec $BROKER mosquitto_pub -h 127.0.0.1 -u $MQTT_USER -P \$(cat $PASSFILE) -r -t $TOPIC/ota/version -m '{\"version\":\"$VER\",\"date\":\"$DATE\",\"url\":\"http://$HOSTONLY:$FW_PORT/door-guard.bin\",\"sha256\":\"$SHA\",\"size\":$SIZE,\"notes\":\"$NOTES\"}'" \
-    || { echo "公告发布失败" >&2; exit 1; }
-echo "已发布 retained 公告 → $TOPIC/ota/version(版本 $VER)"
+# 上传带版本文件名、公告指向它(B8-3 两步原子化):scp 覆写 door-guard.bin
+# 成功而公告失败的历史组合 = URL 新 bin + 旧 sha 公告,设备静默拒升;版本名
+# 文件天然不可变,重跑幂等(scp 覆盖同名 = 同字节),公告失败直接重跑
+FW_VER_TAG="$(printf %s "$VER" | tr -c 'A-Za-z0-9._-' '_')"
+FW_FILE="door-guard-${FW_VER_TAG}.bin"
+scp -q "$BIN" "$FW_HOST:$FW_DIR/$FW_FILE" || { echo "上传失败($FW_HOST:$FW_DIR)" >&2; exit 1; }
+# door-guard.bin 仅作「最新」别名供人工核对;设备只认公告里的版本名 URL
+ssh -o BatchMode=yes "$FW_HOST" "cp -f '$FW_DIR/$FW_FILE' '$FW_DIR/door-guard.bin'" \
+    || echo "警告:door-guard.bin 别名同步失败(不影响设备升级)" >&2
+ssh -o BatchMode=yes "$FW_HOST" "docker exec $BROKER mosquitto_pub -h 127.0.0.1 -u $MQTT_USER -P \$(cat $PASSFILE) -r -t $TOPIC/ota/version -m '{\"version\":\"$VER\",\"date\":\"$DATE\",\"url\":\"http://$HOSTONLY:$FW_PORT/$FW_FILE\",\"sha256\":\"$SHA\",\"size\":$SIZE,\"notes\":\"$NOTES\"}'" \
+    || { echo "公告发布失败(重跑本命令即可:文件已就位,公告幂等)" >&2; exit 1; }
+echo "已发布 retained 公告 → $TOPIC/ota/version(版本 $VER,URL …/$FW_FILE)"
 echo "板端将自动下载升级;观察:ssh ${DOORGUARD_IP:-192.168.2.96} tail -f /var/log/door-guard.log"

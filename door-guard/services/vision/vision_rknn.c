@@ -35,6 +35,7 @@
  * 阈值:沿用 cfg face.match_threshold(1:N/1:1)与 face.dup_threshold(查重)。
  * 注意余弦分度与 ROCKIVA 不同,0.42 是起点,按 2s 节流日志实测标定(遗留)。
  */
+#define _GNU_SOURCE  /* pthread_cond_clockwait(glibc>=2.30):等待时钟切 MONOTONIC */
 #include "vision_service.h"
 #include "vision_backend.h"
 #include "dg_log.h"
@@ -687,9 +688,9 @@ static void *vision_worker(void *arg)
             /* 定时等待:相机断流时没有帧可处理,worker 的"活着"只能靠
              * 醒来这件事自证——心跳义务见 vision_backend.heartbeat_ms */
             struct timespec ts;
-            clock_gettime(CLOCK_REALTIME, &ts);
+            clock_gettime(CLOCK_MONOTONIC, &ts);   /* 校时步进不得拉长自醒间隔 */
             ts.tv_sec += 1;
-            pthread_cond_timedwait(&s_mb_cond, &s_mb_mtx, &ts);
+            pthread_cond_clockwait(&s_mb_cond, &s_mb_mtx, CLOCK_MONOTONIC, &ts);
             atomic_store(&s_worker_hb_ms, now_mono_ms());
         }
         if (s_still.has) {

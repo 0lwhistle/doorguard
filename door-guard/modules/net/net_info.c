@@ -13,6 +13,7 @@
  *      路由,DHCP/静态两条配网路都覆盖,纯文本解析零依赖(2026-09-27)。
  */
 #include "net_info.h"
+#include "timeutil.h"
 
 #include <arpa/inet.h>
 #include <ifaddrs.h>
@@ -144,15 +145,15 @@ bool net_info_is_online(void)
 {
     static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
     static bool cached = false;
-    static time_t cached_at = 0;
+    static int64_t cached_at_ms = 0;      /* 单调毫秒:探活缓存时效不受校时回拨影响 */
 
     char ip[64];
     if (net_info_primary_ipv4(ip, sizeof(ip)) != DG_OK)
         return false;                        /* 连 IP 都没有:必然未联网 */
 
-    time_t now = time(NULL);
+    int64_t now = now_mono_ms();
     pthread_mutex_lock(&mtx);
-    if (cached_at != 0 && (now - cached_at) < NET_ONLINE_CACHE_S) {
+    if (cached_at_ms != 0 && (now - cached_at_ms) < NET_ONLINE_CACHE_S * 1000) {
         bool v = cached;
         pthread_mutex_unlock(&mtx);
         return v;
@@ -163,7 +164,7 @@ bool net_info_is_online(void)
 
     pthread_mutex_lock(&mtx);
     cached = online;
-    cached_at = now;
+    cached_at_ms = now;
     pthread_mutex_unlock(&mtx);
     return online;
 }

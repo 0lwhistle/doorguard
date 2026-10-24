@@ -15,6 +15,7 @@
  * 按依赖分批初始化(缺失依赖/循环依赖置 ERROR 且不拖垮他人)的核心逻辑
  * 逐行保留。
  */
+#define _GNU_SOURCE  /* pthread_mutex_clocklock:超时时钟切 MONOTONIC */
 #include "holder.h"
 #include "dg_log.h"
 #include <pthread.h>
@@ -45,18 +46,19 @@ typedef struct {
 
 static holder_context_t s_holder_ctx = {0};
 
-/* xSemaphoreTake(mutex, pdMS_TO_TICKS(t)) 的 pthread 等价实现(cond 默认
- * CLOCK_REALTIME 时钟,与 event_bus_port 同一约定) */
+/* xSemaphoreTake(mutex, pdMS_TO_TICKS(t)) 的 pthread 等价实现。
+ * 超时时钟用 MONOTONIC(pthread_mutex_clocklock,glibc>=2.30)——
+ * pthread_mutex_timedlock 恒走 REALTIME,校时步进会打穿锁超时 */
 static bool lock_take_ms(int timeout_ms) {
     struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
     ts.tv_sec += timeout_ms / 1000;
     ts.tv_nsec += (timeout_ms % 1000) * 1000000L;
     if (ts.tv_nsec >= 1000000000L) {
         ts.tv_sec += 1;
         ts.tv_nsec -= 1000000000L;
     }
-    return pthread_mutex_timedlock(&s_holder_ctx.mutex, &ts) == 0;
+    return pthread_mutex_clocklock(&s_holder_ctx.mutex, CLOCK_MONOTONIC, &ts) == 0;
 }
 
 /* esp_timer_get_time() 等价:单调微秒,用于初始化耗时统计 */

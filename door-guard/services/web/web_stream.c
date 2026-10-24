@@ -12,6 +12,7 @@
  * 完成(40KB 级 memcpy,微秒级占用)。相机三缓冲的读窗口是 3 个帧周期
  * (~100ms@30fps),我们的降采样直读只要 1~3ms,余量充足,无需重验 seq。
  */
+#define _GNU_SOURCE  /* pthread_cond_clockwait:等待时钟切 MONOTONIC */
 #include "web_stream.h"
 
 #include "camera.h"
@@ -159,9 +160,9 @@ static bool park_until_viewer_or_quit(void)
             DG_LOGI(TAG, "无订阅者,推流取帧已停");
         }
         struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
+        clock_gettime(CLOCK_MONOTONIC, &ts);
         ts.tv_sec += 1;                          /* 兜底周期,正常不走到 */
-        pthread_cond_timedwait(&s_cv, &s_mtx, &ts);
+        pthread_cond_clockwait(&s_cv, &s_mtx, CLOCK_MONOTONIC, &ts);
     }
     bool quit = !s_running;
     pthread_mutex_unlock(&s_mtx);

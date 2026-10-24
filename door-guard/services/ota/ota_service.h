@@ -72,6 +72,9 @@ bool ota_staged_present(void);
 /** 当前暂存字节数(续传对拍) */
 size_t ota_staged_bytes(void);
 
+/** 槽位续传对拍:fw_slot.part 已暂存字节数(与裸包暂存是不同文件) */
+size_t ota_slot_part_bytes(void);
+
 #ifdef __cplusplus
 }
 #endif

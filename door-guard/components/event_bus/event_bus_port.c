@@ -7,6 +7,7 @@
  * 2. 任务增加 stop 标志 + join:模板 PC 分支 deinit 时任务永不退出且句柄
  *    泄漏,door-guard 纪律要求"中途退出有清理路径",故补齐。
  */
+#define _GNU_SOURCE  /* pthread_cond_clockwait:等待时钟切 MONOTONIC */
 #include "event_bus_port.h"
 
 #include <errno.h>
@@ -49,10 +50,11 @@ bus_queue_t *bus_queue_create(int depth, int item_size)
     return q;
 }
 
-/* 绝对超时 = CLOCK_REALTIME 当前值 + timeout_ms(cond 默认时钟) */
+/* 绝对超时 = CLOCK_MONOTONIC 当前值 + timeout_ms(等待走 clockwait 同时钟;
+ * 事件总线是分发祖源,校时步进不得波及) */
 static void abs_deadline(struct timespec *ts, int timeout_ms)
 {
-    clock_gettime(CLOCK_REALTIME, ts);
+    clock_gettime(CLOCK_MONOTONIC, ts);
     ts->tv_sec += timeout_ms / 1000;
     ts->tv_nsec += (timeout_ms % 1000) * 1000000L;
     if (ts->tv_nsec >= 1000000000L) {
@@ -88,7 +90,8 @@ bool bus_queue_recv(bus_queue_t *q, void *item, int timeout_ms)
     bool ok = false;
     pthread_mutex_lock(&q->mtx);
     while (q->count == 0) {
-        if (pthread_cond_timedwait(&q->not_empty, &q->mtx, &ts) == ETIMEDOUT)
+        if (pthread_cond_clockwait(&q->not_empty, &q->mtx, CLOCK_MONOTONIC,
+                                   &ts) == ETIMEDOUT)
             break;
     }
     if (q->count > 0) {
