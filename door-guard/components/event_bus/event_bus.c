@@ -61,13 +61,10 @@ event_t *event_bus_create_event(event_type_t type, const void *data, uint16_t da
     }
 
     size_t total_size = event_bus_calc_total_size(data_len);
-    bool from_pool = false;
     event_t *event = NULL;
 
-    if (s_event_pool) {
+    if (s_event_pool)
         event = dg_event_pool_alloc(s_event_pool);
-        from_pool = (event != NULL);
-    }
     if (event == NULL) {
         event = malloc(total_size);
         if (event == NULL) {
