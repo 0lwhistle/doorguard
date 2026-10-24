@@ -38,8 +38,11 @@ for k in '$1'.split('.'):
 print('true' if d is True else ('false' if d is False else d))
 "; }
 
-if [ ! -x ./build-pc/door-guard ]; then
-    echo "缺少 build-pc/door-guard:先构建 PC 模拟器(见 door-guard/README)"
+# 二进制:默认 build-pc/door-guard,可用 DG_SIM_BIN 覆盖(WSL ext4 构建目录
+# ~/dg-build/pc-*/door-guard 由 dg-test --web 传入;2026-10-25 挂 runner)
+SIM_BIN="${DG_SIM_BIN:-./build-pc/door-guard}"
+if [ ! -x "$SIM_BIN" ]; then
+    echo "缺少 PC 模拟器 $SIM_BIN:先构建(dg-build-pc 或见 door-guard/README)"
     exit 1
 fi
 
@@ -51,7 +54,7 @@ mkdir -p /tmp/dg_webtest
 mkdir -p sim/data
 printf '{"network":{"web_port":8080}}' > sim/data/cur_config.json
 
-SDL_VIDEODRIVER=dummy DG_SIM_VISION=0 ./build-pc/door-guard sim/media \
+SDL_VIDEODRIVER=dummy DG_SIM_VISION=0 "$SIM_BIN" sim/media \
     >/tmp/dg_webtest/server.log 2>&1 &
 SRV_PID=$!
 trap 'kill $SRV_PID 2>/dev/null' EXIT

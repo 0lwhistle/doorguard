@@ -779,12 +779,14 @@ static void seq_enroll(void)
      * 完成(降级:无副本,对账/回灌受损,WARN 留痕)。真机首次录入
      * (2026-10-03)本步必失败:数据/结束包帧式未定,协议文档 §6 待勾,
      * 旧实现回滚整次录入 = 用户白按两次还报"设备通讯异常" */
+    /* data 必须与 vec 同生命周期:vec 指向它内联的 payload 数组,此前声明在
+     * if 块内,出块后 db_finger_add 读的是死栈(落库特征内容不可控) */
+    fp_frame_t data;
     const uint8_t *vec = NULL;
     size_t vec_len = 0;
     size_t n_up = fp_as608_build_cmd(b, sizeof(b), 0x08,
                                      (const uint8_t[]){FP_A608_BUF1}, 1);
     if (cmd_xchg(b, n_up, &ack, &c, 2000) == DG_OK && c == FP_ACK_OK) {
-        fp_frame_t data;
         if (wait_frame(&data, 3000) == DG_OK && data.type == FP_A608_TYPE_DATA &&
             data.payload_len > 0) {
             vec = data.payload;

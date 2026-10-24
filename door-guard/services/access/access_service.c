@@ -512,7 +512,7 @@ static int on_ic_card(const event_t *e, void *ud)
         fsm_event_data_t d;
         memset(&d, 0, sizeof(d));
         d.result.method = DG_METHOD_IC;
-        d.result.now_ms = (int64_t)time(NULL) * 1000;
+        d.result.now_ms = now_mono_ms();  /* 锁定计时:单调钟,SNTP 步进免疫 */
         user_rec_t rec;
         int rc = db_user_get(s_fsm.cur_uid, &rec);
         bool ok = (rc == DG_OK && rec.ic_card[0] &&
@@ -613,7 +613,7 @@ static int on_text_input(const event_t *e, void *ud)
         fsm_event_data_t d;
         memset(&d, 0, sizeof(d));
         d.result.method = DG_METHOD_PWD;
-        d.result.now_ms = (int64_t)time(NULL) * 1000;
+        d.result.now_ms = now_mono_ms();  /* 锁定计时:单调钟,SNTP 步进免疫 */
 
         if (auth_fsm_pwd_locked(&s_fsm, t->uid, d.result.now_ms)) {
             d.result.locked = true;                 /* 锁定中直接拒,不计次数 */

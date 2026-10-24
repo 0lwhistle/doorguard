@@ -515,14 +515,23 @@ static int row_to_user(sqlite3_stmt *st, user_rec_t *out)
         out->finger_vec_len = (uint16_t)plain_len;
     }
 
+    /* pwd 两列与特征同源:库文件损坏/位翻转可能给出超长 BLOB,无校验 memcpy
+     * 即越界写定长字段(口令 32B/盐 16B)——判错走 fail-closed,与上面
+     * unwrap 失败同路径(用户取不出 = 无法验证,安全方向) */
     blob = sqlite3_column_blob(st, 5);
     nbytes = sqlite3_column_bytes(st, 5);
-    if (blob && nbytes > 0)
+    if (blob && nbytes > 0) {
+        if (nbytes > (int)sizeof(out->pwd_hash))
+            return DG_ERR_DB;
         memcpy(out->pwd_hash, blob, (size_t)nbytes);
+    }
     blob = sqlite3_column_blob(st, 6);
     nbytes = sqlite3_column_bytes(st, 6);
-    if (blob && nbytes > 0)
+    if (blob && nbytes > 0) {
+        if (nbytes > (int)sizeof(out->pwd_salt))
+            return DG_ERR_DB;
         memcpy(out->pwd_salt, blob, (size_t)nbytes);
+    }
 
     col_text_copy(st, 7, out->ic_card, sizeof(out->ic_card));
     out->role = sqlite3_column_int(st, 8);

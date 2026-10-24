@@ -800,7 +800,9 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
         int32_t method = r->method;
 
         if (r->ok) {
-            succeed(fsm, method, r->now_ms);
+            /* 日志时间戳传 0:由写入方按落库时刻补齐(MATCH_1N 同约定)——
+             * r->now_ms 现为单调毫秒,直接换算会落出 1970 年 */
+            succeed(fsm, method, 0);
             return;
         }
 
@@ -828,7 +830,8 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
                 /* 锁定中:失败弹窗(文案由 UI 依 locked 状态区分"锁定中") */
             }
         }
-        fail_and_back(fsm, method, r->reason, r->now_ms);
+        /* 日志时间戳传 0(写库补齐,同上);锁定记账继续用 r->now_ms(单调) */
+        fail_and_back(fsm, method, r->reason, 0);
         return;
     }
 
@@ -838,7 +841,8 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
 }
 
 /* 密码方式入口前的锁定预检:该用户连错锁定中返回 true(锁定中直接提示,不计次数;
- * 按 UID 查槽——多个 ID 各自的锁定互不影响,spec §5) */
+ * 按 UID 查槽——多个 ID 各自的锁定互不影响,spec §5)。
+ * now_ms 须为单调毫秒(now_mono_ms),与 FSM_EV_VERIFY_RESULT 携带的锁定时钟同域 */
 bool auth_fsm_pwd_locked(const auth_fsm_t *fsm, const char *user_id, int64_t now_ms)
 {
     for (int i = 0; i < FSM_PWD_LOCK_SLOTS; i++) {

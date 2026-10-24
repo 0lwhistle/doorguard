@@ -115,7 +115,10 @@ typedef struct {
     char user_id[DG_UID_LEN];
     char user_name[DG_NAME_LEN];
     int32_t reason;                /**< 失败原因(dg_auth_reason_t;ok 时 0) */
-    int64_t now_ms;                /**< 密码连错锁定计时用 */
+    int64_t now_ms;                /**< 单调毫秒(now_mono_ms):密码连错锁定
+                                        计时专用——REALTIME 会被开机 SNTP 大步进
+                                        打穿;日志时间戳不走此字段,由写入方按
+                                        落库时刻补齐(0 亦可,见 log_act_t.ts) */
 } fsm_verify_result_t;
 
 typedef struct {

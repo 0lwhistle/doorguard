@@ -346,6 +346,56 @@ static void test_password(void)
     storage_deinit();
 }
 
+/* 库损坏(位翻转/外部改写)把 pwd_hash/pwd_salt 撑成超长 BLOB:row_to_user
+ * 必须判错拒绝,不得越界写 32B/16B 定长字段(2026-10-25 复审 A3;越界写
+ * 正是未结案 rc=134 堆损坏的头号嫌疑) */
+static void test_pwd_blob_corrupt(void)
+{
+    printf("[S2b] corrupt pwd blobs: oversize hash/salt fail closed\n");
+    fresh_setup();
+
+    user_rec_t u = make_user("10001", "张三", "s3cret!");
+    DG_CHECK(db_user_add(&u) == DG_OK);
+
+    char db[128], key[128];
+    snprintf(db, sizeof(db), "%s/db.sqlite", s_dir);
+    snprintf(key, sizeof(key), "%s/dg.key", s_dir);
+    storage_deinit();
+    {
+        sqlite3 *raw = NULL;
+        char *err = NULL;
+        DG_CHECK(sqlite3_open(db, &raw) == SQLITE_OK);
+        /* 64B 伪随机串,远超 32B hash / 16B salt 上限 */
+        DG_CHECK(sqlite3_exec(raw,
+                              "UPDATE users SET pwd_hash = randomblob(64);",
+                              NULL, NULL, &err) == SQLITE_OK);
+        sqlite3_free(err);
+        sqlite3_close(raw);
+    }
+    DG_CHECK(storage_init(db, key) == DG_OK);
+
+    user_rec_t got;
+    DG_CHECK(db_user_get("10001", &got) == DG_ERR_DB);   /* 超长 hash → 拒读 */
+    DG_CHECK(db_verify_password("10001", "s3cret!", &got) != DG_OK);
+
+    storage_deinit();
+    {
+        sqlite3 *raw = NULL;
+        char *err = NULL;
+        DG_CHECK(sqlite3_open(db, &raw) == SQLITE_OK);
+        DG_CHECK(sqlite3_exec(raw,
+                              "UPDATE users SET pwd_hash = NULL,"
+                              " pwd_salt = randomblob(64);",
+                              NULL, NULL, &err) == SQLITE_OK);
+        sqlite3_free(err);
+        sqlite3_close(raw);
+    }
+    DG_CHECK(storage_init(db, key) == DG_OK);
+    DG_CHECK(db_user_get("10001", &got) == DG_ERR_DB);   /* 超长 salt 同判 */
+
+    storage_deinit();
+}
+
 /* ================= 3 日志 ================= */
 
 static void seed_logs(int count)
@@ -1021,6 +1071,7 @@ int main(void)
     test_add();          /* 含 2000 边界,最慢 */
 
     test_password();
+    test_pwd_blob_corrupt();
     test_update_dup();
     test_dup_cmp_fail_closed();
     test_field_valid();

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# door-guard 单元测试(宿主 gcc + ctest)。用法: dg-test [--tsan] [-c]
+# door-guard 单元测试(宿主 gcc + ctest)。用法: dg-test [--tsan] [--web] [-c]
 #   --tsan  另建 ThreadSanitizer 构建目录并跑全部用例(并发组件验收要求)
+#   --web   web 上位机验收套件(tests/web/web_test.sh 67 断言 + api_test.sh,
+#           自起 PC 模拟器自收;2026-10-25 挂进 runner,复审 B8-1)
 #   -c      删除构建目录全新配置
 #
 # 构建目录在 WSL 内默认走 ext4(env.sh 的 DG_TEST_BUILD_DIR),configure 按需跑
@@ -10,10 +12,12 @@ set -euo pipefail
 : "${DOORGUARD_ROOT:?请先 source env/env.sh}"
 
 tsan=0
+web=0
 clean=0
 for a in "$@"; do
     case "$a" in
         --tsan) tsan=1 ;;
+        --web)  web=1 ;;
         -c)     clean=1 ;;
         *) echo "未知参数: $a"; exit 1 ;;
     esac
@@ -30,8 +34,57 @@ build_tests() {
     ctest --test-dir "$dir" --output-on-failure
 }
 
-if [ "$tsan" = 1 ]; then
-    build_tests "${DG_TEST_BUILD_DIR:-build-tests}-tsan" -DCMAKE_C_FLAGS="-fsanitize=thread -g -O1"
-else
-    build_tests "${DG_TEST_BUILD_DIR:-build-tests}"
+# web 验收套件:定位/现编 PC 模拟器 → web_test.sh(自起自收)→ 独立实例跑
+# api_test.sh(web_test 收尾把账号改成 guard01,不复用其沙箱)
+run_web_suite() {
+    cd "$DOORGUARD_ROOT/door-guard"
+    local bin=""
+    pick_bin() {
+        if [ -n "${DG_PC_BUILD_DIR:-}" ] && [ -x "$DG_PC_BUILD_DIR/door-guard" ]; then
+            bin="$DG_PC_BUILD_DIR/door-guard"
+        elif [ -x build-pc/door-guard ]; then
+            bin=build-pc/door-guard
+        fi
+    }
+    pick_bin
+    if [ -z "$bin" ]; then
+        echo "--web: 未发现 PC 模拟器产物,先跑 dg-build-pc ……"
+        dg-build-pc || return 1
+        pick_bin
+        [ -n "$bin" ] || { echo "dg-build-pc 后仍无产物"; return 1; }
+    fi
+    echo "== web 验收套件(二进制 $bin) =="
+    DG_SIM_BIN="$bin" bash tests/web/web_test.sh || return 1
+    echo "== web API 套件(api_test.sh,独立实例) =="
+    rm -f sim/data/door-guard.db sim/data/dg.key
+    mkdir -p sim/data
+    printf '{"network":{"web_port":8080}}' > sim/data/cur_config.json
+    SDL_VIDEODRIVER=dummy DG_SIM_VISION=0 "$bin" sim/media \
+        >/tmp/dg_apitest_server.log 2>&1 &
+    local pid=$!
+    sleep 3
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo "api_test 服务未起来,日志:"
+        tail -20 /tmp/dg_apitest_server.log
+        kill "$pid" 2>/dev/null || true
+        return 1
+    fi
+    local rc=0
+    bash tests/web/api_test.sh || rc=1
+    kill "$pid" 2>/dev/null || true
+    return "$rc"
+}
+
+rc=0
+if [ "$web" = 1 ]; then
+    if ! run_web_suite; then
+        echo "web 套件失败"
+        rc=1
+    fi
 fi
+if [ "$tsan" = 1 ]; then
+    build_tests "${DG_TEST_BUILD_DIR:-build-tests}-tsan" -DCMAKE_C_FLAGS="-fsanitize=thread -g -O1" || rc=1
+else
+    build_tests "${DG_TEST_BUILD_DIR:-build-tests}" || rc=1
+fi
+exit "$rc"
