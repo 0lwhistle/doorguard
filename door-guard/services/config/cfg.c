@@ -700,8 +700,6 @@ int cfg_load(const char *default_path, const char *cur_path)
             DG_LOGW(TAG, "现用配置 %s 解析失败,按空处理(下次改动覆盖)", cur_path);
             /* 解析失败绝不置 s_dirty:脏标记会让空配置先一步落盘,
              * 用户还没动过就被整份清掉(B2-1) */
-            fclose(probe);
-            DG_LOGW(TAG, "现用配置 %s 解析失败,按空处理(下次改动覆盖)", cur_path);
         } else {
             char dir[256];
             snprintf(dir, sizeof(dir), "%s", cur_path);
