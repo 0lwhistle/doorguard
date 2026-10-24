@@ -83,6 +83,8 @@ registry_err_t registry_register(const char *name, registry_start_fn start_fn,
     e->required = required;
     e->user_data = user_data;
     e->state = REG_STATE_REGISTERED;
+    if (dep_count > 0 && !deps)
+        return REG_ERR_DEPENDENCY;       /* C5-2:同 holder.c 的空指针守卫 */
     for (int i = 0; i < dep_count; i++)
         snprintf(e->deps[i], sizeof(e->deps[i]), "%s", deps[i]);
     e->dep_count = dep_count;
@@ -273,23 +275,3 @@ int64_t registry_last_heartbeat_ms(const char *name)
     return hb;
 }
 
-registry_watch_t registry_watchdog_poll(int64_t now_ms, uint32_t stale_after_ms)
-{
-    registry_watch_t worst = REG_WATCH_OK;
-    pthread_mutex_lock(&s_mu);
-    for (uint32_t i = 0; i < s_cnt; i++) {
-        reg_entry_t *e = &s_tbl[i];
-        if (e->state == REG_STATE_ERROR) {
-            worst = REG_WATCH_ERROR;         /* 最严重,可提前定论 */
-            break;
-        }
-        if (e->state == REG_STATE_READY && e->hb_fn) {
-            int64_t hb = e->hb_fn();
-            if (hb > 0 && now_ms - hb > (int64_t)stale_after_ms
-                && worst == REG_WATCH_OK)
-                worst = REG_WATCH_STALE;
-        }
-    }
-    pthread_mutex_unlock(&s_mu);
-    return worst;
-}

@@ -56,10 +56,7 @@ event_bus_err_t event_bus_unsubscribe(event_subscription_t *subscription);
 
 /* ---- 状态与统计(诊断) ---- */
 
-event_bus_err_t event_bus_get_status(int *queue_size, int *subscriber_count);
-event_bus_err_t event_bus_get_stats(uint32_t *events_published, uint32_t *events_processed,
                                     uint32_t *events_dropped, uint32_t *handler_errors);
-event_bus_err_t event_bus_reset_stats(void);
 bool event_bus_is_initialized(void);
 
 /** 池满退化堆分配的累计次数(诊断) */
@@ -72,7 +69,6 @@ uint32_t event_bus_get_heap_outstanding(void);
 
 const char *event_bus_get_type_name(event_type_t type);
 const char *event_bus_get_err_name(event_bus_err_t err);
-void event_bus_print_status(void);
 
 /*
  * 使用示例:

@@ -25,6 +25,12 @@ static void close_internal(void)
             lv_timer_delete(t);            /* 悬挂定时器先清(一次性定时器触发中不受影响) */
         lv_obj_delete(s_popup);
         s_popup = NULL;
+        /* 手动关闭路径也回调 on_close(C6-9:原先只有 3s 超时路径发,手动关
+         * 被静默丢弃——对未来调用者是陷阱;现使用方 on_close 全 NULL 无感) */
+        void (*cb)(void *) = s_result.on_close;
+        s_result.on_close = NULL;
+        if (cb)
+            cb(s_result.ud);
     }
 }
 
@@ -111,6 +117,7 @@ static void result_timer_cb(lv_timer_t *t)
     }
     if (cb)
         cb(ud);
+    s_result.on_close = NULL;            /* 已送达:防后续 close_internal 二次投递 */
 }
 
 static void result_popup(const char *text, const char *sym, lv_color_t color,

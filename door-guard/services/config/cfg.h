@@ -138,7 +138,8 @@ typedef struct {
  */
 int cfg_load(const char *default_path, const char *cur_path);
 
-/** 只读快照(两次 set 之间稳定;cfg_set/reset 成功后更新) */
+/** 只读快照(一代安全:取到的指针在下一次 cfg_set/reset 生效前稳定,
+ *  跨越该点继续读属未定义——没有逐指针生命周期管理,C1-5 注释收窄) */
 const dg_cfg_t *cfg_get(void);
 
 /** 设置并持久化(防抖落盘);key 为业务键名(同 DB 迁移键,见 test_cfg.c) */

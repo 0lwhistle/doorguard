@@ -49,6 +49,16 @@ const char *dg_ui_enroll_err_text(int rc)
     }
 }
 
+/* 角色 → 展示文案(C6-5:原 page_users/page_user_edit 各写一份 switch) */
+const char *ui_role_name(int32_t role)
+{
+    switch (role) {
+    case DG_ROLE_ADMIN:     return _("管理员");
+    case DG_ROLE_BLACKLIST: return _("黑名单");
+    default:                return _("普通");
+    }
+}
+
 /* 凭据行按钮文案:未录 → 录入,已录 → 修改(见 valid_ui.h 头注) */
 const char *dg_ui_face_btn_text(bool enrolled)
 {

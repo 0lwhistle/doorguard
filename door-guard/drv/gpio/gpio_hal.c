@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/eventfd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -139,6 +140,7 @@ int gpio_hal_line(void)
  */
 static int s_in_line = -1;
 static int s_in_fd = -1;
+static int s_abort_efd = -1;   /* 边沿等待的线程外唤醒(C4-6):eventfd 进 poll 集 */
 
 int gpio_hal_edge_wait(int line_no, int timeout_ms, int *level)
 {
@@ -170,13 +172,27 @@ int gpio_hal_edge_wait(int line_no, int timeout_ms, int *level)
         char buf[16];
         (void)!read(s_in_fd, buf, sizeof(buf) - 1);
     }
+    if (s_abort_efd < 0) {
+        s_abort_efd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+        if (s_abort_efd < 0)
+            DG_LOGW(TAG, "eventfd 不可用(%s),abort 退化为关 fd 唤醒", strerror(errno));
+    }
 
-    struct pollfd pfd = { .fd = s_in_fd, .events = POLLPRI | POLLERR };
-    int pr = poll(&pfd, 1, timeout_ms);
+    struct pollfd pfd[2] = {
+        { .fd = s_in_fd, .events = POLLPRI | POLLERR },
+        { .fd = s_abort_efd, .events = POLLIN },
+    };
+    nfds_t nfds = (s_abort_efd >= 0) ? 2 : 1;
+    int pr = poll(pfd, nfds, timeout_ms);
     if (pr < 0)
         return (errno == EINTR) ? DG_ERR_TIMEOUT : DG_ERR_IO;
     if (pr == 0)
         return DG_ERR_TIMEOUT;
+    if (s_abort_efd >= 0 && (pfd[1].revents & POLLIN)) {
+        uint64_t v;                       /* abort 唤醒:排掉信号量,按链路错返回 */
+        (void)!read(s_abort_efd, &v, sizeof(v));
+        return DG_ERR_IO;
+    }
     if (lseek(s_in_fd, 0, SEEK_SET) < 0)
         return DG_ERR_IO;
     char buf[16] = { 0 };
@@ -191,8 +207,12 @@ int gpio_hal_edge_abort(void)
 {
     if (s_in_fd < 0)
         return DG_ERR_NOT_INIT;
-    /* 边沿等待阻塞在 poll,没有可靠的线程外唤醒手段;停线 = 关 fd 使
-     * poll 返回 POLLNVAL(s_in_fd 置 -1 前先记值,避免竞态双重关闭) */
+    /* 先写 eventfd 唤醒等待中的 poll(C4-6:关 fd 唤醒依赖 fd 号不复用,
+     * 弱序下有竞态);再关 value fd 并清行态,下次 wait 重新导出 */
+    if (s_abort_efd >= 0) {
+        uint64_t v = 1;
+        (void)!write(s_abort_efd, &v, sizeof(v));
+    }
     int fd = s_in_fd;
     s_in_fd = -1;
     s_in_line = -1;
@@ -211,6 +231,10 @@ int gpio_hal_in_level(int line_no, int *level)
 
 void gpio_hal_deinit(void)
 {
+    if (s_abort_efd >= 0) {
+        close(s_abort_efd);
+        s_abort_efd = -1;
+    }
     if (s_line >= 0) {
         char path[64];
         snprintf(path, sizeof(path), "/sys/class/gpio/unexport");

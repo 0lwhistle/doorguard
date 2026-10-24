@@ -5,7 +5,7 @@
  * 保留其四个关键设计(注释即"为什么"):
  * 1. 锁外回调:dispatch 锁内快照匹配订阅者,锁外调用 handler——handler 内
  *    再订阅/退订/慢处理不会死锁或长期占锁;
- * 2. 事件内存池:定长块池 + 池满退化堆分配(头 reserved 作来源标志);
+ * 2. 事件内存池:定长块池 + 池满退化堆分配(统一由池侧簿记归还);
  * 3. 统计原子化:C11 atomic 计数;
  * 4. 事件名表供日志输出。
  * 与模板差异(见 README.md):mem_pool/logger 换为 dg_event_pool/dg_log,
@@ -78,11 +78,10 @@ event_t *event_bus_create_event(event_type_t type, const void *data, uint16_t da
         atomic_fetch_add(&s_heap_outstanding, 1);
     }
 
-    /* reserved 兼作分配来源标志:0=池,1=堆 */
+    /* (C5-6:原 reserved 来源标志写而不读,已删) */
     event->header.type = type;
     event->header.data_len = data_len;
-    event->header.reserved = from_pool ? 0 : 1;
-    event->header.timestamp = bus_now_ms();
+     event->header.timestamp = bus_now_ms();
 
     if (data != NULL && data_len > 0)
         memcpy(event->data, data, data_len);
@@ -415,135 +414,13 @@ event_bus_err_t event_bus_unsubscribe(event_subscription_t *subscription)
     }
     bus_lock_give(ctx->lock);
 
-    free_subscription(subscription);
-
     if (!found) {
         DG_LOGW(TAG, "unsubscribe: subscriber id=%lu not found",
                 (unsigned long)subscription->subscriber_id);
+        /* NOT_FOUND 不释放句柄(C5-1):槽位仍被真实订阅者占用,释放即双活 */
         return EVENT_BUS_ERR_NOT_FOUND;
     }
+    free_subscription(subscription);
     return EVENT_BUS_OK;
 }
 
-event_bus_err_t event_bus_get_status(int *queue_size, int *subscriber_count)
-{
-    event_bus_context_t *ctx = event_bus_get_context();
-    if (!atomic_load(&ctx->initialized))
-        return EVENT_BUS_ERR_NOT_INIT;
-
-    if (queue_size != NULL)
-        *queue_size = bus_queue_count(ctx->queue);
-    if (subscriber_count != NULL)
-        *subscriber_count = ctx->subscriber_count;
-    return EVENT_BUS_OK;
-}
-
-event_bus_err_t event_bus_get_stats(uint32_t *events_published, uint32_t *events_processed,
-                                    uint32_t *events_dropped, uint32_t *handler_errors)
-{
-    event_bus_context_t *ctx = event_bus_get_context();
-    if (!atomic_load(&ctx->initialized))
-        return EVENT_BUS_ERR_NOT_INIT;
-
-    if (events_published != NULL)
-        *events_published = atomic_load(&ctx->stats.events_published);
-    if (events_processed != NULL)
-        *events_processed = atomic_load(&ctx->stats.events_processed);
-    if (events_dropped != NULL)
-        *events_dropped = atomic_load(&ctx->stats.events_dropped);
-    if (handler_errors != NULL)
-        *handler_errors = atomic_load(&ctx->stats.handler_errors);
-    return EVENT_BUS_OK;
-}
-
-event_bus_err_t event_bus_reset_stats(void)
-{
-    event_bus_context_t *ctx = event_bus_get_context();
-    if (!atomic_load(&ctx->initialized))
-        return EVENT_BUS_ERR_NOT_INIT;
-
-    atomic_store(&ctx->stats.events_published, 0);
-    atomic_store(&ctx->stats.events_processed, 0);
-    atomic_store(&ctx->stats.events_dropped, 0);
-    atomic_store(&ctx->stats.handler_errors, 0);
-    return EVENT_BUS_OK;
-}
-
-bool event_bus_is_initialized(void)
-{
-    return atomic_load(&event_bus_get_context()->initialized);
-}
-
-uint32_t event_bus_get_heap_fallback(void)
-{
-    return atomic_load(&s_heap_fallback_count);
-}
-
-uint32_t event_bus_get_heap_outstanding(void)
-{
-    return atomic_load(&s_heap_outstanding);
-}
-
-/* ---- 调试辅助 ---- */
-
-static const struct {
-    event_type_t type;
-    const char *name;
-} s_event_type_names[] = {
-    { EVENT_SYSTEM_STARTUP, "SYSTEM_STARTUP" },
-    { EVENT_SYSTEM_SHUTDOWN, "SYSTEM_SHUTDOWN" },
-    { EVENT_SYSTEM_ERROR, "SYSTEM_ERROR" },
-    { EVENT_UI_PAGE_CHANGE, "UI_PAGE_CHANGE" },
-    { EVENT_UI_REFRESH_REQUEST, "UI_REFRESH_REQUEST" },
-    { EVENT_TEST_PUBLISH, "TEST_PUBLISH" },
-    { EVENT_TEST_NO_DATA, "TEST_NO_DATA" },
-    { EVENT_TEST_REENTRANT, "TEST_REENTRANT" },
-    { EVENT_TEST_POOL, "TEST_POOL" },
-    { EVENT_TYPE_MAX, NULL },
-};
-
-const char *event_bus_get_type_name(event_type_t type)
-{
-    for (int i = 0; s_event_type_names[i].name != NULL; i++) {
-        if (s_event_type_names[i].type == type)
-            return s_event_type_names[i].name;
-    }
-    return "UNKNOWN";
-}
-
-const char *event_bus_get_err_name(event_bus_err_t err)
-{
-    switch (err) {
-    case EVENT_BUS_OK:                  return "OK";
-    case EVENT_BUS_ERR_INVALID_PARAM:   return "INVALID_PARAM";
-    case EVENT_BUS_ERR_NOT_INIT:        return "NOT_INIT";
-    case EVENT_BUS_ERR_ALREADY_INIT:    return "ALREADY_INIT";
-    case EVENT_BUS_ERR_QUEUE_FULL:      return "QUEUE_FULL";
-    case EVENT_BUS_ERR_NO_MEMORY:       return "NO_MEMORY";
-    case EVENT_BUS_ERR_NOT_FOUND:       return "NOT_FOUND";
-    case EVENT_BUS_ERR_MAX_SUBSCRIBERS: return "MAX_SUBSCRIBERS";
-    case EVENT_BUS_ERR_TIMEOUT:         return "TIMEOUT";
-    case EVENT_BUS_ERR_INTERNAL:        return "INTERNAL";
-    default:                            return "UNKNOWN";
-    }
-}
-
-void event_bus_print_status(void)
-{
-    event_bus_context_t *ctx = event_bus_get_context();
-
-    printf("=== Event Bus Status ===\n");
-    printf("Initialized: %s\n", ctx->initialized ? "Yes" : "No");
-    if (atomic_load(&ctx->initialized)) {
-        int queue_size = 0, subscriber_count = 0;
-        event_bus_get_status(&queue_size, &subscriber_count);
-        printf("Queue: %d / %d\n", queue_size, EVENT_BUS_QUEUE_SIZE);
-        printf("Subscribers: %d / %d\n", subscriber_count, EVENT_BUS_MAX_SUBSCRIBERS);
-        printf("Stats: published=%u processed=%u dropped=%u handler_errors=%u\n",
-               atomic_load(&ctx->stats.events_published),
-               atomic_load(&ctx->stats.events_processed),
-               atomic_load(&ctx->stats.events_dropped),
-               atomic_load(&ctx->stats.handler_errors));
-    }
-    printf("========================\n");
-}

@@ -7,5 +7,6 @@ sleep "$WAIT"
 ssh root@$IP "rm -f /tmp/dg_walk/dg_screen.raw; touch /tmp/dg_shot; i=0; while [ ! -f /tmp/dg_walk/dg_screen.raw ] && [ \$i -lt 40 ]; do sleep 0.1; i=\$((i+1)); done; mv /tmp/dg_walk/dg_screen.raw /tmp/dg_walk/$NAME.raw" || { echo "BOARD_FAIL"; exit 1; }
 scp -q root@$IP:/tmp/dg_walk/$NAME.raw /root/dg_walk/$NAME.raw || { echo "SCP_FAIL"; exit 1; }
 python3 /root/dg_walk/raw2png.py /root/dg_walk/$NAME.raw /root/dg_walk/$NAME.bmp
-convert /root/dg_walk/$NAME.bmp "/mnt/c/Users/86151/Desktop/doorguard/tmp_walk/$NAME.png" 2>/dev/null || cp /root/dg_walk/$NAME.bmp "/mnt/c/Users/86151/Desktop/doorguard/tmp_walk/$NAME.bmp"
+OUT="${DG_WALK_OUT:-/mnt/c/Users/86151/Desktop/doorguard/tmp_walk}"
+convert /root/dg_walk/$NAME.bmp "$OUT/$NAME.png" 2>/dev/null || cp /root/dg_walk/$NAME.bmp "$OUT/$NAME.bmp"
 echo "DONE $NAME"

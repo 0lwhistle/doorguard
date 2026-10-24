@@ -68,6 +68,7 @@ static void render_status(const ota_upd_status_t *st)
 
     switch (st->state) {
     case OTA_UPD_QUERYING:
+        lv_obj_set_style_text_color(s_lb_status, DG_COL_TEXT(), 0);  /* 清失败红残留(C6-2) */
         lv_label_set_text(s_lb_status, _("查询中..."));
         break;
     case OTA_UPD_AVAILABLE:
@@ -79,6 +80,7 @@ static void render_status(const ota_upd_status_t *st)
         snprintf(t, sizeof(t), "%s %lu.%lu%%", _("下载中"),
                  (unsigned long)(st->permille / 10),
                  (unsigned long)(st->permille % 10));
+        lv_obj_set_style_text_color(s_lb_status, DG_COL_TEXT(), 0);  /* 清失败红残留(C6-2) */
         lv_label_set_text(s_lb_status, t);
         break;
     case OTA_UPD_STAGED:

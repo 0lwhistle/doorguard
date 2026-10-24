@@ -12,7 +12,8 @@ extern "C" {
  *  语言取 cfg_get()->language。表缺失时 _() 回退原文(设备仍可用)。 */
 int i18n_init(const char *lang_dir);
 
-/** 翻译:查当前语言表;缺键回退原文并 WARN(便于发现漏翻) */
+/** 翻译:查当前语言表;缺键回退原文(静默无日志,C6-4:实现无 WARN 能力;
+ *  漏翻由 tests/test_i18n 的键一致性扫描兜住) */
 const char *_(const char *key);
 
 /** 切换语言并立即生效:换表 + 异步重建当前页(navigator_reload,

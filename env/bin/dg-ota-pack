@@ -70,6 +70,8 @@ def main():
     hdr[48:48 + len(date.encode())] = date.encode()
     hdr[64:96] = digest
 
+    if os.path.realpath(args.out) == os.path.realpath(args.app):
+        raise SystemExit("拒绝:输出=输入,继续会把二进制原地覆盖成 96B 空包(C7-7)")
     with open(args.out, "wb") as out, open(args.app, "rb") as f:
         out.write(hdr)
         while True:

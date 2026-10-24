@@ -89,8 +89,9 @@ static int64_t s_last_frame_ms;              /* 最近成功 DQBUF 的单调时�
                                                 据此判停(策略在服务层,这里只记事实) */
 static camera_nv12_fn s_nv12_fn;             /* 视觉帧监听(可空) */
 static camera_nv12_release_fn s_nv12_rel;
-static bool s_busy[CAM_BUF_CNT];             /* ROCKIVA 占用中,归还待 release */
-static uint32_t s_fid[CAM_BUF_CNT];
+static atomic_bool s_busy[CAM_BUF_CNT];      /* 视觉占用中,归还待 release
+                                                (主循环写/release 线程清 → 原子,C4-4) */
+static atomic_uint s_fid[CAM_BUF_CNT];
 static bool s_ready; /* 取流线程完成 STREAMON 后置位 */
 static int s_cap_w, s_cap_h;
 static int s_nplanes = 1, s_stride;
@@ -391,6 +392,10 @@ static bool vid_setup(void)
         ad.fd_flags = O_RDWR | O_CLOEXEC;
         if (ioctl(s_vid.heap_fd, DMA_HEAP_IOCTL_ALLOC, &ad) < 0) {
             DG_LOGW(CAM_TAG, "dma_heap 分配 #%d 失败:%s", i, strerror(errno));
+            for (int j = 0; j < i; j++) {    /* 回收已分配槽(C4-10:泄漏即永久) */
+                close(s_vid.fd[j]);
+                s_vid.fd[j] = -1;
+            }
             close(s_vid.heap_fd);
             s_vid.heap_fd = -1;
             return false;
@@ -478,7 +483,7 @@ void camera_poll(void)
     s_seq++;                                 /* 帧序号与消费路径解耦:RGA 失败
                                                 也照常发号,视觉/直通不受牵连 */
     if (s_rgb_preview && convert_frame_rgb(idx)) {
-        if (getenv("DG_CAM_DUMP") && s_seq == 0) {
+        if (getenv("DG_CAM_DUMP") && s_seq == 1) {   /* 首帧(自增后 1;原 ==0 恒假,C4-1) */
             FILE *f = fopen("/tmp/dg_cam.raw", "wb");
             if (f) {
                 fwrite(s_out[s_out_idx], 1, (size_t)s_out_w * s_out_h * 4, f);
@@ -504,8 +509,8 @@ void camera_poll(void)
 
     /* NV12 出口:视觉占用期间不归还,等 release 回调再 QBUF */
     if (s_nv12_fn) {
-        s_busy[idx] = true;
-        s_fid[idx] = s_seq;
+        atomic_store(&s_busy[idx], true);
+        atomic_store(&s_fid[idx], s_seq);
         s_nv12_fn(s_cap[idx].addr, s_cap_w, s_cap_h, s_seq);
     }
 
@@ -527,7 +532,7 @@ void camera_poll(void)
         }
     }
 
-    if (s_busy[idx])
+    if (atomic_load(&s_busy[idx]))
         return;                          /* 视觉占用中,on_release 归还 */
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
     buf.memory = V4L2_MEMORY_MMAP;
@@ -540,8 +545,8 @@ void camera_poll(void)
 void camera_nv12_release(uint32_t frame_id)
 {
     for (int i = 0; i < CAM_BUF_CNT; i++) {
-        if (s_busy[i] && s_fid[i] == frame_id) {
-            s_busy[i] = false;
+        if (atomic_load(&s_busy[i]) && atomic_load(&s_fid[i]) == frame_id) {
+            atomic_store(&s_busy[i], false);
             qbuf_index(i);
             return;
         }

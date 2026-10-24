@@ -36,11 +36,9 @@ LD_PRELOAD=/tmp/dg_walk/dg_touch_inject_v4.so /root/door-guard
 
 | 脚本 | 用途 |
 |---|---|
-| `walk_login.sh` | 登录链走查(v8 时序:菜单→验证→UID→方式选择 sleep 2→密码) |
-| `walk_pages2.sh` | 七页走查(auth_flags=4 仅密码用户,无方式选择页) |
-| `walk_pages3.sh` | 七页走查+残影专项(auth_flags=5 多方式,推荐) |
+| `walk_pages3.sh` | 七页走查+残影专项(auth_flags=5 多方式,推荐;其余三份
+|                  |  同构走查 2026-10-25 C7-1 归档进 git 历史) |
 | `standby_hide.sh` | 待机三态取证(主页直通→待机黑屏→唤醒恢复) |
-| `walk_ghost.sh` | 残影专项(C3 版,急速往返) |
 | `getshot.sh` | 板上触发导图并取回转 PNG |
 | `raw2png.py` | RAW→bottom-up BMP(pillow/convert 转 PNG) |
 | `perf_cpu2.sh` | 整机 CPU(/proc/pid/stat utime+stime 增量/10s,单核%) |

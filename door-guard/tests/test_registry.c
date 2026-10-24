@@ -131,18 +131,14 @@ static void test_watchdog_primitives(void)
     DG_CHECK(registry_restart("g") == REG_OK);          /* 第 2 次成功 */
     DG_CHECK(registry_is_ready("g") && registry_restart_count("g") == 1);
 
-    /* 巡检:READY 但心跳极旧 → STALE */
-    DG_CHECK(registry_watchdog_poll(2000000, 60000) == REG_WATCH_STALE);
-    /* 心跳钩子返回 <=0:视为无数据,不判失联 */
+    /* 心跳钩子返回 <=0:视为无数据,不判失联(巡检原语 watchdog_poll 已删,
+     * C5-5:生产巡检在 main.c;此处保 restart/disabled 原语) */
     reset();
     DG_CHECK(registry_register("h", ok_start, false, NULL, 0, NULL, NULL) == REG_OK);
     DG_CHECK(registry_init_all(true) == REG_OK);
-    DG_CHECK(registry_watchdog_poll(2000000, 60000) == REG_WATCH_OK);
-    /* ERROR 态 → 巡检报 ERROR */
     reset();
     DG_CHECK(registry_register("k", fail_start, false, NULL, 0, NULL, NULL) == REG_OK);
     DG_CHECK(registry_init_all(true) == REG_OK);
-    DG_CHECK(registry_watchdog_poll(2000000, 60000) == REG_WATCH_ERROR);
 
     /* disabled:重启被拒、幂等 */
     DG_CHECK(registry_mark_disabled("k") == REG_OK);

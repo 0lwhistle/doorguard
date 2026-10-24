@@ -149,7 +149,7 @@ static lv_obj_t *row_create_h(lv_obj_t *parent, const char *title,
     lv_obj_t *val = lv_label_create(row);
     lv_obj_set_style_text_font(val, DG_FONT_CN, 0);
     lv_obj_set_style_text_color(val, DG_COL_TEXT(), 0);
-    lv_obj_align(val, LV_ALIGN_LEFT_MID, 190, 0);
+    lv_obj_align(val, LV_ALIGN_LEFT_MID, DG_VALUE_X, 0);
     *val_out = val;
 
     if (btn_out) {
@@ -195,15 +195,6 @@ static lv_obj_t *row_action_btn_label(lv_obj_t *row, const char *label,
 static lv_obj_t *row_action_btn(lv_obj_t *row, lv_event_cb_t cb)
 {
     return row_action_btn_label(row, _("修改"), cb);
-}
-
-static const char *role_name(int32_t role)
-{
-    switch (role) {
-    case DG_ROLE_ADMIN:     return _("管理员");
-    case DG_ROLE_BLACKLIST: return _("黑名单");
-    default:                return _("普通");
-    }
 }
 
 /* 方式位 → 展示文本(已开启项「/」连接;全关给专门文案) */
@@ -281,7 +272,7 @@ static void refresh(void)
         return;
     }
     val_set(s_val_name, s_draft_name[0] ? s_draft_name : _("无"));
-    val_set(s_val_role, role_name(s_draft_role));
+    val_set(s_val_role, ui_role_name(s_draft_role));
     val_set(s_val_pwd, s_draft_pwd[0] ? _("已修改") : _("已设置"));
     {
         char fv[48];
@@ -901,7 +892,7 @@ void page_user_edit_create(lv_obj_t *parent)
      * 同步收窄,与「修改」按钮保持原间距 */
     lv_obj_set_size(s_img_face, 96, 96);
     lv_image_set_inner_align(s_img_face, LV_IMAGE_ALIGN_CONTAIN);
-    lv_obj_align(s_img_face, LV_ALIGN_RIGHT_MID, -282, 0);
+    lv_obj_align(s_img_face, LV_ALIGN_RIGHT_MID, DG_FACE_THUMB_X, 0);
     lv_obj_add_flag(s_img_face, LV_OBJ_FLAG_HIDDEN);
 
     row = row_create(col, _("指纹"), &s_val_finger, NULL);

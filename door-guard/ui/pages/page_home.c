@@ -171,7 +171,7 @@ void page_home_create(lv_obj_t *parent)
     lv_obj_set_style_radius(s_net_ip, DG_RADIUS, 0);
     lv_obj_set_style_pad_hor(s_net_ip, 10, 0);
     lv_obj_set_style_pad_ver(s_net_ip, 8, 0);
-    lv_obj_align(s_net_ip, LV_ALIGN_TOP_RIGHT, -DG_PAD - 65, DG_PAD);
+    lv_obj_align(s_net_ip, LV_ALIGN_TOP_RIGHT, DG_NET_IP_X, DG_PAD);
     lv_obj_clear_flag(s_net_ip, LV_OBJ_FLAG_CLICKABLE);
 
     s_status_timer = lv_timer_create(status_timer_cb, 1000, NULL);

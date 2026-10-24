@@ -44,7 +44,6 @@ void camera_poll(void);
 const camera_frame_t *camera_latest(void);
 
 /** sim 后端帧率(ms/帧) */
-void camera_sim_set_interval(uint32_t ms);
 
 /* ---- 流健康事实(断流检测用;capture_service 据此判停,holder 置态) ----
  * 板上传感器偶发死机(重启都救不回、须断电 5s)时 V4L2 不再出帧:seq 停止

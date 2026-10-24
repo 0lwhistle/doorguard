@@ -25,6 +25,13 @@
 
 static const char *TAG = "[STORAGE]";
 
+/* 日志分页 OFFSET 上限(C2-6):现实日志量远小于此,越界页按空结果返回 */
+#define LOG_QUERY_OFFSET_MAX (100000000ull)
+
+#ifdef DG_AUTH_FACE
+_Static_assert(DG_AUTH_FACE == 0x1, "storage.c SQL 清 FACE 位的 ~1 魔数须与 DG_AUTH_FACE 同步");
+#endif
+
 static sqlite3 *s_db = NULL;
 static pthread_mutex_t s_mtx = PTHREAD_MUTEX_INITIALIZER;
 static char s_db_path[256];   /* 库文件路径(storage_init 时记下):供占用查询 */
@@ -43,10 +50,12 @@ static void *s_cmp_ud;
 typedef struct {
     uint32_t        count;
     dg_feat_ent_t  *ents;                   /* 随快照整体替换的 malloc 数组 */
+    bool broken;               /* 发布/重载双双失败:快照恒空(fail-closed)。
+                                * 随快照一起在 wrlock 内变更(C2-1:原先独立
+                                * 变量 s_mtx 下写、rdlock 下读,数据竞争) */
 } cache_snap_t;
 
 static cache_snap_t s_cache;
-static bool s_cache_broken;               /* 发布/重载双双失败:快照恒空(fail-closed) */
 static pthread_rwlock_t s_cache_lk = PTHREAD_RWLOCK_INITIALIZER;
 
 static int cache_load_locked(void);       /* 前置声明(实现在 DB 读区) */
@@ -92,7 +101,9 @@ static dg_feat_ent_t *cache_copy(uint32_t extra, uint32_t *out_cap)
 static void cache_recover_locked(void)
 {
     if (cache_load_locked() != DG_OK) {
-        s_cache_broken = true;
+        pthread_rwlock_wrlock(&s_cache_lk);
+        s_cache.broken = true;
+        pthread_rwlock_unlock(&s_cache_lk);
         DG_LOGE(TAG, "特征缓存维护失败且重载失败,1:N 快照已置空(fail-closed)");
     }
 }
@@ -234,11 +245,32 @@ int storage_init(const char *db_path, const char *key_path)
 
     snprintf(s_db_path, sizeof(s_db_path), "%s", db_path);
 
-    /* WAL:断电只丢未 checkpoint 的日志,不损坏主库 */
-    sqlite3_exec(s_db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
+    /* WAL:断电只丢未 checkpoint 的日志,不损坏主库。PRAGMA 返回实际生效的
+     * 模式串——不支持 WAL 的 fs 静默回退 rollback,断电语义变差而不自知(C2-7) */
+    {
+        sqlite3_stmt *st = NULL;
+        if (sqlite3_prepare_v2(s_db, "PRAGMA journal_mode=WAL;", -1, &st, NULL)
+                == SQLITE_OK && sqlite3_step(st) == SQLITE_ROW) {
+            const char *mode = (const char *)sqlite3_column_text(st, 0);
+            if (!mode || strcmp(mode, "wal") != 0)
+                DG_LOGW(TAG, "journal_mode=%s(非 wal:该 fs 不支持 WAL,断电保护降级)",
+                        mode ? mode : "?");
+        } else {
+            DG_LOGW(TAG, "PRAGMA journal_mode=WAL 执行失败,回退 rollback 语义");
+        }
+        sqlite3_finalize(st);
+    }
     sqlite3_busy_timeout(s_db, 3000);
     /* 库文件 0600(spec-database §3):特征为密文、IC 明文,目录权限另由装配保证 */
     chmod(db_path, 0600);
+    /* WAL sidecar 同 0600(内容含未 checkpoint 的明文页) */
+    {
+        char side[280];
+        snprintf(side, sizeof(side), "%s-wal", db_path);
+        chmod(side, 0600);
+        snprintf(side, sizeof(side), "%s-shm", db_path);
+        chmod(side, 0600);
+    }
 
     /* fingerprints 表是否本就存在(须在 DDL 之前判定——CREATE IF NOT EXISTS
      * 执行完就分不出新库老库了);决定 finger_vec 迁移要不要做 */
@@ -422,7 +454,7 @@ void storage_deinit(void)
     free(s_cache.ents);
     s_cache.count = 0;
     s_cache.ents = NULL;
-    s_cache_broken = false;
+    s_cache.broken = false;
     pthread_rwlock_unlock(&s_cache_lk);
     pthread_mutex_unlock(&s_mtx);
     dg_crypto_deinit();
@@ -599,7 +631,9 @@ static int cache_load_locked(void)
     }
     sqlite3_finalize(st);
     cache_publish_locked(arr, n);
-    s_cache_broken = false;
+    pthread_rwlock_wrlock(&s_cache_lk);
+    s_cache.broken = false;
+    pthread_rwlock_unlock(&s_cache_lk);
     return DG_OK;
 }
 
@@ -1257,6 +1291,7 @@ int db_user_clear_face(const char *user_id)
     if (sqlite3_prepare_v2(s_db,
                            "UPDATE users SET face_vec=NULL, avatar=NULL,"
                            " auth_flags=auth_flags & ~1 WHERE user_id=?1",
+                           /* ~1 = ~DG_AUTH_FACE:C2-5 静态断言钉住对应关系 */
                            -1, &st, NULL) != SQLITE_OK) {
         pthread_mutex_unlock(&s_mtx);
         return DG_ERR_DB;
@@ -1865,13 +1900,17 @@ int db_log_query(const log_query_t *q, log_page_t *out)
 
     char sql[512];
     /* page/page_size 已校验为正整数,直接内联(避免动态 ?N 编号错位);
-     * 时间/用户等过滤值仍走绑定,不拼用户输入 */
+     * 时间/用户等过滤值仍走绑定,不拼用户输入。
+     * OFFSET 用 64 位算并设上限(C2-6):uint32 乘法大页号溢出静默取错页 */
+    uint64_t off = ((uint64_t)q->page - 1) * (uint64_t)q->page_size;
+    if (off > LOG_QUERY_OFFSET_MAX)
+        off = LOG_QUERY_OFFSET_MAX;             /* 越界页等价空结果 */
     snprintf(sql, sizeof(sql),
              "SELECT id,ts,user_id,user_name,method,result,reason FROM access_logs"
-             "%s%s ORDER BY ts %s, id %s LIMIT %u OFFSET %u",
+             "%s%s ORDER BY ts %s, id %s LIMIT %u OFFSET %llu",
              w ? " WHERE" : "", where,
              q->descending ? "DESC" : "ASC", q->descending ? "DESC" : "ASC",
-             q->page_size, (q->page - 1) * q->page_size);
+             q->page_size, (unsigned long long)off);
 
     sqlite3_stmt *st;
     int rc = DG_OK;
@@ -1995,7 +2034,7 @@ int db_config_get(const char *key, char *out, size_t out_size)
 const dg_feat_snap_t *storage_features_ro(void)
 {
     pthread_rwlock_rdlock(&s_cache_lk);
-    if (s_cache_broken) {
+    if (s_cache.broken) {
         static const dg_feat_snap_t empty = { .count = 0, .ents = NULL };
         return &empty;                      /* 不解锁:ro_done 统一解,见下 */
     }

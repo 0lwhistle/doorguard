@@ -88,7 +88,7 @@ out.write("""/*
  *   cd frontend && npm ci && npm run build   # 或用 ../build_frontend.sh 一键
  *   ./gen_pages.sh                          # 重生成本文件
  *   git add pages/ web_pages.c              # 两个都提交
- * 资源查找在 web_server.c 的 handle_static()(按路径精确匹配)。
+ * 资源查找在 web_server.c 的 asset_lookup()(按路径精确匹配)。
  */
 #include "web_pages.h"
 

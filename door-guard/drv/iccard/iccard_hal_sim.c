@@ -18,8 +18,8 @@ int iccard_sim_open(void)
     int fds[2];
     if (pipe(fds) != 0)
         return -1;
-    fcntl(fds[0], F_SETFL, O_CLOEXEC);
-    fcntl(fds[1], F_SETFL, O_CLOEXEC);
+    fcntl(fds[0], F_SETFD, FD_CLOEXEC);   /* C4-5:CLOEXEC 是 fd 标志(F_SETFD) */
+    fcntl(fds[1], F_SETFD, FD_CLOEXEC);   /* 原写 F_SETFL 从未生效 */
     if (s_wr >= 0)
         close(s_wr);                      /* 重复 open 换新会话:旧注入端作废 */
     s_wr = fds[1];

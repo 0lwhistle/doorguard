@@ -24,6 +24,10 @@ export const PATHS = {
   usersIcClear: '/api/users/ic_clear',
   accessSet: '/api/access_set',
   systemReboot: '/api/system/reboot',
+  otaUpload: '/api/ota/upload',
+  otaFw: '/api/ota/fw',
+  otaFwUpload: '/api/ota/fw/upload',
+  otaFwApply: '/api/ota/fw/apply',
   ws: '/api/ws',
 }
 

@@ -31,7 +31,7 @@ set_tests_properties(test_auth_fsm PROPERTIES TIMEOUT 60)
 dg_add_test(test_uart_mock dg_uart)
 
 dg_add_test(test_fp_proto dg_fp_as608)
-set_tests_properties(test_auth_fsm PROPERTIES TIMEOUT 60)
+set_tests_properties(test_fp_proto PROPERTIES TIMEOUT 60)
 
 # 指纹/IC 应用层(2026-10-01):协议纯函数 / 防重窗 / FSM 分支 / 两条录入链
 dg_add_test(test_iccard_proto dg_iccard)

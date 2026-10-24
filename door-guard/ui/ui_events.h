@@ -68,7 +68,7 @@ typedef struct {
     ev_sys_data_op_t data_op;      /* UI_EVT_DATA_OP_RESULT */
 } ui_evt_t;
 
-/** 入队(任意线程;队满丢弃并计数) */
+/** 入队(任意线程;队满直接丢弃,无计数器——C6-4 注释对齐实况) */
 void ui_evt_push(const ui_evt_t *e);
 
 /** 出队一条(LVGL 线程);空返回 false */

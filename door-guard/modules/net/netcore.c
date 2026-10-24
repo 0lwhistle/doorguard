@@ -127,7 +127,15 @@ int netcore_start(void)
     if (atomic_load(&s_running))
         return DG_OK;
 
-    memset(&s_mgr, 0, sizeof(s_mgr));
+    /* CAS 抢启动权(C2-3):上面 s_running 检查在线程创建成功后才置位,并发
+     * 双调用会双双穿过 → 双 mg_mgr_init+线程泄漏;实践单线程,防御性收口 */
+    static atomic_bool s_starting;
+    bool expect = false;
+    if (!atomic_compare_exchange_strong(&s_starting, &expect, true)) {
+        DG_LOGW(TAG, "netcore_start 重复调用,忽略");
+        return DG_ERR_STATE;
+    }
+
     mg_mgr_init(&s_mgr);
     load_dns_server();
     /* 默认 3s:家用路由对未缓存域名的递归解析常超(板上实测 ntp.aliyun.com
@@ -139,6 +147,7 @@ int netcore_start(void)
     atomic_store(&s_running, true);
     if (pthread_create(&s_tid, NULL, loop_thread, NULL) != 0) {
         atomic_store(&s_running, false);
+        atomic_store(&s_starting, false);   /* 放行下次启动重试 */
         mg_mgr_free(&s_mgr);
         DG_LOGE(TAG, "loop 线程创建失败,网络层不可用");
         return DG_ERR_IO;

@@ -21,7 +21,8 @@
  *     ENOTTY 排水回退已覆盖;若应用未起,FIFO 无读者时帧被丢弃(事件性
  *     数据,丢弃等价于"驱动没扫到",应用重开 FIFO 后从新帧开始)。
  *
- * 编译(WSL):见同目录 build_iccard_daemon.sh;板上部署:
+ * 编译(WSL):gcc -O2 -Wall -o iccard_daemon iccard_daemon.c(静态自足,
+ *   无项目内依赖;原 build_iccard_daemon.sh 未曾入库)。板上部署:
  *   scp iccard_daemon root@板:/userdata/doorguard/
  *   /etc/init.d/S60doorguard 里的 spidev 绑定钩子会在开机时把 spidev
  *   绑到 spi-gpio 总线上的 rc522 设备(产出发 /dev/spidevX.Y)。

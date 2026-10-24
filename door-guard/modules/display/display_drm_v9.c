@@ -254,7 +254,8 @@ static bool vp_discover(void)
 
 /* 槽位 → NV12 fb(每槽只导入/AddFB 一次)。哨兵用 -1 而非 0——相机槽位
  * 从 0 开始,0 当空位会在首帧假命中返回 fb=0(f519b1e 实测踩坑) */
-static uint32_t vp_fb_for(int slot, int dmabuf_fd, int32_t h, int32_t stride)
+static uint32_t vp_fb_for(int slot, int dmabuf_fd, int32_t w, int32_t h,
+                          int32_t stride)
 {
     int fd = lv_linux_drm_get_fd(lv_display_get_default());
     for (size_t i = 0; i < sizeof(s_vp.cache) / sizeof(s_vp.cache[0]); i++) {
@@ -272,7 +273,8 @@ static uint32_t vp_fb_for(int slot, int dmabuf_fd, int32_t h, int32_t stride)
             uint32_t pitches[2] = { (uint32_t)stride, (uint32_t)stride };
             uint32_t offsets[2] = { 0, (uint32_t)stride * h };
             uint32_t fb = 0;
-            if (drmModeAddFB2(fd, DG_SCREEN_W, DG_SCREEN_H, DRM_FORMAT_NV12,
+            /* FB 尺寸=dmabuf 实际宽高(C4-2:原硬编码屏幕分辨率,rot≠90 时错) */
+            if (drmModeAddFB2(fd, (uint32_t)w, (uint32_t)h, DRM_FORMAT_NV12,
                               handles, pitches, offsets, &fb, 0)) {
                 DG_LOGE("[DISPLAY]", "AddFB2 NV12 失败:%s", strerror(errno));
                 return 0;
@@ -299,7 +301,7 @@ int display_video_plane_show(int slot, int dmabuf_fd, int32_t w, int32_t h,
 {
     if (!display_has_video_plane())
         return DG_ERR_UNSUPPORTED;
-    uint32_t fb = vp_fb_for(slot, dmabuf_fd, h, stride);
+    uint32_t fb = vp_fb_for(slot, dmabuf_fd, w, h, stride);
     if (!fb) {
         s_vp.ok = false;
         DG_LOGE("[DISPLAY]", "video fb 导入失败,永久降级软渲染");
@@ -335,7 +337,9 @@ int display_video_plane_show(int slot, int dmabuf_fd, int32_t w, int32_t h,
         static int n_err;
         if (n_err++ < 3)
             DG_LOGE("[DISPLAY]", "video plane 提交失败(rc=%d)", rc);
-        return rc;
+        s_vp.ok = false;                 /* 契约「失败即永久降级」(C4-3:原先
+                                            返回裸 errno 且不降级) */
+        return DG_ERR_IO;
     }
     return DG_OK;
 }

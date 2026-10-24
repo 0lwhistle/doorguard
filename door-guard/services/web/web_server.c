@@ -83,7 +83,7 @@ static struct mg_connection *s_lsn = NULL;   /* HTTP 监听(loop 线程私有) *
 static event_subscription_t *s_subs[8];
 static int s_sub_cnt = 0;
 static time_t s_started_at = 0;
-static int s_port = 8080;
+static int s_port = 80;                  /* web_setup 按 cfg 覆写;默认 80 */
 
 /* 最近一次 NTP 结果(设备信息里显示"已同步/未同步 + 时间")。
  * 总线线程写(on_ntp_result)、loop 线程读(设备信息 JSON):并到
@@ -113,17 +113,15 @@ static uint32_t s_video_last_seq;
 
 static char s_queue[WS_QUEUE][WS_MSG_MAX];
 static int s_q_head = 0, s_q_tail = 0;
-static int s_q_dropped = 0;
 static pthread_mutex_t s_ws_mtx = PTHREAD_MUTEX_INITIALIZER;
 
-/* 入队(任意线程;满则丢最旧并计数——宁可丢几条实时事件,也不能阻塞总线) */
+/* 入队(任意线程;满则丢最旧——宁可丢几条实时事件,也不能阻塞总线) */
 static void ws_enqueue(const char *json)
 {
     pthread_mutex_lock(&s_ws_mtx);
     int next = (s_q_head + 1) % WS_QUEUE;
     if (next == s_q_tail) {
         s_q_tail = (s_q_tail + 1) % WS_QUEUE;
-        s_q_dropped++;
     }
     snprintf(s_queue[s_q_head], WS_MSG_MAX, "%s", json);
     s_q_head = next;
@@ -157,7 +155,7 @@ static void ws_push_async(void)
     netcore_post(ws_drain_cb, NULL);
 }
 
-static void ws_add(struct mg_connection *c)
+static bool ws_add(struct mg_connection *c)
 {
     for (int i = 0; i < WS_MAX_CONN; i++) {
         if (!s_ws[i]) {
@@ -166,11 +164,11 @@ static void ws_add(struct mg_connection *c)
             s_ws_last_rx[i] = mg_millis();
             s_ws_last_ping[i] = mg_millis();
             DG_LOGI(TAG, "WebSocket 已连接");
-            return;
+            return true;
         }
     }
-    DG_LOGW(TAG, "WebSocket 连接数达上限,拒绝");   /* 表满:直接关 */
-    c->is_draining = 1;
+    DG_LOGW(TAG, "WebSocket 连接数达上限,拒绝");
+    return false;                        /* 表满:升级前拦下(C3-4) */
 }
 
 static void ws_remove(struct mg_connection *c)
@@ -905,18 +903,31 @@ static void handle_account(struct mg_connection *c, struct mg_http_message *hm)
         DG_LOGI(TAG, "web 凭据已由 web 端修改(来源 %s)",
                 remote_ip(c, ipbuf, sizeof(ipbuf)));
     } else {
-        cJSON_AddBoolToObject(root, "ok", false);
-        if (rc == DG_ERR_BAD_UID)
+        if (rc == DG_ERR_BAD_UID) {
+            cJSON_AddBoolToObject(root, "ok", false);
             cJSON_AddStringToObject(root, "msg",
                                     "账号需 3~31 位字母、数字、- 或 _,且以字母或数字开头");
-        else if (rc == DG_ERR_BAD_PWD)
+            cJSON_AddNumberToObject(root, "err", rc);
+            json_reply(c, 400, root);
+        } else if (rc == DG_ERR_BAD_PWD) {
+            cJSON_AddBoolToObject(root, "ok", false);
             cJSON_AddStringToObject(root, "msg", "口令需 4~31 位,不能含空格");
-        else {
-            cJSON_AddStringToObject(root, "msg", "旧口令错误或保存失败");
+            cJSON_AddNumberToObject(root, "err", rc);
+            json_reply(c, 400, root);
+        } else if (rc == DG_ERR_IO) {
+            /* 存储失败(web_auth_set 写 device_config 失败)与口令错误是两回事:
+             * 吞成 400 会把磁盘满伪装成密码错(C3-11) */
+            cJSON_AddBoolToObject(root, "ok", false);
+            cJSON_AddStringToObject(root, "msg", "保存失败(存储异常,请检查磁盘)");
+            cJSON_AddNumberToObject(root, "err", rc);
+            json_reply(c, 500, root);
+        } else {
+            cJSON_AddBoolToObject(root, "ok", false);
+            cJSON_AddStringToObject(root, "msg", "旧口令错误");
             rc = DG_ERR_WRONG_PASSWORD;
+            cJSON_AddNumberToObject(root, "err", rc);
+            json_reply(c, 400, root);
         }
-        cJSON_AddNumberToObject(root, "err", rc);
-        json_reply(c, 400, root);
     }
     cJSON_Delete(root);
 }
@@ -924,6 +935,7 @@ static void handle_account(struct mg_connection *c, struct mg_http_message *hm)
 /* ---- OTA 上传(流式:HDRS 起、READ 喂、收完落位) ---- */
 
 static struct mg_connection *s_ota_c = NULL;   /* 当前上传连接(loop 私有) */
+static bool s_ota_resumed = false;             /* 本次会话是否续传起(应答用) */
 static int64_t s_ota_remain = 0;               /* 还差多少字节 */
 
 static void ota_fail(struct mg_connection *c, int code, const char *msg)
@@ -948,7 +960,8 @@ static void ota_complete(void)
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "ok", true);
     cJSON_AddStringToObject(root, "staged", path);
-    cJSON_AddBoolToObject(root, "resumed", false);
+    cJSON_AddBoolToObject(root, "resumed", s_ota_resumed);
+    s_ota_resumed = false;
     json_reply(c, 200, root);
     cJSON_Delete(root);
 }
@@ -1066,6 +1079,7 @@ static void ota_start(struct mg_connection *c, struct mg_http_message *hm)
     }
 
     s_ota_c = c;
+    s_ota_resumed = resumed;
     s_ota_remain = (int64_t)m.size - (int64_t)offset;
     /* 头部同拍已带正文:先摘头(触发 mongoose 卸载解析器),再喂正文。
      * 摘头后正文从 recv[0] 开始,ota_feed_from 的偏移才正确 */
@@ -1434,7 +1448,10 @@ static void handle_ws(struct mg_connection *c, struct mg_http_message *hm)
         json_msg(c, 401, "未登录或会话已过期");
         return;
     }
-    ws_add(c);
+    if (!ws_add(c)) {
+        json_msg(c, 503, "WebSocket 连接数达上限,请稍后重试");
+        return;
+    }
     mg_ws_upgrade(c, hm, NULL);
 }
 
@@ -1683,31 +1700,30 @@ static void handle_users_update(struct mg_connection *c, struct mg_http_message 
     int32_t role = -1;
     uint32_t flags = 0;
     bool has_name = jstr(body, "name", name, sizeof(name));
-    bool has_role = false, has_flags = false;
-    const cJSON *rit = cJSON_GetObjectItemCaseSensitive(body, "role");
-    if (cJSON_IsNumber(rit)) {
-        has_role = true;
-        role = (int32_t)rit->valuedouble;
-    }
-    const cJSON *fit = cJSON_GetObjectItemCaseSensitive(body, "auth_flags");
-    if (cJSON_IsNumber(fit)) {
-        has_flags = true;
-        flags = (uint32_t)fit->valuedouble;
-    }
     bool has_uid = jstr(body, "uid", uid, sizeof(uid));
+    /* 复用 users_add 的 jrole/jflags 范围解析(C3-13:手写校验与之重复);
+     * 键在而值非法 → 400(语义与手写版一致) */
+    bool has_role = false, has_flags = false;
+    if (cJSON_GetObjectItemCaseSensitive(body, "role")) {
+        if (!jrole(body, &role)) {
+            cJSON_Delete(body);
+            json_msg(c, 400, "role 取值 0 普通/1 管理员/2 黑名单");
+            return;
+        }
+        has_role = true;
+    }
+    if (cJSON_GetObjectItemCaseSensitive(body, "auth_flags")) {
+        if (!jflags(body, &flags)) {
+            cJSON_Delete(body);
+            json_msg(c, 400, "auth_flags 必须是 1~15 的验证方式组合");
+            return;
+        }
+        has_flags = true;
+    }
     cJSON_Delete(body);
 
     if (!has_uid || (!has_name && !has_role && !has_flags)) {
         json_msg(c, 400, "需要 uid 与至少一个待改字段");
-        return;
-    }
-    if (has_role && (role < 0 || role > 2)) {
-        json_msg(c, 400, "role 取值 0 普通/1 管理员/2 黑名单");
-        return;
-    }
-    if (has_flags &&
-        (flags == 0 || flags > (uint32_t)DG_AUTH_ALL)) {
-        json_msg(c, 400, "auth_flags 必须是 1~15 的验证方式组合");
         return;
     }
 
@@ -2559,6 +2575,8 @@ static int on_net_addr(const event_t *e, void *ud)
 static void net_watch_cb(void *arg)
 {
     (void)arg;
+    if (!s_started)
+        return;                          /* C3-10:teardown 后定时器残留窗口守卫 */
     net_info_addr_t now;
     if (net_info_read(&now) != DG_OK)
         return;
@@ -2632,6 +2650,7 @@ static int on_web_set(const event_t *e, void *ud)
  * 重启窗口里上一实例可能尚未完全退出(EADDRINUSE 是暂态);仍失败才回退
  * 8080(非 root 环境如 PC 模拟器)并同步 mDNS 通告端口 */
 static int s_bind_retry;
+static struct mg_timer *s_tmr_watch, *s_tmr_uptime, *s_tmr_video;  /* C3-10 */
 
 static void web_setup(void *arg)
 {
@@ -2657,15 +2676,20 @@ static void web_setup(void *arg)
         DG_LOGE(TAG, "web 启动失败(端口 %d 被占?)", s_port);
     else
         DG_LOGI(TAG, "web 上位机就绪 :%d(版本 %s)", s_port, DG_FW_VERSION);
-    mg_timer_add(netcore_mgr(), 5000, MG_TIMER_REPEAT, net_watch_cb, NULL);
-    mg_timer_add(netcore_mgr(), 5000, MG_TIMER_REPEAT, uptime_push_cb, NULL);
-    mg_timer_add(netcore_mgr(), 100, MG_TIMER_REPEAT, video_push_cb, NULL);
+    s_tmr_watch = mg_timer_add(netcore_mgr(), 5000, MG_TIMER_REPEAT, net_watch_cb, NULL);
+    s_tmr_uptime = mg_timer_add(netcore_mgr(), 5000, MG_TIMER_REPEAT, uptime_push_cb, NULL);
+    s_tmr_video = mg_timer_add(netcore_mgr(), 100, MG_TIMER_REPEAT, video_push_cb, NULL);
     net_watch_cb(NULL);                  /* 起服即记录基线地址(变化才推) */
 }
 
 static void web_teardown(void *arg)
 {
     (void)arg;
+    /* 摘掉 setup 注册的三个重复定时器(C3-10):stop→start 不摘会叠注册,
+     * 定时器回调查 stop 后的空状态 */
+    if (s_tmr_watch) { mg_timer_free(&netcore_mgr()->timers, s_tmr_watch); s_tmr_watch = NULL; }
+    if (s_tmr_uptime) { mg_timer_free(&netcore_mgr()->timers, s_tmr_uptime); s_tmr_uptime = NULL; }
+    if (s_tmr_video) { mg_timer_free(&netcore_mgr()->timers, s_tmr_video); s_tmr_video = NULL; }
     if (s_ota_c || s_fw_c) {
         ota_abort();
         s_ota_c = NULL;
@@ -2711,7 +2735,6 @@ int web_server_start(void)
     s_started = true;
     pthread_mutex_lock(&s_ws_mtx);
     s_q_head = s_q_tail = 0;
-    s_q_dropped = 0;
     pthread_mutex_unlock(&s_ws_mtx);
 
     s_sub_cnt = 0;

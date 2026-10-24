@@ -39,13 +39,15 @@ static const int locks_opts[] = { 30, 60, 120, 300 };
     static void name##_click(lv_event_t *e)                              \
     {                                                                    \
         (void)e;                                                         \
-        static char buf[4][16];                                          \
-        const char *opts[4];                                             \
-        for (int i = 0; i < 4; i++) {                                    \
+        enum { N = (int)(sizeof(OPTS) / sizeof(OPTS[0])) };              \
+        static char buf[N][16];          /* C6-1:按表长(原硬编码 4,     \
+                                          * door_opts 5 项的第 5 项永远选不到) */ \
+        const char *opts[N];                                             \
+        for (int i = 0; i < N; i++) {                                    \
             snprintf(buf[i], sizeof(buf[i]), "%d", OPTS[i]);             \
             opts[i] = buf[i];                                            \
         }                                                                \
-        dg_popup_choice(LABEL, opts, 4, name##_pick, NULL, NULL);        \
+        dg_popup_choice(LABEL, opts, N, name##_pick, NULL, NULL);        \
     }
 
 MAKE_PICKER(door, "door_open_ms", door_opts, _("开门时长"))
@@ -118,7 +120,7 @@ void page_access_set_create(lv_obj_t *parent)
 void page_access_set_destroy(void)
 {
     if (s_timer) {
-        lv_timer_del(s_timer);
+        lv_timer_delete(s_timer);
         s_timer = NULL;
     }
     s_row_btns[0] = s_row_btns[1] = s_row_btns[2] = NULL;

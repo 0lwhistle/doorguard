@@ -14,7 +14,7 @@
 #include <string.h>
 #include <unistd.h>
 
-static const char *TAG = "[CARDCARD]";
+static const char *TAG = "[ICCARD]";
 
 static const char *SVC_NAME = "iccard";   /* EV_SYS_SERVICE_STATE 注册名 */
 

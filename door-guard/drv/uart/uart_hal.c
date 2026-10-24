@@ -93,8 +93,16 @@ int uart_hal_open(const uart_config_t *cfg, uart_rx_fn rx, void *ud)
     }
 
     s_rx_run = true;
-    if (pthread_create(&s_rx_tid, NULL, rx_thread, NULL) == 0)
+    if (pthread_create(&s_rx_tid, NULL, rx_thread, NULL) == 0) {
         s_rx_created = true;
+    } else {
+        /* 读线程起不来 = 链路只发不收(指纹/IC 全瘫),必须显式失败(C4-7) */
+        s_rx_run = false;
+        close(s_fd);
+        s_fd = -1;
+        DG_LOGE(TAG, "rx 线程创建失败:%s", strerror(errno));
+        return DG_ERR_INTERNAL;
+    }
     DG_LOGI(TAG, "%s 就绪 %d 8%c%d", cfg->device, cfg->baud, cfg->parity,
             cfg->stop_bits);
     return DG_OK;

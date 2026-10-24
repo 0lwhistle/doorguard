@@ -19,6 +19,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 static const char *TAG = "[CFG]";
@@ -539,6 +540,23 @@ static int atomic_write(const char *path, const char *data)
     if (rename(tmp, path) != 0) {
         remove(tmp);
         return DG_ERR_IO;
+    }
+    /* fsync 父目录(C1-7):rename 的目录项改动也要落盘,掉电后 rename 才保证持久 */
+    {
+        char dir[288];
+        snprintf(dir, sizeof(dir), "%s", path);
+        char *slash = strrchr(dir, '/');
+        int dfd = -1;
+        if (slash && slash != dir) {
+            *slash = '\0';
+            dfd = open(dir, O_RDONLY | O_DIRECTORY);
+        } else if (slash == dir) {
+            dfd = open("/", O_RDONLY | O_DIRECTORY);
+        }
+        if (dfd >= 0) {
+            fsync(dfd);
+            close(dfd);
+        }
     }
     return DG_OK;
 }

@@ -102,10 +102,15 @@ int iccard_hal_flush(int fd)
     if (fl < 0 || fcntl(fd, F_SETFL, fl | O_NONBLOCK) < 0)
         return DG_ERR_IO;
     uint8_t drain[DG_ICCARD_FRAME_SZ];
-    while (read(fd, drain, sizeof(drain)) > 0) {
+    /* 以最后一次 read 的返回值判定(C4-12:errno 可能陈旧;EOF=对端关=死节点,
+     * 不得误报成功) */
+    ssize_t rc;
+    while ((rc = read(fd, drain, sizeof(drain))) > 0) {
     }
     fcntl(fd, F_SETFL, fl);
-    return (errno == EAGAIN) ? DG_OK : DG_ERR_IO;
+    if (rc < 0 && errno == EAGAIN)
+        return DG_OK;                    /* 排干:缓冲清空 */
+    return DG_ERR_IO;                    /* EOF(死节点)/其他读错 */
 }
 
 void iccard_hal_close(int fd)

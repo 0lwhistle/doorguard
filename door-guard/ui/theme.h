@@ -55,6 +55,10 @@ extern "C" {
 #define DG_BTN_H      96   /**< 主按钮高度(触摸友好) */
 #define DG_RADIUS     12
 #define DG_PAD        16
+/* 布局魔数收编(C6-8):值列/头像/状态 chip 的偏移原散在各页,改布局要点名 */
+#define DG_VALUE_X      190  /**< 设置页「值」列 x 偏移(标签列右侧) */
+#define DG_FACE_THUMB_X (-282) /**< 编辑页人脸缩略图右对齐偏移 */
+#define DG_NET_IP_X     (-DG_PAD - 65) /**< 主页网络/IP chip 右上偏移 */
 
 /** 中文界面字体(由 ui/font/gen.sh 生成,覆盖 lang 目录 json 全部字符)。
  * 四档:XS 密排预留 / SUB 次要提示 / CN 正文·列表·按钮 / TITLE 页面标题

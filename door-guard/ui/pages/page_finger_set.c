@@ -348,7 +348,7 @@ static lv_obj_t *slot_row(lv_obj_t *parent, int i, lv_coord_t y)
     lv_obj_t *val = lv_label_create(row);
     lv_obj_set_style_text_font(val, DG_FONT_CN, 0);
     lv_obj_set_style_text_color(val, DG_COL_TEXT(), 0);
-    lv_obj_align(val, LV_ALIGN_LEFT_MID, 190, 0);
+    lv_obj_align(val, LV_ALIGN_LEFT_MID, DG_VALUE_X, 0);
     s_val[i] = val;
 
     lv_obj_t *btn = dg_btn_create_light(row, NULL, "");

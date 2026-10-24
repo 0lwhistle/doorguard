@@ -110,14 +110,17 @@ int dg_aes256_ctr(const uint8_t key[32], const uint8_t iv[16],
 int dg_feature_wrap(const uint8_t *plain, size_t len,
                     uint8_t *out, size_t out_cap, size_t *out_len)
 {
-    if (!s_key_ready)
-        return DG_ERR_NOT_INIT;
     if (!plain || len == 0 || !out || !out_len)
         return DG_ERR_PARAM;
     if (out_cap < len + 16)
         return DG_ERR_PARAM;                    /* 需容纳 IV 前缀 */
 
     pthread_mutex_lock(&s_key_mtx);
+    /* 就绪检查进锁内(C2-2):锁外读 s_key_ready 与 deinit 清钥匙构成 TOCTOU */
+    if (!s_key_ready) {
+        pthread_mutex_unlock(&s_key_mtx);
+        return DG_ERR_NOT_INIT;
+    }
     if (RAND_bytes(out, 16) != 1) {             /* 每次封装随机 IV:同明文不同密文 */
         pthread_mutex_unlock(&s_key_mtx);
         return DG_ERR_INTERNAL;
@@ -133,14 +136,17 @@ int dg_feature_wrap(const uint8_t *plain, size_t len,
 int dg_feature_unwrap(const uint8_t *in, size_t len,
                       uint8_t *out, size_t out_cap, size_t *out_len)
 {
-    if (!s_key_ready)
-        return DG_ERR_NOT_INIT;
     if (!in || len <= 16 || !out || !out_len)
         return DG_ERR_PARAM;
     if (out_cap < len - 16)
         return DG_ERR_PARAM;
 
     pthread_mutex_lock(&s_key_mtx);
+    /* 就绪检查进锁内(C2-2,同 wrap) */
+    if (!s_key_ready) {
+        pthread_mutex_unlock(&s_key_mtx);
+        return DG_ERR_NOT_INIT;
+    }
     int rc = dg_aes256_ctr(s_device_key, in, in + 16, len - 16, out);
     pthread_mutex_unlock(&s_key_mtx);
     if (rc != DG_OK)

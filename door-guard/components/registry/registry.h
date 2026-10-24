@@ -80,20 +80,8 @@ uint32_t registry_restart_count(const char *name);
 uint32_t registry_count(void);
 /** 按索引取名字(配合 registry_count 遍历);越界返回 NULL */
 const char *registry_name_at(uint32_t idx);
-/** 最近心跳(unix ms);无心跳钩子返回 -1 */
+/** 最近心跳(单调毫秒,now_mono_ms 同域——同 B6-2 契约);无心跳钩子返回 -1 */
 int64_t registry_last_heartbeat_ms(const char *name);
-
-/* 巡检结论(最严重者胜出;处置策略——重启一次/禁用/停机——归调用方):
- *   REG_WATCH_OK     全部健康
- *   REG_WATCH_STALE  有 READY 服务心跳超龄(仅对注册了心跳钩子的服务判定)
- *   REG_WATCH_ERROR  有服务处于 ERROR 态 */
-typedef enum {
-    REG_WATCH_OK = 0,
-    REG_WATCH_STALE,
-    REG_WATCH_ERROR,
-} registry_watch_t;
-
-registry_watch_t registry_watchdog_poll(int64_t now_ms, uint32_t stale_after_ms);
 
 #ifdef __cplusplus
 }

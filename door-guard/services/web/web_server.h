@@ -2,7 +2,7 @@
  * web_server.h — 内嵌 web 上位机(spec-network §1,mongoose 统一事件循环)
  *
  * 传输层跑在 modules/net/netcore 的 loop 线程上(2026-09-22 起替代 civetweb)。
- * 端口:device_config web_port(默认 8080)。
+ * 端口:device_config web_port(默认 80;绑定失败回退 8080,见 web_setup)。
  * 安全(逐条对应实现):
  *   - 除静态页(/ 与 /assets 资源)与登录外,全部要求 token
  *     (X-Auth-Token;WebSocket 因浏览器无法自定义头,用 ?token=)

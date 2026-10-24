@@ -6,6 +6,7 @@
  * apply 提取时)→ 流式上传(带进度/断点续传)→ apply 交装(S60 装槽重启)。
  */
 import { request, uploadWithProgress } from './client'
+import { PATHS } from './endpoints'
 
 /** 解析 .ota 包头(结构级校验;返回 {version,date,payloadSize,sha256Hex}) */
 export function parseOtaHeader(file) {
@@ -60,12 +61,12 @@ export function parseOtaHeader(file) {
 
 /** 槽位状态(GET /api/ota/fw) */
 export function getFwSlot() {
-  return request('/api/ota/fw')
+  return request(PATHS.otaFw)
 }
 
 /** 上传到槽(整个 .ota;offset 续传;onProgress 0~100) */
 export function uploadFw(file, { offset = 0, onProgress, signal } = {}) {
-  return uploadWithProgress('/api/ota/fw/upload', file.slice(offset), {
+  return uploadWithProgress(PATHS.otaFwUpload, file.slice(offset), {
     headers: {
       'X-OTA-Size': String(file.size),
       ...(offset > 0 ? { 'X-OTA-Offset': String(offset) } : {}),
@@ -77,10 +78,10 @@ export function uploadFw(file, { offset = 0, onProgress, signal } = {}) {
 
 /** 删除槽内包(DELETE /api/ota/fw) */
 export function deleteFw() {
-  return request('/api/ota/fw', { method: 'DELETE' })
+  return request(PATHS.otaFw, { method: 'DELETE' })
 }
 
 /** 提取校验并交装(POST /api/ota/fw/apply;202 = 受理) */
 export function applyFw() {
-  return request('/api/ota/fw/apply', { method: 'POST' })
+  return request(PATHS.otaFwApply, { method: 'POST' })
 }

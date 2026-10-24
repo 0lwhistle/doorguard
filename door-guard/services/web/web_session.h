@@ -24,7 +24,7 @@
 extern "C" {
 #endif
 
-#define WEB_SESSION_MAX    8      /**< 表槽位数(单会话下仅占 1 槽,防御性上限) */
+#define WEB_SESSION_MAX    1      /**< 单会话策略(2026-09-22):签发即清空,恒占 1 槽 */
 #define WEB_SESSION_TTL_S  3600   /**< 会话有效期(秒) */
 #define WEB_TOKEN_LEN      32     /**< hex 长度(16B 随机) */
 

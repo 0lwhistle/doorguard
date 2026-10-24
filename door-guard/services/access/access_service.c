@@ -24,7 +24,9 @@
 #include "storage.h"
 #include "tasker.h"
 #include "timeutil.h"
-#include "vision_service.h"
+/* vision_service.h 的函数声明零调用;留下只为 dg_vision_mode_t(家在
+ * vision_backend.h,经它传递)。C1-9:include 收窄到类型实际来源 */
+#include "vision_backend.h"
 
 #include <pthread.h>
 #include <stdint.h>

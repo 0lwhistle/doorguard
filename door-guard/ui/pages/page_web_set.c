@@ -200,17 +200,15 @@ void page_web_set_create(lv_obj_t *parent)
     lv_obj_align(back, LV_ALIGN_TOP_LEFT, DG_PAD, 16);
     lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);
 
-    /* 页面刚打开时先请求一次状态(避免显示空) */
-    bridge_web_state_req();
-
-    /* 2s 跟随刷新:状态来自 net 回执,轮询请求保持页面与设备一致 */
+    /* 首发请求由 show(on_enter)承担;2s 定时器跟随刷新(C6-3:create 里
+     * 再直调一次是三连发) */
     s_poll = lv_timer_create(poll_timer_cb, 2000, NULL);
 }
 
 void page_web_set_destroy(void)
 {
     if (s_poll) {
-        lv_timer_del(s_poll);
+        lv_timer_delete(s_poll);
         s_poll = NULL;
     }
     DG_LOGI("[WEBSET]", "page destroy");

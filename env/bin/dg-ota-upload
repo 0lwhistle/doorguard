@@ -13,7 +13,11 @@ base="http://$ip:$port"
 
 user="${DG_WEB_USER:-admin}"
 pwd="${DG_WEB_PWD:-admin}"
-resp=$(curl -s -H 'Content-Type: application/json' \
+if ! curl -s --connect-timeout 5 -o /dev/null "$base/api/device" 2>/dev/null; then
+    echo "连不上 $base(板不在线/端口不对;web 端口可用 DG_WEB_PORT 覆盖)" >&2
+    exit 1
+fi
+resp=$(curl -s --connect-timeout 5 -H 'Content-Type: application/json' \
     -d "{\"user\":\"$user\",\"pwd\":\"$pwd\"}" "$base/api/login")
 token=$(echo "$resp" | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
 [ -n "$token" ] || { echo "登录失败: $resp"; exit 1; }

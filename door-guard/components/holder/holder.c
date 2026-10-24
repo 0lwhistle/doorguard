@@ -178,7 +178,8 @@ holder_err_t holder_register_module_ex(const char* name,
         return HOLDER_ERR_NO_MEMORY;
     }
     
-    // 初始化节点信息
+    // 初始化节点信息。name 是指针别名不拷贝(C5-3):调用方必须传静态存活
+    // 字符串(与 registry 的拷贝语义分叉,勿混用) */
     new_node->info.name = name;
     new_node->info.init_fn = init_fn;
     new_node->info.state = HOLDER_MODULE_STATE_REGISTERED;

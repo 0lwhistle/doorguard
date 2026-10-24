@@ -3,7 +3,8 @@
 #
 #   source <仓库>/env/env.sh     # 仓库内外均可,自动定位仓库根
 #
-# 可用脚本: dg-build / dg-deploy / dg-tc-install / dg-serial
+# 可用脚本: dg-build dg-build-pc dg-test dg-deploy dg-font dg-frontend
+#            dg-ota-pack dg-ota-upload dg-ota-publish dg-tc-install dg-serial
 # 可选环境变量(可写进 ~/.bashrc):
 #   DG_TC_ROOT     交叉工具链根目录   (默认 ~/dg-toolchain)
 #   DOORGUARD_IP   板子 IP            (dg-deploy 可省参数)
@@ -46,7 +47,7 @@ fi
 
 echo "door-guard env 就绪"
 echo "  DOORGUARD_ROOT = $DOORGUARD_ROOT"
-echo "  脚本           = dg-build dg-build-pc dg-test dg-deploy dg-font dg-frontend dg-ota-upload dg-ota-publish dg-tc-install dg-serial(用法: env/README.md)"
+echo "  脚本           = dg-build dg-build-pc dg-test dg-deploy dg-font dg-frontend dg-ota-pack dg-ota-upload dg-ota-publish dg-tc-install dg-serial(用法: env/README.md)"
 [ -n "${DG_BUILD_DIR:-}" ]      && echo "  DG_BUILD_DIR   = $DG_BUILD_DIR"
 [ -n "${DG_TEST_BUILD_DIR:-}" ] && echo "  DG_TEST_BUILD_DIR = $DG_TEST_BUILD_DIR"
 [ -n "${DG_PC_BUILD_DIR:-}" ]   && echo "  DG_PC_BUILD_DIR   = $DG_PC_BUILD_DIR"

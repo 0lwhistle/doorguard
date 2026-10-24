@@ -105,10 +105,6 @@ int camera_init(const char *res_path, camera_frame_fn cb, void *ud)
     return DG_OK;
 }
 
-void camera_sim_set_interval(uint32_t ms)
-{
-    s_interval_ms = ms;
-}
 
 int camera_rotation(void)
 {

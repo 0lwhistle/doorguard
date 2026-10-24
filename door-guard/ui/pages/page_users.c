@@ -33,15 +33,6 @@ static enroll_user_row_t s_rows[USERS_PAGE_SIZE];     /* 本页行数据(服务�
 static void refresh_list(void);
 static void on_row_click(lv_event_t *e);
 
-static const char *role_name(int32_t role)
-{
-    switch (role) {
-    case DG_ROLE_ADMIN:     return _("管理员");
-    case DG_ROLE_BLACKLIST: return _("黑名单");
-    default:                return _("普通");
-    }
-}
-
 static void refresh_list(void)
 {
     if (!s_list)
@@ -62,7 +53,7 @@ static void refresh_list(void)
         snprintf(rowtxt, sizeof(rowtxt), "%.*s %.*s [%.24s]",
                  DG_UID_LEN - 1, s_rows[i].user_id,
                  DG_NAME_LEN - 1, s_rows[i].user_name,
-                 role_name(s_rows[i].role));
+                 ui_role_name(s_rows[i].role));
         /* 整块拷贝(dst/src 同为 char[DG_UID_LEN]):等价且绕开格式分析误报 */
         memcpy(s_row_uids[i], s_rows[i].user_id, DG_UID_LEN);
         /* 行首头像缩略图(40×40,libjpeg 1/4 缩放解码 + 控件内缓存);

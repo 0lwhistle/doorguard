@@ -217,27 +217,25 @@ static void pub_enroll_result(int32_t kind, const char *uid, uint32_t seq, int e
  * 应答帧可能跨包到达/与数据包粘包:字节进环形缓冲,持久解析器逐帧吐出。 */
 
 #define FP_RX_RING_SZ 2048
-static pthread_mutex_t s_rx_mtx = PTHREAD_MUTEX_INITIALIZER;
+/* 单线程契约(2026-10-25 复审 C1-4 确认):rx_push 只被 wait_frame 的收包
+ * 循环调用,push/pull/parse 全在 fp 工作线程,互斥锁已删——不得从其他线程
+ * 触碰 rx_*;uart 收包是本线程主动 recv,无 RX 回调 */
 static uint8_t s_rx[FP_RX_RING_SZ];
 static uint16_t s_rx_len;
 static fp_parser_t s_parser;
 
 static void rx_push(const uint8_t *d, size_t n)
 {
-    pthread_mutex_lock(&s_rx_mtx);
     if (n > sizeof(s_rx) - s_rx_len)
         n = sizeof(s_rx) - s_rx_len;      /* 满:丢新字节(校验和会暴露) */
     memcpy(s_rx + s_rx_len, d, n);
     s_rx_len = (uint16_t)(s_rx_len + n);
-    pthread_mutex_unlock(&s_rx_mtx);
 }
 
 static void rx_pull(uint16_t n)
 {
-    pthread_mutex_lock(&s_rx_mtx);
     s_rx_len = (uint16_t)(s_rx_len - n);
     memmove(s_rx, s_rx + n, s_rx_len);
-    pthread_mutex_unlock(&s_rx_mtx);
 }
 
 /** 等一帧(ACK/数据/结束);DG_OK / DG_ERR_TIMEOUT / DG_ERR_IO。
@@ -249,9 +247,7 @@ static int wait_frame(fp_frame_t *out, int timeout_ms)
     for (;;) {
         fp_frame_t f;
         size_t consumed = 0;
-        pthread_mutex_lock(&s_rx_mtx);
         uint16_t len = s_rx_len;
-        pthread_mutex_unlock(&s_rx_mtx);
         if (len > 0) {
             int r = fp_as608_parse(&s_parser, s_rx, len, &f, &consumed);
             if (consumed)
@@ -617,7 +613,14 @@ static void seq_enroll(void)
         return;
     }
     {
-        /* payload = 确认码(1B) + 模板数(2B) */
+        /* payload = 确认码(1B) + 模板数(2B);短包=链路损坏,按 IO 错收场
+         * (C1-3:原先不校验长度直接取 payload[1..2]) */
+        if (ack.payload_len < 3) {
+            DG_LOGW(TAG, "ValidTempleteNum 应答短包(len=%u)", ack.payload_len);
+            pub_enroll_result(DG_ENROLL_FINGER, uid, s_cur.seq, DG_ERR_IO);
+            s_mode = DG_FMODE_IDLE;
+            return;
+        }
         uint16_t valid = ((uint16_t)ack.payload[1] << 8) | ack.payload[2];
         if (valid >= FP_PAGE_COUNT) {
             pub_enroll_result(DG_ENROLL_FINGER, uid, s_cur.seq, DG_ERR_FINGER_FULL);
@@ -955,7 +958,9 @@ static int read_module_count(uint32_t *out)
         return DG_ERR_IO;
     if (c != FP_ACK_OK)
         return confirm_to_err(c);
-    /* payload = [确认码 1B, 模板数 2B] */
+    /* payload = [确认码 1B, 模板数 2B];短包按链路错(C1-3,:476 有正确示范) */
+    if (ack.payload_len < 3)
+        return DG_ERR_IO;
     *out = (uint32_t)(((uint16_t)ack.payload[1] << 8) | ack.payload[2]);
     return DG_OK;
 }

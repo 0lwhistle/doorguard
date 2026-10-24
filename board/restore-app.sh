@@ -22,6 +22,8 @@ set -euo pipefail
 
 IP="${1:-${DOORGUARD_IP:-192.168.2.96}}"
 SSHOPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10)
+# DOORGUARD_SSH_PORT(dg-deploy 同名约定):空 = 直连 22
+[ -n "${DOORGUARD_SSH_PORT:-}" ] && SSHOPTS+=(-p "$DOORGUARD_SSH_PORT")
 sshx() { ssh "${SSHOPTS[@]}" "root@$IP" "$@"; }
 
 # 仓库根(本脚本在 <repo>/board/ 下)
