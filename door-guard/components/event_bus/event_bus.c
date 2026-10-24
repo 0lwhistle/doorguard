@@ -421,6 +421,16 @@ event_bus_err_t event_bus_unsubscribe(event_subscription_t *subscription)
     return EVENT_BUS_OK;
 }
 
+uint32_t event_bus_get_heap_fallback(void)
+{
+    return atomic_load(&s_heap_fallback_count);
+}
+
+uint32_t event_bus_get_heap_outstanding(void)
+{
+    return atomic_load(&s_heap_outstanding);
+}
+
 /* ---- 调试辅助(type_name:测试断言事件名映射用) ---- */
 
 static const struct {

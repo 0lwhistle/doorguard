@@ -62,6 +62,8 @@ bool event_bus_is_initialized(void);
 
 /** 池满退化堆分配的累计次数(诊断) */
 uint32_t event_bus_get_heap_fallback(void);
+uint32_t event_bus_get_heap_outstanding(void);
+uint32_t event_bus_get_heap_fallback(void);
 
 /** 当前在途的堆兜底块数:压测后应为 0(全部归还) */
 uint32_t event_bus_get_heap_outstanding(void);

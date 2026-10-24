@@ -2,6 +2,7 @@
  * valid_ui.c — 输入校验的文案包装(规则见 proto/valid.h,文案走 _())
  */
 #include "valid_ui.h"
+#include "proto/types.h"   /* DG_ROLE_*(C6-5 收编后需要) */
 #include "i18n.h"
 #include "valid.h"
 
