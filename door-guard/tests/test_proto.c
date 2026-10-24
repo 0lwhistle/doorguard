@@ -97,11 +97,6 @@ static void catalog_build(void)
     p_ntp.err = DG_OK;
     p_ntp.synced_ts = 1789000100;
 
-    memset(&p_ota, 0, sizeof(p_ota));
-    p_ota.permille = 999;
-    p_ota.done = true;
-    p_ota.err = DG_OK;
-
     memset(&p_finger, 0, sizeof(p_finger));
     p_finger.status = DG_FINGER_PRESSED;
 

@@ -421,3 +421,21 @@ event_bus_err_t event_bus_unsubscribe(event_subscription_t *subscription)
     return EVENT_BUS_OK;
 }
 
+event_bus_err_t event_bus_get_stats(uint32_t *events_published, uint32_t *events_processed,
+                                    uint32_t *events_dropped, uint32_t *handler_errors)
+{
+    event_bus_context_t *ctx = event_bus_get_context();
+    if (!atomic_load(&ctx->initialized))
+        return EVENT_BUS_ERR_NOT_INIT;
+
+    if (events_published != NULL)
+        *events_published = atomic_load(&ctx->stats.events_published);
+    if (events_processed != NULL)
+        *events_processed = atomic_load(&ctx->stats.events_processed);
+    if (events_dropped != NULL)
+        *events_dropped = atomic_load(&ctx->stats.events_dropped);
+    if (events_handler_errors != NULL)
+        *events_handler_errors = atomic_load(&ctx->stats.handler_errors);
+    return EVENT_BUS_OK;
+}
+

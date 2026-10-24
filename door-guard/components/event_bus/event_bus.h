@@ -54,6 +54,8 @@ event_subscription_t *event_bus_subscribe(event_type_t event_type,
 /** 取消订阅;句柄随即失效。重复取消同一句柄返回 NOT_FOUND */
 event_bus_err_t event_bus_unsubscribe(event_subscription_t *subscription);
 
+event_bus_err_t event_bus_get_stats(uint32_t *events_published, uint32_t *events_processed,
+                                    uint32_t *events_dropped, uint32_t *handler_errors);
 bool event_bus_is_initialized(void);
 
 /** 池满退化堆分配的累计次数(诊断) */
