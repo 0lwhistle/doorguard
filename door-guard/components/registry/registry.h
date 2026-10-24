@@ -43,8 +43,9 @@ typedef enum {
 
 /** 服务启动函数:0 成功,非 0 失败(简短,不得回调本表) */
 typedef int (*registry_start_fn)(void);
-/** 心跳钩子:返回最近一次活动时间(unix ms);NULL = 无常驻线程,仅状态监控;
- * 返回 <=0 视为暂无数据(不判失联) */
+/** 心跳钩子:返回最近一次活动时间(**单调毫秒**,now_mono_ms 同域——
+ * 全网心跳 2026-10-03 起 MONOTONIC,按 unix ms 实现会使看门狗永不触发);
+ * NULL = 无常驻线程,仅状态监控;返回 <=0 视为暂无数据(不判失联) */
 typedef int64_t (*registry_heartbeat_fn)(void);
 
 registry_err_t registry_init(void);

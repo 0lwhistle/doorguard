@@ -3,7 +3,8 @@
  *
  * 覆盖:正常接收→校验闭环→落位;sha256 不符拒收;超声明大小拒绝;
  * 单实例 BUSY;中途 abort 后可重新开始;断点续传(offset 对拍);
- * EV_NET_OTA_PROGRESS 进度/终态事件真的在发(M2④ 前该事件从未被发布)。
+ * 槽位模式收口。进度广播原走 EV_NET_OTA_PROGRESS,B6-4 删(双轨,只发不收),
+ * 同步语义由 ota_finish 的终态等待承担。
  */
 #include "dg_test.h"
 #include "ota_service.h"
@@ -22,42 +23,6 @@
 static char s_dir[64];
 static uint8_t s_content[CONTENT_SZ];
 static char s_sha_hex[65];
-
-/* ---- 事件捕获(总线异步分发:计数 + 终态标志) ---- */
-static pthread_mutex_t s_ev_mu = PTHREAD_MUTEX_INITIALIZER;
-static int s_ev_count;
-static bool s_ev_terminal;
-static int s_ev_term_err;
-static int s_ev_term_seq;   /* 终态事件序号:等待"新"终态用(旧标志永不复位会串场) */
-
-static int on_ota_progress(const event_t *e, void *ud)
-{
-    (void)ud;
-    const ev_ota_progress_t *ev = (const ev_ota_progress_t *)e->data;
-    pthread_mutex_lock(&s_ev_mu);
-    s_ev_count++;
-    if (ev->done) {
-        s_ev_terminal = true;
-        s_ev_term_err = ev->err;
-        s_ev_term_seq++;
-    }
-    pthread_mutex_unlock(&s_ev_mu);
-    return 0;
-}
-
-/* 等到第 expect_seq 个终态事件(调用前先记下当前 s_ev_term_seq 作基线) */
-static bool wait_terminal(int expect_seq, int timeout_ms)
-{
-    for (int i = 0; i < timeout_ms / 10; i++) {
-        pthread_mutex_lock(&s_ev_mu);
-        bool t = s_ev_term_seq >= expect_seq;
-        pthread_mutex_unlock(&s_ev_mu);
-        if (t)
-            return true;
-        usleep(10 * 1000);
-    }
-    return false;
-}
 
 static void sha256_hex(const uint8_t *data, size_t len, char *out /*65*/)
 {
@@ -104,15 +69,12 @@ int main(void)
     sha256_hex(s_content, CONTENT_SZ, s_sha_hex);
 
     DG_CHECK(event_bus_init() == EVENT_BUS_OK);
-    event_subscription_t *sub =
-        event_bus_subscribe(EV_NET_OTA_PROGRESS, on_ota_progress, NULL);
-    DG_CHECK(sub != NULL);
 
     char staged[192];
     snprintf(staged, sizeof(staged), "%s/ota_staged.bin", s_dir);
 
-    /* ---- O1 正常闭环:接收→校验→落位→进度/终态事件 ---- */
-    printf("[O1] happy path: receive + verify + staged + events\n");
+    /* ---- O1 正常闭环:接收→校验→落位 ---- */
+    printf("[O1] happy path: receive + verify + staged\n");
     ota_manifest_t m;
     manifest_make(&m, CONTENT_SZ, s_sha_hex);
     bool resumed = false;
@@ -122,16 +84,9 @@ int main(void)
     DG_CHECK(push_all(s_content, 40000, 80000) == DG_OK);
     DG_CHECK(push_all(s_content, 80000, CONTENT_SZ) == DG_OK);
     char path[192];
-    int base1 = s_ev_term_seq;
-    DG_CHECK(ota_finish(path, sizeof(path)) == DG_OK);
+    DG_CHECK(ota_finish(path, sizeof(path)) == DG_OK);   /* 终态等待内建 */
     DG_CHECK(strcmp(path, staged) == 0);
     DG_CHECK(access(staged, F_OK) == 0);
-    DG_CHECK(wait_terminal(base1 + 1, 5000));
-    pthread_mutex_lock(&s_ev_mu);
-    DG_CHECK(s_ev_count >= 2);              /* 至少:进度一拍 + 终态 */
-    DG_CHECK(s_ev_term_err == DG_OK);
-    int cnt_after_o1 = s_ev_count;
-    pthread_mutex_unlock(&s_ev_mu);
 
     /* ---- O2 单实例 BUSY(会话结束后可重新开始) ---- */
     printf("[O2] busy during session, reusable after\n");
@@ -164,13 +119,8 @@ int main(void)
     remove(staged);                         /* 清掉 O1 的落位文件,拒收后应保持不存在 */
     DG_CHECK(ota_begin(&m, 0, &resumed) == DG_OK);
     DG_CHECK(push_all(s_content, 0, CONTENT_SZ) == DG_OK);
-    int base3 = s_ev_term_seq;
     DG_CHECK(ota_finish(path, sizeof(path)) == DG_ERR_IO);
     DG_CHECK(access(staged, F_OK) != 0);
-    DG_CHECK(wait_terminal(base3 + 1, 5000));
-    pthread_mutex_lock(&s_ev_mu);
-    DG_CHECK(s_ev_term_err == DG_ERR_IO);
-    pthread_mutex_unlock(&s_ev_mu);
 
     /* ---- O4 超声明大小:写途中拒绝 ---- */
     printf("[O4] oversize rejected mid-stream\n");
@@ -222,12 +172,6 @@ int main(void)
     DG_CHECK(ota_finish(path, sizeof(path)) == DG_OK);
     DG_CHECK(access(staged, F_OK) == 0);
 
-    /* 收尾:事件总数只增不减;清理 */
-    pthread_mutex_lock(&s_ev_mu);
-    DG_CHECK(s_ev_count >= cnt_after_o1);
-    pthread_mutex_unlock(&s_ev_mu);
-
-    event_bus_unsubscribe(sub);
     snprintf(cmd, sizeof(cmd), "rm -rf %s", s_dir);
     if (system(cmd) != 0) { /* 清理失败不影响结论 */ }
 

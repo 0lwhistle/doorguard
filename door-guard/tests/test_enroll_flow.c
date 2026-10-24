@@ -285,13 +285,13 @@ int main(void)
     {
         enroll_user_row_t rows[2];
         uint32_t n = 0, total = 0;
-        DG_CHECK(enroll_service_user_page(rows, 2, &n, &total) == DG_OK);
+        DG_CHECK(enroll_service_user_page(0, rows, 2, &n, &total) == DG_OK);
         DG_CHECK(n == 2 && total == 3);              /* 字典序首页 + 全量计数 */
         DG_CHECK(strcmp(rows[0].user_id, "20001") == 0);
         DG_CHECK(strcmp(rows[1].user_id, "20002") == 0);
         DG_CHECK(strcmp(rows[0].user_name, "李四丰") == 0);
         DG_CHECK(rows[0].role == DG_ROLE_ADMIN);
-        DG_CHECK(enroll_service_user_page(rows, ENROLL_USER_PAGE_MAX + 1,
+        DG_CHECK(enroll_service_user_page(0, rows, ENROLL_USER_PAGE_MAX + 1,
                                           &n, &total) == DG_ERR_PARAM);
     }
 

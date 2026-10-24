@@ -81,7 +81,6 @@ struct task_manager *task_manager_init(const unsigned int size)
 }
 
 void task_node_init(struct task_node *node,
-                    const int timeout,
                     const uint64_t inject_time,
                     const int period,
                     const int run_cnt,
@@ -93,11 +92,9 @@ void task_node_init(struct task_node *node,
     node->inject_time = inject_time;
     node->fn = fn;
     atomic_store(&node->pri, pri);
-    node->timeout = timeout;
     atomic_store(&node->cancel, 0);
     node->ctx = ctx;
     atomic_store(&node->done, 0);
-    node->is_timeout = 0;
     atomic_store(&node->level, level);
     node->period = period;
     atomic_store(&node->run_cnt, run_cnt);
@@ -126,24 +123,9 @@ bool task_manager_is_full(const struct task_manager *mgr)
     return true;
 }
 
-void task_done(struct task_node *node)
-{
-    atomic_store(&node->done, 1);
-}
-
-int task_is_done(struct task_node *node)
-{
-    return atomic_load(&node->done);
-}
-
 void task_cancel(struct task_node *node)
 {
     atomic_store(&node->cancel, 1);
-}
-
-int task_is_cancel(struct task_node *node)
-{
-    return atomic_load(&node->cancel);
 }
 
 void task_node_pri_up(struct task_node *node)
@@ -151,13 +133,6 @@ void task_node_pri_up(struct task_node *node)
     int p = atomic_load(&node->pri);
     if (p > first)
         atomic_store(&node->pri, p - 1);
-}
-
-void task_node_leve_up(struct task_node *node)
-{
-    int lv = atomic_load(&node->level);
-    if (lv < level_lots)
-        atomic_store(&node->level, lv + 1);
 }
 
 struct task_node *find_task_node_by_name(struct task_manager *worker_queue, const char *name)

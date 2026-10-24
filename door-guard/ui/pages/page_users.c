@@ -25,6 +25,8 @@
 
 static lv_obj_t *s_list = NULL;
 static lv_obj_t *s_title = NULL;
+static uint32_t s_page = 0;                           /* 当前页(0 起) */
+static uint32_t s_total = 0;                          /* 用户总数(翻页界判断) */
 static char s_row_uids[USERS_PAGE_SIZE][DG_UID_LEN];  /* 行→uid(页容量定长池) */
 static enroll_user_row_t s_rows[USERS_PAGE_SIZE];     /* 本页行数据(服务回填) */
 
@@ -49,8 +51,9 @@ static void refresh_list(void)
     /* 列表数据一次取齐(user_id 字典序本页 + 总数);行数据不再逐个
      * db_user_get——此前 UI 三连调 count/list_ids/get 的读路径已收口
      * 进 enroll 服务(A1,登记见 docs/architecture-v2-proposal §1) */
-    uint32_t n = 0, total = 0;
-    if (enroll_service_user_page(s_rows, USERS_PAGE_SIZE, &n, &total) != DG_OK)
+    uint32_t n = 0;
+    if (enroll_service_user_page(s_page * USERS_PAGE_SIZE, s_rows,
+                                 USERS_PAGE_SIZE, &n, &s_total) != DG_OK)
         return;
     for (uint32_t i = 0; i < n; i++) {
         /* 全部参数带精度上限:-O3 的 -Wformat-truncation=2 对未知长度 %s
@@ -81,12 +84,11 @@ static void refresh_list(void)
         lv_obj_clear_flag(hint, LV_OBJ_FLAG_CLICKABLE);
     }
     if (s_title) {
-        char t[32];
-        snprintf(t, sizeof(t), "%s (%u)", _("用户管理"), total);
+        char t[40];
+        snprintf(t, sizeof(t), "%s (%u)", _("用户管理"), s_total);
         lv_label_set_text(s_title, t);
     }
-    DG_LOGI("[USERS]", "list rows=%u/%u first=%s", n, total,
-            n ? s_rows[0].user_id : "-");
+    DG_LOGI("[USERS]", "list page=%u rows=%u/%u", s_page, n, s_total);
 }
 
 static void on_row_click(lv_event_t *e)
@@ -125,6 +127,25 @@ static void on_back_page(lv_event_t *e)
     navigator_back();
 }
 
+/* 翻页(B7-1):USERS_PAGE_SIZE=6 而 DG_USER_MAX=2000,不分页只显示前 6 条 */
+static void on_prev_page(lv_event_t *e)
+{
+    (void)e;
+    if (s_page == 0)
+        return;
+    s_page--;
+    refresh_list();
+}
+
+static void on_next_page(lv_event_t *e)
+{
+    (void)e;
+    if ((s_page + 1) * USERS_PAGE_SIZE >= s_total)
+        return;
+    s_page++;
+    refresh_list();
+}
+
 void page_users_create(lv_obj_t *parent)
 {
     DG_LOGI("[USERS]", "page create");
@@ -142,6 +163,16 @@ void page_users_create(lv_obj_t *parent)
     lv_obj_set_size(add, 180, DG_BTN_H);
     lv_obj_align(add, LV_ALIGN_BOTTOM_LEFT, DG_PAD, -DG_PAD);
     lv_obj_add_event_cb(add, on_add, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *prev = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("上一页"));
+    lv_obj_set_size(prev, 150, DG_BTN_H);
+    lv_obj_align(prev, LV_ALIGN_BOTTOM_MID, -85, -DG_PAD);
+    lv_obj_add_event_cb(prev, on_prev_page, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *next = dg_btn_create_light(parent, LV_SYMBOL_RIGHT, _("下一页"));
+    lv_obj_set_size(next, 150, DG_BTN_H);
+    lv_obj_align(next, LV_ALIGN_BOTTOM_MID, 85, -DG_PAD);
+    lv_obj_add_event_cb(next, on_next_page, LV_EVENT_CLICKED, NULL);
 
     /* 统一导航:返回固定左上角 */
     lv_obj_t *back = dg_btn_create_light(parent, LV_SYMBOL_LEFT, _("返回"));

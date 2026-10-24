@@ -2,7 +2,7 @@
  * test_tasker.c — tasker 移植测试
  *
  * 移植自模板 tests/test_tasker.c(TK1~TK5 断言逐条保留,未弱化)。
- * 任务在 pthread 真实调度下运行;超时定时器为 no-op,timeout 升级路径
+ * 任务在 pthread 真实调度下运行;超时维度已删(2026-10-25 B6-5,原 no-op)
  * 在板上验证(见 components/tasker/README.md)。
  */
 #include "tasker.h"
@@ -105,7 +105,7 @@ static void test_cancel(void)
     DG_CHECK(drift <= 1);                       /* 最多再跑一次在途周期 */
 }
 
-/* ---------- TK4 快任务不误标超时 ---------- */
+/* ---------- TK4 快任务入队即达(原「不误标超时」;超时维度已删) ---------- */
 static atomic_int s_fast_done = 0;
 
 static enum task_t t_fast(void *ctx)
@@ -118,14 +118,13 @@ static enum task_t t_fast(void *ctx)
 
 static void test_no_false_timeout(void)
 {
-    printf("[TK4] no false timeout on fast task (li default 50ms)\n");
+    printf("[TK4] fast task completes via little queue\n");
     struct task_node node;
     DG_CHECK(tasker_task_init_li(&node, 0, 1, "t_fast", t_fast, NULL) == TASK_OK);
     atomic_store(&s_fast_done, 0);
     DG_CHECK(tasker_enqueue(&node) == TASK_OK);
     wait_flag(&s_fast_done, 2000);
     DG_CHECK(atomic_load(&s_fast_done) == 1);
-    DG_CHECK(node.is_timeout == 0);             /* 快任务不应被标超时 */
 }
 
 /* ---------- TK5 队列状态 API ---------- */

@@ -24,6 +24,8 @@ typedef struct {
     lv_obj_t *toggle;             /* 页脚 ABC/123 */
     bool alpha;                   /* 当前是否字母页 */
     bool caps;                    /* 字母页大小写 */
+    char *syms[KBD_SYMS_MAX];     /* 字母键堆上键值(DELETE 时统一回收) */
+    int nsym;
 } dg_kbd_t;
 
 /* ---- 键 → 回调 ---- */
@@ -149,17 +151,26 @@ static lv_obj_t *add_key(lv_obj_t *parent, dg_kbd_t *k, const char *label,
     return b;
 }
 
-/* 字母键:键值 = 小写单字符(堆上,键盘随弹窗销毁时不回收:一次性小对象,
- * 生命周期与页面同;要严格回收可在键盘根对象上挂 LV_EVENT_DELETE)。
+/* 字母键:键值 = 小写单字符(堆上;指针登记进 k->syms,键盘根对象
+ * LV_EVENT_DELETE 时统一回收——此前每次开输入弹窗漏 ~150B,密码/姓名
+ * 高频路径长待机无界累积,B7-2)。
  * 宽 9%:每行 10 键 + 9 个 6px 间距要压进 100%,10% 会把行尾键挤出屏幕 */
-static lv_obj_t *add_letter_key(lv_obj_t *parent, dg_kbd_t *k, char lc)
+#define KBD_SYMS_MAX 32
+static lv_obj_t *add_letter_key(dg_kbd_t *k, lv_obj_t *parent, char lc)
 {
+    if (k->nsym >= KBD_SYMS_MAX)
+        return NULL;
     char *sym = malloc(2);
     if (!sym)
         return NULL;
     sym[0] = lc;
     sym[1] = '\0';
     lv_obj_t *b = dg_btn_create_light(parent, NULL, sym);
+    if (!b) {
+        free(sym);
+        return NULL;
+    }
+    k->syms[k->nsym++] = sym;
     lv_obj_set_width(b, LV_PCT(9));
     lv_obj_set_height(b, 62);
     lv_obj_set_user_data(b, sym);
@@ -177,6 +188,18 @@ static lv_obj_t *add_row(lv_obj_t *parent, int32_t h)
     lv_obj_set_style_pad_column(row, 6, 0);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     return row;
+}
+
+/* 键盘销毁:回收登记的键值串与实例(LV_EVENT_DELETE;children 已先销毁,
+ * 这里只碰堆内存,不触任何对象) */
+static void kbd_delete_cb(lv_event_t *e)
+{
+    dg_kbd_t *k = lv_event_get_user_data(e);
+    if (!k)
+        return;
+    for (int i = 0; i < k->nsym; i++)
+        free(k->syms[i]);
+    free(k);
 }
 
 /* 光标移动键:箭头走 dg_btn 图标槽(LVGL 内置 symbol 在 montserrat 内嵌,
@@ -210,6 +233,9 @@ lv_obj_t *dg_kbd_create(lv_obj_t *parent, bool start_alpha, const dg_kbd_ops_t *
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_user_data(root, k);
     k->root = root;
+    /* 键值串与实例本身随根对象销毁统一回收(B7-2:输入弹窗每开一次
+     * 泄漏一次的历史在这里收口;children 先删,DELETE 回调只碰堆内存) */
+    lv_obj_add_event_cb(root, kbd_delete_cb, LV_EVENT_DELETE, k);
 
     const int32_t KEY_H = 62;
 
@@ -246,20 +272,20 @@ lv_obj_t *dg_kbd_create(lv_obj_t *parent, bool start_alpha, const dg_kbd_ops_t *
     static const char *const rows_abc[3] = { "qwertyuiop", "asdfghjkl", "zxcvbnm" };
     lv_obj_t *r1 = add_row(k->alpha_page, KEY_H);
     for (int i = 0; rows_abc[0][i]; i++)
-        add_letter_key(r1, k, rows_abc[0][i]);
+        add_letter_key(k, r1, rows_abc[0][i]);
 
     lv_obj_t *r2 = add_row(k->alpha_page, KEY_H);
     for (int i = 0; rows_abc[1][i]; i++)
-        add_letter_key(r2, k, rows_abc[1][i]);
+        add_letter_key(k, r2, rows_abc[1][i]);
     add_key(r2, k, _("删除"), 9, KEY_H, true, emit_backspace);
 
     lv_obj_t *r3 = add_row(k->alpha_page, KEY_H);
     add_key(r3, k, "Aa", 15, KEY_H, true, on_shift);              /* 大小写(纯 ASCII,必有字形) */
     for (int i = 0; rows_abc[2][i]; i++)
-        add_letter_key(r3, k, rows_abc[2][i]);
+        add_letter_key(k, r3, rows_abc[2][i]);
 
     lv_obj_t *r4 = add_row(k->alpha_page, KEY_H);
-    /* 空格键:键值是 " "(单空格),label 单独给文字——原实现 label 也是
+    /* 空格键:键值是 " "(单空格,串字面量保留),label 单独给文字——原实现 label 也是
      * 空格,屏上就是一个看不出用途的空白按钮 */
     lv_obj_t *space = add_key(r4, k, _("空格"), 58, KEY_H, true, emit_key);
     lv_obj_set_user_data(space, (void *)" ");

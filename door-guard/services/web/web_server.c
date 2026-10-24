@@ -1554,7 +1554,7 @@ static void handle_users_list(struct mg_connection *c, struct mg_http_message *h
     /* 字典序全量 ID 再内存分页(loop 线程独占,静态避免 64KB 栈) */
     static char ids[DG_USER_MAX][DG_UID_LEN];
     uint32_t n = 0;
-    if (db_user_list_ids(ids, DG_USER_MAX, &n) != DG_OK) {
+    if (db_user_list_ids(0, ids, DG_USER_MAX, &n) != DG_OK) {
         json_msg(c, 500, "枚举用户失败");
         return;
     }

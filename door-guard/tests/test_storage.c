@@ -738,7 +738,7 @@ static void test_user_list_ids(void)
 
     char ids[8][DG_UID_LEN];
     uint32_t n = 0;
-    DG_CHECK(db_user_list_ids(ids, 8, &n) == DG_OK && n == 4);
+    DG_CHECK(db_user_list_ids(0, ids, 8, &n) == DG_OK && n == 4);
     /* 字典序:007 < 10001 < 123 < abc */
     DG_CHECK(strcmp(ids[0], "007") == 0);
     DG_CHECK(strcmp(ids[1], "10001") == 0);
@@ -746,16 +746,17 @@ static void test_user_list_ids(void)
     DG_CHECK(strcmp(ids[3], "abc") == 0);
 
     /* cap 截断:只取前 2 个 */
-    DG_CHECK(db_user_list_ids(ids, 2, &n) == DG_OK && n == 2);
+    DG_CHECK(db_user_list_ids(0, ids, 2, &n) == DG_OK && n == 2);
+    DG_CHECK(db_user_list_ids(2, ids, 8, &n) == DG_OK && n == 2);  /* offset 翻页 */
 
     /* 空库 */
     DG_CHECK(db_user_del("abc") == DG_OK && db_user_del("007") == DG_OK);
     DG_CHECK(db_user_del("10001") == DG_OK && db_user_del("123") == DG_OK);
-    DG_CHECK(db_user_list_ids(ids, 8, &n) == DG_OK && n == 0);
+    DG_CHECK(db_user_list_ids(0, ids, 8, &n) == DG_OK && n == 0);
 
     /* 参数防御 */
-    DG_CHECK(db_user_list_ids(NULL, 8, &n) == DG_ERR_PARAM);
-    DG_CHECK(db_user_list_ids(ids, 0, &n) == DG_ERR_PARAM || n == 0);
+    DG_CHECK(db_user_list_ids(0, NULL, 8, &n) == DG_ERR_PARAM);
+    DG_CHECK(db_user_list_ids(0, ids, 0, &n) == DG_ERR_PARAM || n == 0);
 }
 
 static void test_finger(void)

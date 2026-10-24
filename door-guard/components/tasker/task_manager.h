@@ -32,16 +32,11 @@
 #define DISPATCHER_TASK_QUEUE_STACK_SIZE (64 * 1024)
 #define SCHED_TASK_QUEUE_STACK_SIZE (64 * 1024)
 
-#define LITTLE_TASK_DEFAULT_TIMEOUT 50  /* ms */
-#define MIDDLE_TASK_DEFAULT_TIMEOUT 1000 /* ms */
-#define LOTS_TASK_DEFAULT_TIMEOUT 10000 /* ms */
-
 extern const char *TASK_MANAGER_TAG;
 
 enum task_t {
     TASK_OK = 0,
     TASK_MEM_ERR = -1,
-    TASK_TIMEOUT_ERR = -2,
     TASK_PARA_ERR = -3,
     TASK_FUNC_ERR = -4,
     TASK_INNER_ERR = -5,
@@ -69,8 +64,6 @@ struct task_node {
     /* cancel/done/dispatched 跨线程读写(模板 5.2 修复2: 原子化) */
     atomic_int done;
     atomic_int cancel;
-    int timeout;
-    int is_timeout;        /* 仅执行线程写、无跨线程读,保持普通 int */
     int period;
     atomic_int run_cnt;    /* sched 写、执行线程读,跨互斥域 → 原子 */
     atomic_int pri;        /* dispatcher/sched/worker 三线程读改写 → 原子 */
@@ -98,7 +91,6 @@ void task_node_pool_free(struct task_node *node);
 
 /* 调用方节点就地初始化(无堆分配) */
 void task_node_init(struct task_node *node,
-                    const int timeout,
                     const uint64_t inject_time,
                     const int period,
                     const int run_cnt,
@@ -108,15 +100,11 @@ void task_node_init(struct task_node *node,
                     task_fn fn, void *ctx);
 
 void task_node_pri_up(struct task_node *node);
-void task_node_leve_up(struct task_node *node);
 
 struct task_node *find_task_node_by_name(struct task_manager *worker_queue, const char *name);
 
 void task_manager_pri_sort(struct task_manager *worker_queue);
 
-void task_done(struct task_node *node);
-int task_is_done(struct task_node *node);
 void task_cancel(struct task_node *node);
-int task_is_cancel(struct task_node *node);
 
 #endif /* TASK_MANAGER */

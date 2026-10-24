@@ -57,7 +57,7 @@ extern "C" {
 #define EV_SYS_DATA_OP_RESULT EV_DEF(DG_MODULE_ID_SYSTEM, 0x0013) /**< 设备数据维护回执 */
 
 /* CAPTURE:取流状态(capture → UI/服务) */
-#define EV_CAPTURE_STATE     EV_DEF(DG_MODULE_ID_CAPTURE, 0x0001) /**< [预留] 就绪/断流;待上位机/降级提示接入 */
+#define EV_CAPTURE_STATE     EV_DEF(DG_MODULE_ID_CAPTURE, 0x0001) /**< 活契约:capture_service 发布,access_service/UI bridge 订阅(FSM cam_ready) */
 
 /* ---- ENROLL:录入编排(UI → enroll → UI) ---- */
 
@@ -92,7 +92,6 @@ typedef struct {
 #define EV_NET_STATE         EV_DEF(DG_MODULE_ID_NET, 0x0001)    /**< [死契约·被取代] 被 EV_NET_ADDR(地址快照监视)取代 */
 #define EV_NET_NTP_RESULT    EV_DEF(DG_MODULE_ID_NET, 0x0002)    /**< NTP 校正结果 */
 #define EV_NET_NTP_TRIGGER   EV_DEF(DG_MODULE_ID_NET, 0x0004)    /**< 请求校正一次(菜单按钮→net) */
-#define EV_NET_OTA_PROGRESS  EV_DEF(DG_MODULE_ID_NET, 0x0003)    /**< [预留] OTA 进度/终态;本打算给上位机,WS 未接 */
 /* web 上位机账号管理(设备页 ↔ net):UI 不碰凭据存储,只发请求、收状态 */
 #define EV_NET_WEB_STATE_REQ EV_DEF(DG_MODULE_ID_NET, 0x0005)    /**< UI→net:请回报 web 状态 */
 #define EV_NET_WEB_STATE     EV_DEF(DG_MODULE_ID_NET, 0x0006)    /**< net→UI:web 运行状态快照 */
@@ -105,7 +104,7 @@ typedef struct {
 
 /* HAL:硬件事件(HAL → 服务)。IC 已激活(2026-10-01 card_provider 落地);
  * 指纹状态/门磁链路尚未接入,契约保留待硬件接入 */
-#define EV_FINGER_STATUS     EV_DEF(DG_MODULE_ID_HAL, 0x0001)    /**< [死契约·待硬件] 指纹按压/释放/错误(fp_provider 落地后激活) */
+#define EV_FINGER_STATUS     EV_DEF(DG_MODULE_ID_HAL, 0x0001)    /**< 活契约:fp_provider 发布(按压/释放/错误),access_service 订阅;勿按「死契约」删链路 */
 #define EV_IC_CARD           EV_DEF(DG_MODULE_ID_HAL, 0x0002)    /**< 读到卡号(已激活:card_provider 发布,access/enroll 按 FSM 状态分流) */
 #define EV_DOOR_STATE        EV_DEF(DG_MODULE_ID_HAL, 0x0003)    /**< [死契约·待硬件] 门磁/门控反馈 */
 /* 指纹验证结果(FINGERPRINT_AS608.md §4;2026-09-30 新增)。
@@ -343,13 +342,6 @@ typedef struct {
     char     notes[128];                  /**< 更新说明(公告携带) */
 } ev_ota_update_t;
 
-/** EV_NET_OTA_PROGRESS */
-typedef struct {
-    uint32_t permille;                    /**< 0~1000 */
-    bool     done;                        /**< true = 终态 */
-    int32_t  err;                         /**< dg_err_t */
-} ev_ota_progress_t;
-
 /** EV_NET_WEB_STATE_REQ(无负载) / EV_NET_WEB_SET */
 typedef struct {
     char user[32];                        /**< 新账号;空串 = 保持当前账号(仅改口令) */
@@ -582,7 +574,6 @@ _Static_assert(sizeof(ev_ntp_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ntp_resu
 _Static_assert(sizeof(ev_net_addr_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_addr_t 超限");
 _Static_assert(sizeof(ev_net_cfg_set_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_cfg_set_t 超限");
 _Static_assert(sizeof(ev_net_cfg_result_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_net_cfg_result_t 超限");
-_Static_assert(sizeof(ev_ota_progress_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ota_progress_t 超限");
 _Static_assert(sizeof(ev_ota_update_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_ota_update_t 超限");
 _Static_assert(sizeof(ev_web_set_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_set_t 超限");
 _Static_assert(sizeof(ev_web_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_web_state_t 超限");

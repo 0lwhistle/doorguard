@@ -33,7 +33,6 @@ static ev_enroll_progress_t p_prog;
 static ev_enroll_result_t p_result;
 static ev_net_state_t p_net;
 static ev_ntp_result_t p_ntp;
-static ev_ota_progress_t p_ota;
 static ev_finger_status_t p_finger;
 static ev_ic_card_t p_ic;
 static ev_door_state_t p_door;
@@ -129,7 +128,6 @@ static void catalog_build(void)
         { EV_ENROLL_RESULT,    &p_result,  sizeof(p_result) },
         { EV_NET_STATE,        &p_net,     sizeof(p_net) },
         { EV_NET_NTP_RESULT,   &p_ntp,     sizeof(p_ntp) },
-        { EV_NET_OTA_PROGRESS, &p_ota,     sizeof(p_ota) },
         { EV_FINGER_STATUS,    &p_finger,  sizeof(p_finger) },
         { EV_IC_CARD,          &p_ic,      sizeof(p_ic) },
         { EV_DOOR_STATE,       &p_door,    sizeof(p_door) },

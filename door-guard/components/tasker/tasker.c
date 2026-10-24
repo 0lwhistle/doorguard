@@ -66,11 +66,6 @@ int tasker_enqueue(struct task_node* node) {
     return TASK_OK;
 }
 
-void tasker_cancel_by_node(struct task_node* node) {
-    if (!node) return;
-    tasker_cancel_by_name(node->name);
-}
-
 void tasker_cancel_by_name(const char* name) {
     if (!name || !strlen(name)) return;
 
@@ -101,7 +96,7 @@ int tasker_task_init_li(struct task_node* out, int period, int run_cnt,
     if (tasker_validate_params(period, fn, name) != TASK_OK) return TASK_PARA_ERR;
     if (tasker_auto_init() != TASK_OK) return TASK_INNER_ERR;
 
-    task_node_init(out, LITTLE_TASK_DEFAULT_TIMEOUT, tasker_get_time_ms(), 
+    task_node_init(out, tasker_get_time_ms(),
                    period, run_cnt, last, level_little, name, fn, ctx);
     return TASK_OK;
 }
@@ -112,18 +107,7 @@ int tasker_task_init_mi(struct task_node* out, int period, int run_cnt,
     if (tasker_validate_params(period, fn, name) != TASK_OK) return TASK_PARA_ERR;
     if (tasker_auto_init() != TASK_OK) return TASK_INNER_ERR;
 
-    task_node_init(out, MIDDLE_TASK_DEFAULT_TIMEOUT, tasker_get_time_ms(), 
+    task_node_init(out, tasker_get_time_ms(),
                    period, run_cnt, last, level_middle, name, fn, ctx);
-    return TASK_OK;
-}
-
-int tasker_task_init_lo(struct task_node* out, int timeout, int period, 
-                        int run_cnt, const char* name, task_fn fn, void* ctx) {
-    if (!out) return TASK_PARA_ERR;
-    if (tasker_validate_params(period, fn, name) != TASK_OK) return TASK_PARA_ERR;
-    if (tasker_auto_init() != TASK_OK) return TASK_INNER_ERR;
-
-    task_node_init(out, timeout, tasker_get_time_ms(), 
-                   period, run_cnt, last, level_lots, name, fn, ctx);
     return TASK_OK;
 }

@@ -48,8 +48,8 @@ typedef struct {
 
 /** 列表页一次取齐:字典序 cap 行 + 用户总数(替代 UI 的
  *  count+list_ids+逐行 get 三连调)。rows 调用方分配;out_n 实际行数 */
-int enroll_service_user_page(enroll_user_row_t *rows, uint32_t cap,
-                             uint32_t *out_n, uint32_t *out_total);
+int enroll_service_user_page(uint32_t offset, enroll_user_row_t *rows,
+                             uint32_t cap, uint32_t *out_n, uint32_t *out_total);
 
 /** 门禁日志分页查询(记录查询页数据源;q/out 由调用方提供,透传 db_log_query) */
 int enroll_service_log_query(const log_query_t *q, log_page_t *out);

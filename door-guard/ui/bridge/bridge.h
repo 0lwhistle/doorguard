@@ -66,7 +66,7 @@ uint32_t bridge_enroll_request_arg(const char *uid, int32_t kind, int32_t arg);
 void bridge_data_op(int32_t op);
 
 /** 指纹两侧数量检查的待告知(fp_sync)——开机检查可能早于 UI 就绪,而
- *  event_bus 不回放,所以这条通知走"拉":UI 泵里轮询,取走即清。
+ *  event_bus 不回放,所以这条通知走「拉」:UI 泵里轮询,取走即清。
  *  @return true = *out 有效(fp_sync_notice_t 之一) */
 bool bridge_fp_notice_take(int32_t *out);
 

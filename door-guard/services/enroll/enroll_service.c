@@ -257,14 +257,14 @@ int enroll_service_user_get(const char *user_id, user_rec_t *out)
     return db_user_get(user_id, out);
 }
 
-int enroll_service_user_page(enroll_user_row_t *rows, uint32_t cap,
-                             uint32_t *out_n, uint32_t *out_total)
+int enroll_service_user_page(uint32_t offset, enroll_user_row_t *rows,
+                             uint32_t cap, uint32_t *out_n, uint32_t *out_total)
 {
     if (!rows || !out_n || !out_total || !cap || cap > ENROLL_USER_PAGE_MAX)
         return DG_ERR_PARAM;
     char ids[ENROLL_USER_PAGE_MAX][DG_UID_LEN];
     uint32_t n = 0;
-    int rc = db_user_list_ids(ids, cap, &n);
+    int rc = db_user_list_ids(offset, ids, cap, &n);
     if (rc != DG_OK)
         return rc;
     uint32_t out = 0;                     /* 紧凑写入(B2-2):跳行不得留

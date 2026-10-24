@@ -52,7 +52,7 @@ void dg_popup_choice_ex(const char *title, const char *const *options, int cnt,
                         uint32_t red_mask, void (*on_pick)(void *ud, int idx),
                         void (*on_cancel)(void *ud), void *ud);
 
-/** 多选弹窗配置(验证方式等"多开多关"场景,2026-10-04) */
+/** 多选弹窗配置(验证方式等「多开多关」场景,2026-10-04) */
 typedef struct {
     const char *title;              /**< 已 _() 的标题 */
     const char *const *items;       /**< 选项文本(已 _();未启用项调用方自行附注) */

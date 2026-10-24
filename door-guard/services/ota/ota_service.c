@@ -8,7 +8,8 @@
  *   web 连接线程(生产者)只把收到的字节投进环形缓冲;
  *   盘 I/O + 摘要 + 终态校验/落位在"按需写线程"完成——ota_begin 时创建,
  *   finish/abort/失败即退出,不留常驻线程(慢盘不再拖垮 HTTP 读循环)。
- *   进度经 EV_NET_OTA_PROGRESS 广播(≥5% 一拍 + 终态),上位机实时可见。
+ *   (原 EV_NET_OTA_PROGRESS 进度广播已删:B6-4 只发不收,进度统一走
+ *    ota_update 的 EV_NET_OTA_UPDATE 通道)
  * 测试可用 DG_OTA_DIR 覆盖暂存目录(默认 /var/lib/door-guard)。
  */
 #define _GNU_SOURCE  /* pthread_cond_clockwait:等待时钟切 MONOTONIC */
@@ -52,7 +53,6 @@ typedef struct {
     int  result;                              /* 写线程终态(dg_err_t) */
     bool slot_mode;                           /* 槽位会话:收口不比对声明摘要 */
     char sha_hex[65];                         /* 槽位会话:整文件实算摘要(hex) */
-    uint32_t last_permille;
     uint8_t pipe[OTA_PIPE_CAP];
     size_t head, tail, count;
     pthread_mutex_t mu;
@@ -91,12 +91,6 @@ static void paths_init(void)
     snprintf(s_slot, sizeof(s_slot), "%s/fw_slot.ota", s_dir);
 }
 
-static void publish_progress(uint32_t permille, bool done, int err)
-{
-    ev_ota_progress_t ev = { .permille = permille, .done = done, .err = err };
-    EVENT_BUS_PUBLISH(EV_NET_OTA_PROGRESS, &ev);
-}
-
 static bool pipe_pop(uint8_t *out, size_t cap, size_t *got)
 {
     size_t n = s_ctx.count < cap ? s_ctx.count : cap;
@@ -120,7 +114,6 @@ static void *writer_thread(void *arg)
     (void)arg;
     uint8_t buf[16 * 1024];
     int rc = DG_OK;
-    uint32_t last_reported = 0;                  /* 锁外发布用的进度快照 */
 
     /* 续传:先把已暂存字节重放进摘要(与收包同一摘要流);槽位会话的
      * 暂存是 fw_slot.part,不能读裸包的 ota_staging.part */
@@ -165,19 +158,11 @@ static void *writer_thread(void *arg)
                 break;
             }
             EVP_DigestUpdate(s_ctx.md, buf, got);
-            /* received/last_permille 与生产者(can_accept/staged_bytes)共享,
+            /* received 与生产者(can_accept/staged_bytes)共享,
              * TSAN 验收要求:落盘后的簿记更新也必须持锁(fwrite 本身在锁外) */
             pthread_mutex_lock(&s_ctx.mu);
             s_ctx.received += got;
-            uint32_t permille =
-                (uint32_t)((uint64_t)s_ctx.received * 1000 / s_ctx.manifest.size);
-            if (permille - s_ctx.last_permille >= 5)
-                s_ctx.last_permille = permille;
             pthread_mutex_unlock(&s_ctx.mu);
-            if (permille - last_reported >= 5) {
-                last_reported = permille;
-                publish_progress(permille, false, DG_OK);
-            }
         }
         if (eof_drained)
             break;
@@ -254,7 +239,6 @@ finish:
     pthread_mutex_lock(&s_ctx.mu);
     s_ctx.result = rc;
     s_ctx.done = true;
-    publish_progress(1000, true, rc == DG_OK ? DG_OK : rc);
     pthread_cond_broadcast(&s_ctx.cv_data);   /* finish/abort 的等待者 */
     pthread_cond_broadcast(&s_ctx.cv_space);  /* 满缓冲等空位的生产者 */
     pthread_mutex_unlock(&s_ctx.mu);
@@ -365,7 +349,6 @@ static int begin_common(const ota_manifest_t *m, uint32_t offset, bool *resumed,
     s_ctx.head = s_ctx.tail = s_ctx.count = 0;
     s_ctx.eof = s_ctx.abort = s_ctx.done = false;
     s_ctx.result = DG_OK;
-    s_ctx.last_permille = 0;
     s_ctx.manifest = *m;
     s_ctx.slot_mode = slot_mode;
     s_ctx.sha_hex[0] = '\0';
@@ -385,7 +368,6 @@ static int begin_common(const ota_manifest_t *m, uint32_t offset, bool *resumed,
 
     DG_LOGI(TAG, "开始接收 v=%s size=%u offset=%zu resumed=%d(写线程已就位)",
             m->version, m->size, staged, *resumed);
-    publish_progress((uint32_t)(staged * 1000 / m->size), false, DG_OK);
     return DG_OK;
 }
 

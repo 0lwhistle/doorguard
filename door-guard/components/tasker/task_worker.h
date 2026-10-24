@@ -30,8 +30,6 @@ extern struct task_worker_ctx s_task_worker_ctx;
 
 struct task_worker {
     atomic_int stop;       /* 主线程置位、工作线程轮询,跨线程 → 原子 */
-    int timeout_flag;
-    tasker_timer_t timeout_timer;
     int pt_created;                       /* pthread_create 成功标记(安全 join) */
     pthread_t pt;
     pthread_mutex_t mtx;
@@ -59,7 +57,5 @@ void worker_do_handler(struct task_worker *worker);
 
 int worker_sched_enqueue(struct task_node *node);
 int worker_task_enqueue(struct task_worker *worker, struct task_node *node);
-void worker_task_done(struct task_worker *worker, struct task_node *node);
-void worker_task_cancel(struct task_worker *worker, struct task_node *node);
 
 #endif /* TASK_WORKER */

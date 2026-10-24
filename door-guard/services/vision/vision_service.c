@@ -355,7 +355,7 @@ int vision_service_library_clear(void)
         return DG_ERR_NO_MEMORY;
 
     uint32_t got = 0;
-    int rc = db_user_list_ids(ids, cap, &got);
+    int rc = db_user_list_ids(0, ids, cap, &got);
     if (rc == DG_OK) {
         for (uint32_t i = 0; i < got; i++) {
             int r = s_lib_del(ids[i]);

@@ -9,7 +9,8 @@
  *    tasker 仅收 ≤500ms 短周期任务(心跳/超时/轮询);
  * 2. priority 维度(first/middle/last)已废弃,仅 level
  *    (little/middle/lots 时间成本分级)有效;
- * 3. 超时仅能升级任务 level,不能中断任务函数本身。
+ * 3. 模板的超时维度已整体删除(2026-10-25 B6-5:定时器恒 no-op、升级路径
+ *    不可达)——任务函数不可中断,长任务请勿入 tasker。
  */
 #ifndef TASKER_H
 #define TASKER_H
@@ -30,9 +31,6 @@ int tasker_init(void);
  *  保持原样可重试。返回 TASK_OK / TASK_PARA_ERR / TASK_QUEUE_FULL / ... */
 int tasker_enqueue(struct task_node *node);
 
-/** 按节点指针取消(只取消调度表中已入队的副本,不影响源节点) */
-void tasker_cancel_by_node(struct task_node *node);
-
 /** 按名字取消(名字须唯一) */
 void tasker_cancel_by_name(const char *name);
 
@@ -45,12 +43,9 @@ int tasker_is_empty(void);
 /** 高频短任务(默认超时 50ms) */
 int tasker_task_init_li(struct task_node *out, const int period, const int run_cnt,
                         const char *name, task_fn fn, void *ctx);
-/** 常规任务(默认超时 1000ms) */
+/** 常规任务 */
 int tasker_task_init_mi(struct task_node *out, const int period, const int run_cnt,
                         const char *name, task_fn fn, void *ctx);
-/** 重任务(显式超时) */
-int tasker_task_init_lo(struct task_node *out, const int timeout, const int period,
-                        const int run_cnt, const char *name, task_fn fn, void *ctx);
 
 /*
  * 使用示例:
