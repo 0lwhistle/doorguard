@@ -268,21 +268,36 @@ ck "升级包未授权上传被拒" "未登录" "$R"
 R=$(curl -s -m 5 -X POST $B/api/ota/fw/upload -H "$A" --data-binary @/tmp/apitest.ota)
 ck "升级包缺 Size 头被拒" "缺少 X-OTA-Size" "$R"
 
-# 升级包:好包入槽
+# 升级包:好包入槽(2026-10-25 复核挪后台线程:应答 finalizing,轮询收敛)
 R=$(curl -s -m 10 -X POST $B/api/ota/fw/upload -H "$A" \
     -H "X-OTA-Size: $(stat -c %s /tmp/apitest.ota)" --data-binary @/tmp/apitest.ota)
-ck "升级包入槽" '"version":"0.0.1"' "$R"
+ck "升级包入槽(应答 finalizing)" '"finalizing":true' "$R"
+FWOK=""
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 1
+    FWOK=$(curl -s -m 3 -H "$A" $B/api/ota/fw)
+    echo "$FWOK" | grep -q '"finalizing":false' && break
+    FWOK=""
+done
+ck "复核收敛且包入槽" '"present":true' "$FWOK"
 
 # 升级包:状态可见
-R=$(curl -s -m 3 -H "$A" $B/api/ota/fw)
-ck "升级包状态含版本" '"version":"0.0.1"' "$R"
-ck "升级包状态含暂存标志" '"staged":' "$R"
+ck "升级包状态含版本" '"version":"0.0.1"' "$FWOK"
+ck "升级包状态含暂存标志" '"staged":' "$FWOK"
 
-# 升级包:坏包(截断)→ 422
+# 升级包:坏包(截断)→ 复核异步拒收(finalize_err≠0,槽不留坏包)
 head -c 98 /tmp/apitest.ota > /tmp/apitest_bad.ota   # 96B<98<100:过前置大小检、砸中「总长与头不符」
-R=$(curl -s -m 5 -X POST $B/api/ota/fw/upload -H "$A" \
-    -H "X-OTA-Size: $(stat -c %s /tmp/apitest_bad.ota)" --data-binary @/tmp/apitest_bad.ota)
-ck "坏包 422 拒收" "包校验失败" "$R"
+curl -s -m 10 -X POST $B/api/ota/fw/upload -H "$A" \
+    -H "X-OTA-Size: $(stat -c %s /tmp/apitest_bad.ota)" --data-binary @/tmp/apitest_bad.ota >/dev/null
+BADOK=""
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 1
+    BADOK=$(curl -s -m 3 -H "$A" $B/api/ota/fw)
+    echo "$BADOK" | grep -q '"finalizing":false' && break
+    BADOK=""
+done
+ck "坏包复核收敛" '"finalizing":false' "$BADOK"
+ck "坏包不占槽" '"present":false' "$BADOK"
 
 # 升级包:空槽 apply → 409(真升级板上人工验收,不进自动化)
 curl -s -m 3 -X DELETE $B/api/ota/fw -H "$A" >/dev/null
