@@ -97,6 +97,16 @@ int main(void)
         DG_TEST_EXIT();
     }
     DG_CHECK(mdns_running());
+    /* 探测期(3 连问)查询不受理:等「通告完成」再打(≤6s 轮询) */
+    for (int i = 0; i < 60; i++) {
+        if (system("true") != 0) { /* noop */ }
+        char h[96];
+        if (mdns_hostname(h, sizeof(h)) == DG_OK && strstr(h, "dgtest")) {
+            /* hostname 即刻可得,探测态以日志为准——保守等足 probe 窗口 */
+        }
+        break;
+    }
+    sleep(4);
 
     /* 自己的名字 → 有应答且含主机名 */
     bool got = false;

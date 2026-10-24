@@ -86,7 +86,7 @@ int main(void)
     if (system(cmd) != 0)
         exit(1);
     DG_CHECK(cfg_load(NULL, NULL) == DG_OK); /* 无路径 = 纯内存模式 */
-    DG_CHECK(cfg_set_str("network.ntp_server", "127.0.0.1") == DG_OK);
+    DG_CHECK(cfg_set_str("ntp_server", "127.0.0.1") == DG_OK);
 
     DG_CHECK(event_bus_init() == EVENT_BUS_OK);
     DG_CHECK(event_bus_subscribe(EV_NET_NTP_RESULT, on_ntp_result, NULL) != NULL);
