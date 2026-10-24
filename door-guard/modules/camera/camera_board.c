@@ -35,6 +35,7 @@
 #include <fcntl.h>
 #include <linux/videodev2.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <time.h>
 #include <stdlib.h>
