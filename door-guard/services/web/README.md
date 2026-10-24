@@ -79,7 +79,18 @@ components/      纯展示:只吃 props、只发 emits(不 import store / api / 
 | GET | `/api/logs` | token | `from,to,user_id,page,page_size(≤100)` 分页 |
 | POST | `/api/ntp` | token | 异步触发(202),结果走 WebSocket |
 | POST | `/api/account` | token+旧口令 | 改账号/口令,成功后**所有会话失效** |
-| POST | `/api/ota/upload` | token | 流式收包 + sha256 校验 |
+| POST | `/api/ota/upload` | token | 流式收包 + sha256 校验(裸包暂存) |
+| GET/POST | `/api/network` | token | 网络配置读/应用(设备端屏幕设置) |
+| GET | `/api/users` | token | 用户列表(分页行+总数) |
+| POST | `/api/users/add` `/api/users/update` `/api/users/pwd` `/api/users/delete` | token | 用户 CRUD/改密 |
+| POST | `/api/users/face_clear` `/api/users/face_set` | token | 清除/录入人脸(方式位联动) |
+| POST | `/api/users/ic_set` `/api/users/ic_clear` | token | IC 卡绑定/解绑 |
+| GET/POST | `/api/access_set` | token | 门禁设置读/写 |
+| POST | `/api/system/reboot` | token | 设备重启 |
+| GET | `/api/ota/fw` | token | 升级包槽位状态(含 finalizing/finalize_err/partial 续传偏移) |
+| DELETE | `/api/ota/fw` | token | 弃包(槽位清空) |
+| POST | `/api/ota/fw/upload` | token | 升级包流式上传(.ota 全量;后台复核 finalizing) |
+| POST | `/api/ota/fw/apply` | token | 提取校验并交装(202;S60 装槽重启) |
 | GET | `/api/ws` | `?token=` | WebSocket:认证事件、NTP 结果、网络地址、uptime 心跳 |
 
 约束与理由:
@@ -161,7 +172,8 @@ door-guard/tests/web/web_test.sh                 # 63 项
   mongoose 3MB 收包上限会显式断连,客户端以 X-OTA-Offset 续传(有界失败)
 - 页面文案只有中文(设备端 `ui/lang/*.json` 那套 i18n 未接入前端);要接的话在
   `frontend/src/` 加文案表即可。
-- 监控画面仍是占位:RTSP/MJPEG 要与 `capture_service` 对接(统一走 capture,不另开链路)。
+- 监控画面**已实装**(web_stream:MJPEG 推流,camera_latest 取帧;2026-10-04 起):
+  浏览器拉 `/api/stream/mjpeg`,WS 控制订阅起停。
 - web 端用户管理已开放(CRUD/改密/清人脸,2026-09-27 a275a1f:与设备端同源
   校验;删除/清人脸经 enroll 服务事件,DB+特征库+头像一起动)。
 - 产物未做 gzip 内嵌(131KB JS,gzip 后 51KB):局域网直发可接受;若要省,可在构建时

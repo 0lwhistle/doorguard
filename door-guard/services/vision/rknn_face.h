@@ -6,10 +6,11 @@
  * 契约装配与事件发布在 vision_rknn.c —— 三层各管一段。
  *
  * 为什么解码单独成单元:解码规则随检测器走,换检测器只换解码。
- * 当前实现 **SCRFD-10G**(`det_10g.rknn`,板上实测见 models/README.md):
- *   输入 640×640×3 NHWC F16;9 个输出 = 3 个 stride × (score/bbox/kps),
- *   每位置 2 anchor;stride 8/16/32 → 12800/3200/800。
- *   输出顺序 = [s8,s16,s32, b8,b16,b32, k8,k16,k32](rknn_model_zoo 约定)。
+ * 当前实现 **RetinaFace**(det_320.rknn,输入 320×320;板上实测见 models/README.md)。
+ *   下方 SCRFD-10G 解码规则为**遗留备件**(生产零调用,tests 对拍用):换
+ *   SCRFD-10G(640×640,9 输出 = 3 stride × score/bbox/kps,每位置 2 anchor,
+ *   stride 8/16/32 → 12800/3200/800,输出顺序 [s8,s16,s32,b8,b16,b32,k8,k16,k32],
+ *   rknn_model_zoo 约定)时复用。
  *   bbox/kps 是"相对 anchor 中心的距离 × stride",需按 stride 还原。
  *
  * RetinaFace 若要接(需先按 RK3576 重转,见 models/README):它是 anchor-based

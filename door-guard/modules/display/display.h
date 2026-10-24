@@ -2,7 +2,7 @@
  * display.h — 显示 HAL(LVGL 显示驱动 + 触摸输入注册)
  *
  * PC 模拟器:SDL2 窗口 720×1280(DG_SIM 构建);
- * 板上:DRM/LVGL(Phase 8 接入,当前为占位)。
+ * 板上:DRM/LVGL9(display_drm_v9,已实装)。
  * 同一份 ui/ 代码跑两处(spec-ui),业务与 UI 层不感知后端差异。
  */
 #ifndef DG_DISPLAY_H

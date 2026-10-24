@@ -44,8 +44,8 @@ RFC 1035 §4.1 的字节布局写断言(`tests/test_mdns_wire.c`,69 项)。
 - **重名处理**:探测期发现同名不同 IP → 改名 `doorguard-2`(后缀递增,最多 -9)并写回
   `device_config.mdns_host`,重启后名字稳定;
 - **关机 goodbye**(TTL=0):停止服务时发一轮,不留幽灵条目;
-- 逐接口入组(`IP_ADD_MEMBERSHIP` per iface)+ `IP_PKTINFO` 取来源网口,
-  双网口(eth0+eth1)时从正确的网口应答;
+- 逐接口入组(`IP_ADD_MEMBERSHIP` per iface);**应答统一从主网口发出**
+  (mdns_responder.c 头注:单网口产品形态下够用,`IP_PKTINFO` 仅备用未接);
 - 与 avahi / 手机热点共存:`SO_REUSEPORT` 抢不到 5353 也不影响别家。
 
 主机名配置:`device_config.mdns_host`(默认 `doorguard`,最长 39 字符)。

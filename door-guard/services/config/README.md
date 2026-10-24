@@ -23,19 +23,17 @@ cur_config.json(现用配置,稀疏覆盖;板上 /userdata/doorguard/cur_config.
 | door_open_ms | access.door_open_ms | 1000~10000 | 3000 |
 | pwd_fail_lock_n | access.pwd_fail_lock_n | 1~10 | 5 |
 | pwd_fail_lock_s | access.pwd_fail_lock_s | 10~3600 | 60 |
-| face_dup_threshold | face.face_dup_threshold | 0.50~1.00 | 0.90 |
+| face_dup_threshold | face.face_dup_threshold | 0.30~1.00 | 0.50(录入查重,余弦距离) |
 | face_match_threshold | face.match_threshold | 0.30~1.00 | 0.42 |
 | min_face_px | face.min_face_px | 40~400 | 80 |
 | blur_min | face.blur_min | 0~50000 | 50 |
 | det_score_min | face.det_score_min | 0.30~1.00 | 0.70 |
 | det_threshold | face.det_threshold | 0.30~0.95 | 0.60(检测出框线;i8 模型空场景有 0.5x 幻检) |
-| liveness_enable | face.liveness_enable | 0/1 | 0(B8 活体算法落地后开) |
-| antispoof_enable | face.antispoof_enable | 0/1 | 0(反欺骗单帧判定;模型上板+假体标定后开。命中判"疑似假体"→发起多模态二次验证) |
-| antispoof_threshold | face.antispoof_threshold | 0~1.00 | 0.50(真脸分数下限,多帧平滑分低于它即降级;误拒只多验一道,可调严) |
+| antispoof_threshold | face.antispoof_threshold | 0~1.00 | 0.50(真脸分数下限,多帧平滑分低于它即降级;误拒只多验一道,可调严。注:liveness/antispoof 两开关键已删,活体恒启用——cfg.c 删除注) |
 | standby_timeout_s | ui.standby_timeout_s | 15~60 | 30 |
 | menu_timeout_s | ui.menu_timeout_s | 5~120 | 15 |
 | language | ui.language | zh-CN/en-US | zh-CN |
-| web_port | network.web_port | 1024~65535 | 8080(含 OTA 上传端点) |
+| web_port | network.web_port | 1024~65535 | 80(2026-09-27 起 URL 免端口;非 root 回退 8080;含 OTA 上传端点) |
 | ntp_server | network.ntp_server | 字符串 | ntp.aliyun.com |
 | ota_url | network.ota_url | 字符串 | 空 |
 

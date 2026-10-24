@@ -4,9 +4,9 @@
  * 分层:
  *   vision_service(本层的服务) = 模式状态 / 特征槽 / 库维护转发 / 录入抓取,
  *      完全不认识 ROCKIVA、rknn 或任何具体模型;
- *   后端(backend)= 具体实现:ROCKIVA 官方库(默认)、自建 rknn 模型
- *      (SCRFD+ArcFace 之类开源模型)、PC mock。
- * 选择方式:编译进哪个后端由 CMake 决定(DG_SIM → sim,否则 rockiva);
+ *   后端(backend)= 具体实现:**自建 rknn 模型(板上主线,main.c 先注册)**、
+ *      ROCKIVA 官方库(备选:本版 SDK 缺 rk3576 人脸模型,见 PROJECT_PLAN)、PC mock。
+ * 选择方式:编译进哪个后端由 CMake 决定(DG_SIM → sim,否则 rknn);
  *   运行时用 cfg `face.backend` 或 env `DG_VISION_BACKEND` 按名字挑(注册表内),
  *   缺省用第一个注册的后端 —— 将来同一份固件编进多个后端可直接切,不必改服务层。
  *   装配(注册)只在 app/main.c 做(那里允许知道具体模块)。

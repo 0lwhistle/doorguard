@@ -203,7 +203,7 @@ RK3576 上的通行做法(见 `sdk-guide/README.md §5`):
 
 ### 新增一个后端的步骤(不改服务层/UI/FSM/存储)
 
-1. 写 `modules/vision/vision_rknn.c`:`#include "vision_backend.h"`,实现 ops,
+1. 写 `services/vision/vision_rknn.c`:`#include "vision_backend.h"`,实现 ops,
    文件尾导出 `const vision_backend_ops_t vision_backend_rknn = {...}`;
 2. `CMakeLists.txt`:`DG_SIM OR DG_BUILD_TESTS` 之外的分支里加该源文件与它的
    头/库(rknn 头在 sysroot `usr/include/rknn`,库 `librknnrt.so`);
@@ -220,7 +220,7 @@ RK3576 上的通行做法(见 `sdk-guide/README.md §5`):
 | `face.model_dir` | ROCKIVA 的模型目录(env `DG_IVA_MODEL_DIR` 优先) | `/usr/lib` |
 | `face.model_tag` | 特征口径标识,空 = 用后端自带默认 | 空 |
 | `face.match_threshold` | 1:N/1:1 命中阈值(余弦分度,须实测标定) | 0.42 |
-| `face.face_dup_threshold` | 录入查重阈值(同上) | 0.90 |
+| `face.face_dup_threshold` | 录入查重阈值(同上) | 0.50 |
 | `face.det_threshold` | 检测器出框阈值(i8 模型空场景有 0.5x 幻检;正脸 0.85+) | 0.60 |
 | `face.liveness_enable` | 动作活体开关(B8 算法) | 0 |
 

@@ -30,9 +30,9 @@ typedef struct {
 typedef void (*camera_frame_fn)(const camera_frame_t *frame, void *ud);
 
 /**
- * 初始化。
+ * 初始化(后台线程完成全部阻塞初始化,本函数立即返回)。
  * SIM 后端:res_path = 图片目录(循环播放,支持 png/jpg/bmp)。
- * 板上后端:res_path = 设备节点(Phase 8)。
+ * 板上后端:**忽略 res_path**(假参数,节点取 DG_CAM_DEV env)。
  */
 int camera_init(const char *res_path, camera_frame_fn cb, void *ud);
 

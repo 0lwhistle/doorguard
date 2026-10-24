@@ -1,7 +1,8 @@
 /*
  * vision_service.h — 视觉服务(检测/特征/1:N 检索;architecture §1)
  *
- * 后端:PC=sim mock(周期事件 + 确定性伪特征);板=ROCKIVA(B7/B8 接入)。
+ * 后端:PC=sim mock(周期事件 + 确定性伪特征);板=自建 rknn(RetinaFace+ArcFace,
+ * ROCKIVA 为备选——本版 SDK 缺 rk3576 人脸模型,见 services/vision/README.md)。
  * 特征大数据经本模块槽位传递(事件只带 seq 句柄,架构既定的"大数据不过总线"模式)。
  * 检索范围:全部开启人脸的用户(含黑名单,命中即拒——spec-auth §2.4)。
  */
