@@ -421,6 +421,11 @@ event_bus_err_t event_bus_unsubscribe(event_subscription_t *subscription)
     return EVENT_BUS_OK;
 }
 
+bool event_bus_is_initialized(void)
+{
+    return atomic_load(&event_bus_get_context()->initialized);
+}
+
 uint32_t event_bus_get_heap_fallback(void)
 {
     return atomic_load(&s_heap_fallback_count);
