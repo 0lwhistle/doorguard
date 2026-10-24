@@ -150,6 +150,26 @@ target_link_libraries(test_ota PRIVATE dg_net crypto pthread)
 add_test(NAME test_ota COMMAND test_ota)
 set_tests_properties(test_ota PROPERTIES TIMEOUT 120)
 
+# OTA HTTP 客户端(手写协议层):回环假源(2026-10-25 B8-4)
+dg_add_test(test_ota_http dg_ota)
+set_tests_properties(test_ota_http PROPERTIES TIMEOUT 30)
+
+# NTP 服务 socket 层:回环 SNTP 假源(2026-10-25 B8-5;离线环境 SKIP)
+add_executable(test_ntp test_ntp.c)
+target_include_directories(test_ntp PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto ${CMAKE_SOURCE_DIR}/services)
+target_link_libraries(test_ntp PRIVATE dg_net dg_config dg_timeutil dg_event_bus dg_log)
+add_test(NAME test_ntp COMMAND test_ntp)
+set_tests_properties(test_ntp PROPERTIES TIMEOUT 60)
+
+# mDNS 应答器 socket 层:回环单播查询(2026-10-25 B8-5;非 root/无组播 SKIP)
+add_executable(test_mdns_resp test_mdns_resp.c)
+target_include_directories(test_mdns_resp PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/proto ${CMAKE_SOURCE_DIR}/services)
+target_link_libraries(test_mdns_resp PRIVATE dg_net dg_storage dg_config dg_log)
+add_test(NAME test_mdns_resp COMMAND test_mdns_resp)
+set_tests_properties(test_mdns_resp PROPERTIES TIMEOUT 30)
+
 # i18n 一致性:扫描源码 _() 键 + 双 json 覆盖 + 裸中文检查 + 字体字形覆盖
 # (C3:随 LVGL9 编译,lv_font_get_glyph_dsc 两代同签名;头路径按代际切换)
 add_executable(test_i18n test_i18n.c)
