@@ -38,6 +38,8 @@ static void *srv_thread(void *arg)
         uint8_t req[128];
         ssize_t n = recvfrom(s_srv, req, sizeof(req), 0,
                              (struct sockaddr *)&from, &flen);
+        if (n < 0)
+            continue;                        /* 超时轮询 s_srv_run */
         if (n < 48)
             continue;
         s_req_cnt++;
@@ -102,6 +104,8 @@ int main(void)
     /* 假源就位 → 触发 → 等回执(≤10s) */
     s_srv = socket(AF_INET, SOCK_DGRAM, 0);
     DG_CHECK(s_srv >= 0);
+    struct timeval rxto = { 1, 0 };      /* 收包超时:收尾 join 不挂死 */
+    setsockopt(s_srv, SOL_SOCKET, SO_RCVTIMEO, &rxto, sizeof(rxto));
     struct sockaddr_in a = { 0 };
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);

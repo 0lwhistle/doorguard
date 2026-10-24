@@ -9,6 +9,7 @@
 #include "dg_test.h"
 #include "mdns_responder.h"
 #include "storage.h"
+#include "netcore.h"
 #include "cfg.h"
 
 #include <arpa/inet.h>
@@ -83,10 +84,9 @@ int main(void)
     DG_CHECK(db_config_set("mdns_host", "dgtest") == DG_OK);
     DG_CHECK(db_config_set("web_port", "8080") == DG_OK);
 
-    /* cfg 内存态同样给出(mdns_start 两处读谁以实现为准,双保险) */
-    DG_CHECK(cfg_load(NULL, NULL) == DG_OK);
-    DG_CHECK(cfg_set_str("network.web_port", "8080") == DG_OK);
+    DG_CHECK(cfg_load(NULL, NULL) == DG_OK);   /* mdns_start 链路要 cfg 就绪 */
 
+    DG_CHECK(netcore_start() == DG_OK);        /* mdns_start 的收发跑在 netcore loop */
     int rc = mdns_start();
     if (rc != DG_OK) {
         /* 5353 被占/组播入组失败的环境(非 root CI):SKIP 不算失败 */
@@ -113,6 +113,7 @@ int main(void)
 
     mdns_stop();
     DG_CHECK(!mdns_running());
+    netcore_stop();
     storage_deinit();
     snprintf(cmd, sizeof(cmd), "rm -rf %s", dir);
     (void)system(cmd);
