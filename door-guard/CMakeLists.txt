@@ -388,7 +388,7 @@ target_compile_definitions(mongoose PRIVATE MG_ARCH=MG_ARCH_UNIX MG_ENABLE_TCPIP
 add_library(dg_net_info STATIC modules/net/net_info.c)
 target_include_directories(dg_net_info PUBLIC ${CMAKE_SOURCE_DIR}/modules/net
                                               ${CMAKE_SOURCE_DIR}/proto)
-target_link_libraries(dg_net_info PUBLIC dg_log)
+target_link_libraries(dg_net_info PUBLIC dg_log dg_timeutil)
 
 add_library(dg_net STATIC
     modules/net/netcore.c
