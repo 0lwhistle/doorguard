@@ -41,6 +41,7 @@ static int s_head = 0, s_tail = 0;
 static int s_dropped = 0;
 /* 跨线程标志/心跳一律原子量:TSAN 下零竞态,语义与朴素读写一致 */
 static atomic_bool s_running = false;
+static atomic_bool s_starting = false;   /* start/stop 全周期闸(C2-3,文件域供 stop 复位) */
 static atomic_llong s_hb_ms = 0;
 
 /* 项目心跳约定(2026-10-03 起统一)= MONOTONIC 毫秒(timeutil 的
@@ -129,7 +130,6 @@ int netcore_start(void)
 
     /* CAS 抢启动权(C2-3):上面 s_running 检查在线程创建成功后才置位,并发
      * 双调用会双双穿过 → 双 mg_mgr_init+线程泄漏;实践单线程,防御性收口 */
-    static atomic_bool s_starting;
     bool expect = false;
     if (!atomic_compare_exchange_strong(&s_starting, &expect, true)) {
         DG_LOGW(TAG, "netcore_start 重复调用,忽略");
