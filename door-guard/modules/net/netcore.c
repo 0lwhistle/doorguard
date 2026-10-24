@@ -171,6 +171,7 @@ void netcore_stop(void)
     }
     mg_mgr_free(&s_mgr);                     /* 关闭所有残留连接 */
     atomic_store(&s_hb_ms, 0);
+    atomic_store(&s_starting, false);        /* stop 后允许下次 start(C2-3 配套) */
     DG_LOGI(TAG, "统一网络事件循环已停止(闭包丢弃累计 %d)", s_dropped);
 }
 

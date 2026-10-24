@@ -215,32 +215,37 @@ void page_device_create(lv_obj_t *parent)
     lv_obj_align(s_time, LV_ALIGN_TOP_MID, 0, 90);
     refresh_time();
 
-    /* 表驱动(C6-6:十个同构按钮原先逐个复制粘贴;label 是 i18n 键原文,
-     * 动态行传 NULL 由 refresh_rows 回填) */
+    /* 表驱动(C6-6:十个同构按钮原先逐个复制粘贴)。label 走运行期 _()
+     * 数组(i18n 裸中文扫描要求键字面量出现在 _() 内),动态行 LB_NONE
+     * 由 refresh_rows 回填 */
+    enum { LB_NONE = 255 };
     static const struct {
         const char *icon;
-        const char *key;                 /* i18n 键(NULL = 动态文案行) */
+        uint8_t label;                   /* LBT[] 下标;LB_NONE = 动态文案行 */
         lv_event_cb_t cb;
         bool danger;
     } BTNS[] = {
-        { LV_SYMBOL_REFRESH,  "语言",        on_lang,         false },
-        { LV_SYMBOL_UP,       "NTP 校时",    on_ntp,          false },
-        { LV_SYMBOL_SETTINGS, "人脸识别",    on_face_set,     false },
-        { LV_SYMBOL_WIFI,     "网络配置",    on_net,          false },
-        { LV_SYMBOL_SETTINGS, "Web 管理",    on_web,          false },
-        { LV_SYMBOL_IMAGE,    "屏幕显示",    on_display_set,  false },
-        { LV_SYMBOL_EYE_OPEN, NULL,          on_standby,      false },
-        { LV_SYMBOL_SETTINGS, NULL,          on_menu_timeout, false },
-        { LV_SYMBOL_LIST,     "关于设备",    on_about,        false },
-        { LV_SYMBOL_REFRESH,  "重启设备",    on_reboot,       true },
+        { LV_SYMBOL_REFRESH,  0,        on_lang,         false },
+        { LV_SYMBOL_UP,       1,        on_ntp,          false },
+        { LV_SYMBOL_SETTINGS, 2,        on_face_set,     false },
+        { LV_SYMBOL_WIFI,     3,        on_net,          false },
+        { LV_SYMBOL_SETTINGS, 4,        on_web,          false },
+        { LV_SYMBOL_IMAGE,    5,        on_display_set,  false },
+        { LV_SYMBOL_EYE_OPEN, LB_NONE,  on_standby,      false },
+        { LV_SYMBOL_SETTINGS, LB_NONE,  on_menu_timeout, false },
+        { LV_SYMBOL_LIST,     6,        on_about,        false },
+        { LV_SYMBOL_REFRESH,  7,        on_reboot,       true },
+    };
+    const char *const LBT[] = {
+        _("语言"), _("NTP 校时"), _("人脸识别"), _("网络配置"),
+        _("Web 管理"), _("屏幕显示"), _("关于设备"), _("重启设备"),
     };
     lv_obj_t *dev_btns[sizeof(BTNS) / sizeof(BTNS[0])] = { 0 };
     for (size_t i = 0; i < sizeof(BTNS) / sizeof(BTNS[0]); i++) {
+        const char *label = (BTNS[i].label == LB_NONE) ? "" : LBT[BTNS[i].label];
         lv_obj_t *b = BTNS[i].danger
-                          ? dg_btn_create_danger(parent, BTNS[i].icon,
-                                                 BTNS[i].key ? _(BTNS[i].key) : "")
-                          : dg_btn_create(parent, BTNS[i].icon,
-                                          BTNS[i].key ? _(BTNS[i].key) : "");
+                          ? dg_btn_create_danger(parent, BTNS[i].icon, label)
+                          : dg_btn_create(parent, BTNS[i].icon, label);
         lv_obj_set_size(b, DG_SCREEN_W - 2 * DG_PAD, DG_BTN_H);
         lv_obj_align(b, LV_ALIGN_TOP_MID, 0, 180 + (int32_t)i * (DG_BTN_H + DG_PAD));
         lv_obj_add_event_cb(b, BTNS[i].cb, LV_EVENT_CLICKED, NULL);
