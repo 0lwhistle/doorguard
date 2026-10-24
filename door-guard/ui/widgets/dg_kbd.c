@@ -16,6 +16,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* 字母键键值登记上限(26 字母 + 余量;B7-2 回收登记表) */
+#define KBD_SYMS_MAX 32
+
 typedef struct {
     dg_kbd_ops_t ops;
     lv_obj_t *root;               /* 键盘根(toggle 事件经它找回 k) */
@@ -155,7 +158,6 @@ static lv_obj_t *add_key(lv_obj_t *parent, dg_kbd_t *k, const char *label,
  * LV_EVENT_DELETE 时统一回收——此前每次开输入弹窗漏 ~150B,密码/姓名
  * 高频路径长待机无界累积,B7-2)。
  * 宽 9%:每行 10 键 + 9 个 6px 间距要压进 100%,10% 会把行尾键挤出屏幕 */
-#define KBD_SYMS_MAX 32
 static lv_obj_t *add_letter_key(dg_kbd_t *k, lv_obj_t *parent, char lc)
 {
     if (k->nsym >= KBD_SYMS_MAX)
