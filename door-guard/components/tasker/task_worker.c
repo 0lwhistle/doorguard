@@ -24,7 +24,7 @@ static inline uint64_t get_time_ms(void){
 
 // forward declarations for static functions used before definition
 static inline int enqueue_switcher(struct task_node* node);
-static int worker_task_enqueue_nocancel(struct task_worker* des, struct task_node* node);
+static int task_enqueue_common(struct task_worker* des, struct task_node* node, int bump_on_full);
 
 #include <string.h>
 
