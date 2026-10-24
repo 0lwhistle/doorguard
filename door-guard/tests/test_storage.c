@@ -383,8 +383,9 @@ static void test_pwd_blob_corrupt(void)
         sqlite3 *raw = NULL;
         char *err = NULL;
         DG_CHECK(sqlite3_open(db, &raw) == SQLITE_OK);
+        /* hash 换回合法 32B(列 NOT NULL 置 NULL 会被约束拒),只撑爆 salt */
         DG_CHECK(sqlite3_exec(raw,
-                              "UPDATE users SET pwd_hash = NULL,"
+                              "UPDATE users SET pwd_hash = randomblob(32),"
                               " pwd_salt = randomblob(64);",
                               NULL, NULL, &err) == SQLITE_OK);
         sqlite3_free(err);
