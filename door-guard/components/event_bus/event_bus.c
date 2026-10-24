@@ -421,6 +421,46 @@ event_bus_err_t event_bus_unsubscribe(event_subscription_t *subscription)
     return EVENT_BUS_OK;
 }
 
+/* ---- 调试辅助(type_name:测试断言事件名映射用) ---- */
+
+static const struct {
+    event_type_t type;
+    const char *name;
+} s_event_type_names[] = {
+    { EVENT_SYSTEM_STARTUP, "SYSTEM_STARTUP" },
+    { EVENT_SYSTEM_SHUTDOWN, "SYSTEM_SHUTDOWN" },
+    { EVENT_SYSTEM_ERROR, "SYSTEM_ERROR" },
+    { EVENT_UI_PAGE_CHANGE, "UI_PAGE_CHANGE" },
+    { EVENT_UI_REFRESH_REQUEST, "UI_REFRESH_REQUEST" },
+    { EVENT_TEST_PUBLISH, "TEST_PUBLISH" },
+    { EVENT_TEST_NO_DATA, "TEST_NO_DATA" },
+    { EVENT_TEST_REENTRANT, "TEST_REENTRANT" },
+    { EVENT_TEST_POOL, "TEST_POOL" },
+    { EVENT_TYPE_MAX, NULL },
+};
+
+const char *event_bus_get_type_name(event_type_t type)
+{
+    for (int i = 0; s_event_type_names[i].name != NULL; i++) {
+        if (s_event_type_names[i].type == type)
+            return s_event_type_names[i].name;
+    }
+    return "UNKNOWN";
+}
+
+event_bus_err_t event_bus_reset_stats(void)
+{
+    event_bus_context_t *ctx = event_bus_get_context();
+    if (!atomic_load(&ctx->initialized))
+        return EVENT_BUS_ERR_NOT_INIT;
+
+    atomic_store(&ctx->stats.events_published, 0);
+    atomic_store(&ctx->stats.events_processed, 0);
+    atomic_store(&ctx->stats.events_dropped, 0);
+    atomic_store(&ctx->stats.handler_errors, 0);
+    return EVENT_BUS_OK;
+}
+
 event_bus_err_t event_bus_get_stats(uint32_t *events_published, uint32_t *events_processed,
                                     uint32_t *events_dropped, uint32_t *handler_errors)
 {
