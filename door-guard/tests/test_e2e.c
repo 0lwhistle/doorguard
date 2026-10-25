@@ -214,9 +214,21 @@ int main(void)
      * 不离场则新场景不会重新判定(2026-09-22 在场闸) */
     EVENT_BUS_PUBLISH_EMPTY(EV_VISION_FACE_LOST);
     sleep(1);                                   /* LOST 分发完再进场 */
+    /* sim 后端是活循环(每 ~4s MATCH/LOST 交替),会把 1.5s 窗抢答成 PASS
+     * 或用 LOST 撤窗——窗口期先切 DETECT_ONLY 消音;结果弹窗回普通时
+     * access 会重新派生 DETECT_1N,无需手动恢复 */
+    vision_service_set_mode(DG_VMODE_DETECT_ONLY, NULL);
     ev_face_box_t box = { .x = 1, .y = 2, .w = 3, .h = 4,
                           .state = DG_BOX_DETECTED };
     EVENT_BUS_PUBLISH(EV_VISION_FACE_BOX, &box);
+    /* B8(2026-10-25):1.5s 判定窗改由活体通过武装——这里黑盒代打
+     * EV_LIVENESS_PROMPT(PASSED)(真实链路里它是 liveness 状态机发的) */
+    {
+        ev_liveness_t lv;
+        memset(&lv, 0, sizeof(lv));
+        lv.phase = DG_LIVE_PHASE_PASSED;
+        EVENT_BUS_PUBLISH(EV_LIVENESS_PROMPT, &lv);
+    }
     wait_until(5000, &s_result_cnt, 2);         /* 1.5s 窗口超时 */
     DG_CHECK(atomic_load(&s_result_cnt) == 2);
     DG_CHECK(s_results[1].result == DG_RESULT_REJECT);

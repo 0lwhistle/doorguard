@@ -1122,7 +1122,10 @@ static void t17_liveness_window(void)
     fsm_reset();
     face_detected();
     face_detected();
-    DG_CHECK(last_act(FSM_ACT_SET_TIMER)->d.timer.timer_id != FSM_TMR_MATCH_WINDOW);
+    {
+        const act_rec_t *t = last_act(FSM_ACT_SET_TIMER);
+        DG_CHECK(t == NULL || t->d.timer.timer_id != FSM_TMR_MATCH_WINDOW);
+    }
     DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 0);
 
     /* 无脸时收到活体通过(face_present=false):不武装 */

@@ -227,12 +227,13 @@ static void arm_frame(int64_t now, float yaw, float nod)
     s_run.ring_n++;
     if (s_run.ring_n < LV_ARM_FRAMES)
         return;
+    float sy = 0, sn = 0;               /* 局部累加:复用全局会被上一场污染 */
     for (int i = 0; i < LV_BASE_RING; i++) {
-        s_base_yaw += s_run.ring_yaw[i];
-        s_base_nod += s_run.ring_nod[i];
+        sy += s_run.ring_yaw[i];
+        sn += s_run.ring_nod[i];
     }
-    s_base_yaw /= LV_BASE_RING;
-    s_base_nod /= LV_BASE_RING;
+    s_base_yaw = sy / LV_BASE_RING;
+    s_base_nod = sn / LV_BASE_RING;
     s_state = ST_CHALLENGE;
     deal_sequence(now);
     DG_LOGI(TAG, "活体出题 %d 步", s_run.seq_len);
