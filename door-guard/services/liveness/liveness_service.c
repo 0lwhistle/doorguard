@@ -33,14 +33,14 @@
 
 static const char *TAG = "[LIVENESS]";
 
-/* ---- 判定参数(代码常量,板上标定后再考虑进配置;单位见各注释) ---- */
+/* ---- 判定参数(代码常量,阈值按 10-25 板上标定放宽过一档;单位见注释) ---- */
 #define LV_ARM_FRAMES     8      /* 基线采样帧数(30fps ≈ 0.27s) */
 #define LV_BASE_RING      4      /* 基线取末 4 帧均值 */
 #define LV_HOLD_FRAMES    4      /* 判定沿需连续帧数(滤单帧抖动) */
-#define LV_EXC_YAW        0.28f  /* 摇头起幅:|Δyaw| ≥ 0.28 眼距(≈19° 转头) */
-#define LV_EXC_YAW_CROSS  0.20f  /* 摇头往返:翻到对侧 ≥ 0.20 眼距 */
-#define LV_EXC_NOD        0.10f  /* 点头起幅:|Δr| ≥ 0.10(≈10° 低头) */
-#define LV_RET_NOD        0.04f  /* 点头回位:回到基线 ±0.04 */
+#define LV_EXC_YAW        0.22f  /* 摇头起幅:|Δyaw| ≥ 0.22 眼距(≈15° 转头) */
+#define LV_EXC_YAW_CROSS  0.15f  /* 摇头往返:翻到对侧 ≥ 0.15 眼距 */
+#define LV_EXC_NOD        0.08f  /* 点头起幅:|Δr| ≥ 0.08(≈7° 低头) */
+#define LV_RET_NOD        0.05f  /* 点头回位:回到基线 ±0.05 */
 #define LV_PASS_STALE_MS  2000   /* PASSED 后无回灌超过该时长视为已离场 */
 #define LV_N5_DEGRADE_MS  2000   /* 非 5 点回灌持续超过该时长 → 降级放行 */
 #define LV_DEFAULT_MIN    2      /* cfg 缺失/越界时的内置兜底 */
@@ -69,6 +69,9 @@ typedef struct {
     int   seq_len;
     int   step;                          /* 当前步下标(0 起) */
     int64_t step_start_ms;               /* 本步开始时刻(单调) */
+    /* 诊断(板上标定用):本步帧数与两轴最大偏移 */
+    uint32_t frames;
+    float max_dyaw, max_dnod;
     int64_t non5_since_ms;               /* 非 5 点回灌开始时刻(0=无) */
     bool  warned_degrade;                /* 降级告警只打一次 */
     bool  chip_shown;                    /* 提示条在屏(UI 需要成对 HIDE) */
@@ -145,9 +148,10 @@ static void pub_prompt(int8_t action, int8_t step, int8_t total,
         s_run.chip_shown = false;
 }
 
-/* 重置到 IDLE(离场/失活);若提示在屏则补一条 HIDE 成对收起 */
+/* 重置到 IDLE(离场/失活);离开出题态打一条 INFO(低频,标定可见) */
 static void reset_locked(const char *why)
 {
+    bool was_active = (s_state != ST_IDLE);
     if (s_state == ST_IDLE && !s_run.chip_shown) {
         s_run.non5_since_ms = 0;
         return;
@@ -159,7 +163,8 @@ static void reset_locked(const char *why)
     s_run.hold = 0;
     s_run.ring_n = 0;
     s_run.non5_since_ms = 0;
-    DG_LOGD(TAG, "复位(%s)", why);
+    if (was_active)
+        DG_LOGI(TAG, "复位(%s)", why);
 }
 
 /* 出新序列:长度与动作随机(相邻不重复);CHALLENGE 从第 0 步开始 */
@@ -179,6 +184,9 @@ static void deal_sequence(int64_t now)
     s_run.stage = 0;
     s_run.hold = 0;
     s_run.dir = 0;
+    s_run.frames = 0;
+    s_run.max_dyaw = 0;
+    s_run.max_dnod = 0;
     s_run.step_start_ms = now;
     pub_prompt((int8_t)s_run.seq[0], 1, (int8_t)s_run.seq_len,
                DG_LIVE_PHASE_STEP);
@@ -271,19 +279,29 @@ static void handle_frame(int64_t now, const dg_face_pt_t *pts, uint32_t n)
         arm_frame(now, yaw, nod);
         return;
     case ST_CHALLENGE: {
+        /* 诊断累计:本步帧数与两轴最大偏移(超时日志据此标定阈值) */
+        s_run.frames++;
+        const float dy = yaw - s_base_yaw, dn = nod - s_base_nod;
+        if (dy > s_run.max_dyaw) s_run.max_dyaw = dy;
+        if (-dy > s_run.max_dyaw) s_run.max_dyaw = -dy;
+        if (dn > s_run.max_dnod) s_run.max_dnod = dn;
+        if (-dn > s_run.max_dnod) s_run.max_dnod = -dn;
         if (now - s_run.step_start_ms > cfg_timeout_ms()) {
-            DG_LOGI(TAG, "第 %d/%d 步超时,重出题", s_run.step + 1,
-                    s_run.seq_len);
+            DG_LOGI(TAG, "第 %d/%d 步超时,重出题(本步 %u 帧,max|Δyaw|=%.2f/阈 %.2f,"
+                         "max|Δr|=%.2f/阈 %.2f)",
+                    s_run.step + 1, s_run.seq_len, s_run.frames,
+                    s_run.max_dyaw, LV_EXC_YAW, s_run.max_dnod, LV_EXC_NOD);
             s_state = ST_ARMING;         /* 重新采基线再出题(人可能挪了) */
             s_run.ring_n = 0;
             return;
         }
-        if (step_detect(yaw - s_base_yaw, nod - s_base_nod)) {
+        if (step_detect(dy, dn)) {
             s_run.step++;
             if (s_run.step >= s_run.seq_len) {
                 s_state = ST_PASSED;
                 pub_prompt(0, 0, 0, DG_LIVE_PHASE_PASSED);
-                DG_LOGI(TAG, "动作活体通过");
+                DG_LOGI(TAG, "动作活体通过(共 %u 帧,max|Δyaw|=%.2f,max|Δr|=%.2f)",
+                        s_run.frames, s_run.max_dyaw, s_run.max_dnod);
             } else {
                 s_run.stage = 0;
                 s_run.hold = 0;
