@@ -141,7 +141,7 @@ enroll_service ──vision_service_library_add/remove──▶ ops->lib_add/lib
 |---|---|
 | `name` | 后端名;`cfg face.backend` / env `DG_VISION_BACKEND` 按它选择 |
 | `model_tag` | 特征口径(模型指纹);换模型必须换 tag,见下"换模型" |
-| `has_landmarks` | 是否回灌关键点(B8 活体依赖);false 且 `liveness_enable=1` 会告警 |
+| `has_landmarks` | 是否输出关键点(供对齐;活体=反欺骗模型,不依赖关键点) |
 | `start(enable_mock)` | 装配私有接线 + 初始化;失败返回非 0 → `vision_backend=ERROR` 降级 |
 | `lib_add` / `lib_del` | 特征库增删(可 NULL);幂等,删不存在的 id 视为成功 |
 | `compare` | 查重比较器(可 NULL=逐字节);1=重复 0=不重复 <0=错误 |
@@ -185,7 +185,7 @@ RK3576 上的通行做法(见 `sdk-guide/README.md §5`):
 | 环节 | 开源/官方方案 | 产物 |
 |---|---|---|
 | 检测 | SCRFD / RetinaFace(rknn_model_zoo 有转换脚本) | `det.rknn` |
-| 关键点 | PFLD / InsightFace 关键点 | `landmark.rknn`(B8 活体要) |
+| 关键点 | PFLD / InsightFace 关键点 | `landmark.rknn`(对齐用) |
 | 识别 | ArcFace / MobileFaceNet | `rec.rknn`(512 维浮点 embedding) |
 | 运行时 | `rknpu2` 的 `librknnrt.so` + `rknn_api.h` | 板端推理 |
 
@@ -196,8 +196,8 @@ RK3576 上的通行做法(见 `sdk-guide/README.md §5`):
   服务层的槽位/库/DB 都是按这个宏走长度校验的,提一处即可;
 - **比较器**:embedding 用余弦相似度阈值得分(0~1),自己写 `compare` 注入,
   阈值建议单独一个 cfg 键,不要复用 ROCKIVA 的 0.42;
-- **关键点**:`has_landmarks=true` 时按帧 `liveness_service_on_face()`
-  (万分比坐标,与分辨率无关);没有关键点就置 false,B8 活体在该后端上不可用;
+- **关键点**:`has_landmarks=true` 时输出给对齐/诊断;活体不依赖关键点
+  (反欺骗模型按检测框取景出分);
 - **模型文件路径**:自己的 cfg 键或 env,别复用 `DG_IVA_MODEL_DIR`;
 - **资格**:`model_tag` 定成 `"rknn-arcface-v1"` 这类稳定标识。
 
@@ -222,7 +222,7 @@ RK3576 上的通行做法(见 `sdk-guide/README.md §5`):
 | `face.match_threshold` | 1:N/1:1 命中阈值(余弦分度,须实测标定) | 0.42 |
 | `face.face_dup_threshold` | 录入查重阈值(同上) | 0.50 |
 | `face.det_threshold` | 检测器出框阈值(i8 模型空场景有 0.5x 幻检;正脸 0.85+) | 0.60 |
-| `face.liveness_enable` | 动作活体开关(B8 算法) | 0 |
+| ~~`face.liveness_enable`~~ | (已删:活体=反欺骗模型恒启用,无开关) | — |
 
 rknn 后端的模型路径走 **env**(沿用 ROCKIVA 那套"现场诊断"惯例;模型文件与解码器
 强绑定,文件名是后端身份的一部分):
@@ -237,7 +237,7 @@ rknn 后端的模型路径走 **env**(沿用 ROCKIVA 那套"现场诊断"惯例;
 
 ## 单帧反欺骗(MiniFASNet×2,2026-09-27 上板)
 
-两层活体的**第一层**(第二层=多模态二次验证,在 access FSM):对检测框按
+活体判定(命中疑似假体时由 access FSM 发起多模态二次验证):对检测框按
 scale 2.7/4.0 两次取景 → 双 80×80 MiniFASNet 推理 → real 概率相加平均 →
 5 帧中位数平滑 → 低于 `face.antispoof_threshold` 即判"疑似假体"。
 1:N 命中发布带 `spoof_challenge`,由 FSM 发起二次验证(不再开门);
@@ -257,7 +257,7 @@ scale 2.7/4.0 两次取景 → 双 80×80 MiniFASNet 推理 → real 概率相�
 - **阈值标定**:`face.match_threshold`/`face_dup_threshold` 的余弦分度需按板上
   2s 节流日志"1:N 最高分"实测(ROCKIVA 时代的 0.42/0.90 只是起点);
   质量阈值 `face.min_face_px`/`face.blur_min`/`face.det_score_min` 同样待板上标定;
-- B7:活体判定算法(B8);`face.model_tag` 的切换目前靠配置/DB 手工改,
+- 反欺骗阈值 `face.antispoof_threshold` 待假体样本标定;`face.model_tag` 的切换目前靠配置/DB 手工改,
   将来可在设备设置页加一项(需要时再说);
 - B10:把视觉模型放进 buildroot 包,别再手工拷(ROCKIVA 走 IVA 包;
   rknn 自组模型考虑随固件入 `/userdata` 或整包下发)。

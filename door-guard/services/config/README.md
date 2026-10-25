@@ -29,7 +29,7 @@ cur_config.json(现用配置,稀疏覆盖;板上 /userdata/doorguard/cur_config.
 | blur_min | face.blur_min | 0~50000 | 50 |
 | det_score_min | face.det_score_min | 0.30~1.00 | 0.70 |
 | det_threshold | face.det_threshold | 0.30~0.95 | 0.60(检测出框线;i8 模型空场景有 0.5x 幻检) |
-| antispoof_threshold | face.antispoof_threshold | 0~1.00 | 0.50(真脸分数下限,多帧平滑分低于它即降级;误拒只多验一道,可调严。注:liveness/antispoof 两开关键已删,活体恒启用——cfg.c 删除注) |
+| antispoof_threshold | face.antispoof_threshold | 0~1.00 | 0.50(真脸分数下限,多帧平滑分低于它即降级;误拒只多验一道,可调严。注:liveness/antispoof 两开关键已删——活体=反欺骗模型恒启用(2026-10-25 拍板,动作方案弃用),无开关) |
 | standby_timeout_s | ui.standby_timeout_s | 15~60 | 30 |
 | menu_timeout_s | ui.menu_timeout_s | 5~120 | 15 |
 | language | ui.language | zh-CN/en-US | zh-CN |

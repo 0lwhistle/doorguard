@@ -4,7 +4,7 @@
 
 非 ESP32 模板组件,2026-09-28 C2 收口新建(PENDING_DECISIONS C2:全库
 7 处 `static now_ms()` 重复定义——app/main.c、modules/net/netcore.c、
-services/{liveness,mdns,vision/vision_rknn,vision/vision_rockiva},声明
+services/{mdns,vision/vision_rknn,vision/vision_rockiva},声明
 定义合计 7 处)。组件 port 层各自的时基(`bus_now_ms`/`tasker_now_ms`,
 带回绕语义的 port 契约)**不**在本组件收口范围——那是模板自带的 port
 边界,保持自足。

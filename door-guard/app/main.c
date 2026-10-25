@@ -6,7 +6,7 @@
  *     event_bus → tasker → storage → config → relay → audio → camera
  *   registry(components/registry):services 层(依赖可跨表解析到 holder)
  *     capture → vision_service → vision_backend → access → enroll → finger
- *     → iccard → liveness → ntp → sysctl → net_cfg → web → mdns → mqtt → ui
+ *     → iccard → ntp → sysctl → net_cfg → web → mdns → mqtt → ui
  *
  * 初始化完成后 main 线程转看门狗(5s 巡检):
  *   - 可选服务异常/心跳超龄 → 重启一次 → 仍异常置 DISABLED + EV_SYS_SERVICE_STATE
@@ -30,7 +30,6 @@
 #include "events.h"
 #include "fp_provider.h"
 #include "holder.h"
-#include "liveness_service.h"
 #include "mdns/mdns_responder.h"
 #include "mqtt/mqtt_service.h"
 #include "audio/audio_player.h"
@@ -217,11 +216,6 @@ static int mod_iccard(void)
     return card_provider_start();
 }
 
-static int mod_liveness(void)
-{
-    return liveness_service_start();
-}
-
 /* 统一网络事件循环:web/OTA/NTP/mDNS 全部网络 I/O 的唯一传输层。
  * 必须先于网络服务族就绪——服务的监听注册经 netcore_post 投递进 loop */
 static int mod_netcore(void)
@@ -333,7 +327,6 @@ static registry_err_t register_services(void)
         { "finger",         mod_finger,         false, DEP_CONFIG,      1,
           fp_provider_heartbeat_ms },
         { "iccard",         mod_iccard,         false, DEP_CONFIG,      1, NULL },
-        { "liveness",       mod_liveness,       false, DEP_TASKER_ONLY, 1, NULL },
         { "ntp",            mod_ntp,            false, DEP_EVENT_BUS,   1, NULL },
         { "sysctl",         mod_sysctl,         false, DEP_EVENT_BUS,   1, NULL },
         { "net_cfg",        mod_net_cfg,        false, DEP_CONFIG,      1, NULL },

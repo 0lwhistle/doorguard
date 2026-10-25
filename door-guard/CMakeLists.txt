@@ -271,7 +271,6 @@ else()
         ${CMAKE_SYSROOT}/usr/include/rockiva
         ${CMAKE_SOURCE_DIR}/modules/sqlite
         ${CMAKE_SOURCE_DIR}/services/config
-        ${CMAKE_SOURCE_DIR}/services/liveness
         ${CMAKE_SOURCE_DIR}/drv/npu)
     # 库链接在 dg_camera 定义之后统一补(见下方"rockiva 链接"块)
 endif()
@@ -355,11 +354,6 @@ if(NOT DG_SIM AND NOT DG_BUILD_TESTS)
     add_executable(rknn_spoof_test tools/rknn_spoof_test.c)
     target_link_libraries(rknn_spoof_test PRIVATE dg_npu dg_rknn_face)
 endif()
-
-# liveness:动作活体(B7 留口 on_face/pass;B8 状态机)
-add_library(dg_liveness STATIC services/liveness/liveness_service.c)
-target_include_directories(dg_liveness PUBLIC ${CMAKE_SOURCE_DIR}/services/liveness)
-target_link_libraries(dg_liveness PUBLIC dg_proto dg_config dg_timeutil)
 
 # mongoose:第三方网络库(GPLv2/商业双许可,单文件 vendored;本项目按 GPLv2 开源路线使用)
 # 统一网络层的唯一传输引擎(web/OTA/NTP/mDNS 全走 modules/net 的 netcore 事件循环;
@@ -505,11 +499,11 @@ target_include_directories(dg_camera PUBLIC ${CMAKE_SOURCE_DIR}/proto)
 # camera 的静态链接顺序由此确定)
 target_link_libraries(dg_web_stream PUBLIC dg_camera)
 
-# rockiva 视觉链接(dg_vision 引用 camera/storage/cfg/liveness 符号;
+# rockiva 视觉链接(dg_vision 引用 camera/storage/cfg 符号;
 # 必须在这些库定义之后,CMake 才能建立正确的静态链接顺序)
 if(NOT DG_SIM)
     target_link_libraries(dg_vision PUBLIC rockiva dg_storage dg_config dg_camera
-                                           dg_liveness dg_npu dg_rknn_face)
+                                           dg_npu dg_rknn_face)
 endif()
 
 # ---- 应用(交叉编译产物,dg-deploy 推板) ----
@@ -526,7 +520,7 @@ add_executable(door-guard app/main.c)
 target_link_libraries(door-guard PRIVATE
     -Wl,--start-group
     dg_event_bus dg_tasker dg_holder dg_registry dg_proto dg_storage dg_config
-    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_liveness dg_relay dg_timeutil dg_uart dg_net dg_sysctl dg_display dg_camera dg_audio
+    lvgl dg_ui dg_access dg_vision dg_enroll dg_capture dg_relay dg_timeutil dg_uart dg_net dg_sysctl dg_display dg_camera dg_audio
     dg_fp dg_card dg_iccard dg_alarm
     -Wl,--end-group)
 

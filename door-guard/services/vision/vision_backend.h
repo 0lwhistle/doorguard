@@ -22,7 +22,6 @@
  *  6. 发布 1:N/1:1 命中前必须查 vision_service_features_compatible():
  *     false(模型换过、旧特征未重录)时不得发布 —— 宁可不开门,不可错开门
  *  7. on_mode:进入 VERIFY_11 时按 uid 准备比对标的(如装载目标特征)
- *  8. 关键点(可选):有就按帧回灌 liveness_service_on_face(B8 活体依赖)
  *
  * 换模型的两条路(详见 modules/vision/README.md):
  *  A. 同一框架换模型文件:替换 DG_IVA_MODEL_DIR 下的 .data 文件 + 改

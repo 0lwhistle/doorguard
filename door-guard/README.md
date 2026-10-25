@@ -36,7 +36,6 @@ tests/web/web_test.sh        # web 上位机功能验收
 | `services/vision/` | 视觉服务:特征槽位句柄 + sim/rknn/rockiva 三后端可插拔(板上主线 rknn) | services/vision/README.md |
 | `services/enroll/` | 录入编排(请求→抓取→查重→入库→回执) | — |
 | `services/capture/` | 取流状态服务(EV_CAPTURE_STATE) | — |
-| `services/liveness/` | 活体占位(接口预留;认证管线强制阶段) | — |
 | `services/verify/` | 各验证方式 provider:face(vision)/ fingerprint(fp_provider)/ ic(card_provider);认证判定经事件总线走 FSM,无统一 provider 抽象(v2 草案 auth_provider.h 已废) | services/verify/ic/README.md |
 | `services/web/` | web 上位机(mongoose 统一事件循环 + Vue 前端 `frontend/`,产物内嵌) | services/web/README.md |
 | `services/ota/` | OTA(流式+sha256,A/B 换槽) | — |

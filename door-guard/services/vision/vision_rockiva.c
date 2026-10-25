@@ -3,7 +3,6 @@
  *
  * 链路:camera NV12 帧(零拷贝包 RockIvaImage)→ ROCKIVA_PushFrame(异步)
  *   ├─ detCallback:人脸框(万分比)→ 旋转映射到竖屏坐标 → EV_VISION_FACE_BOX
- *   │    + 106 点关键点回灌 liveness_service_on_face
  *   └─ analyseCallback:质量合格的人脸特征 → 录入缓存(近 3s)+ 按模式分支:
  *        DETECT_1N  → FeatureLibraryControl 检索 → 命中≥cfg face_match_threshold
  *                     → EV_VISION_MATCH_1N(走既有 FSM)
@@ -29,7 +28,6 @@
 #include "events.h"
 #include "storage.h"
 #include "cfg.h"
-#include "liveness_service.h"
 #include "modules/camera/camera.h"
 
 #include <rockiva_face_api.h>
@@ -112,22 +110,6 @@ static void on_frame_push(const uint8_t *data, int w, int h, uint32_t frame_id)
     }
 }
 
-/* 关键点回灌活体(万分比 int16 → 后端无关的 dg_face_pt_t;ROCKIVA 给 106 点) */
-static void feed_liveness(const RockIvaFaceInfo *f)
-{
-    if (!f || f->landmarksNum == 0)
-        return;
-    uint32_t n = f->landmarksNum;
-    if (n > DG_LANDMARK_MAX)
-        n = DG_LANDMARK_MAX;
-    dg_face_pt_t pts[DG_LANDMARK_MAX];
-    for (uint32_t i = 0; i < n; i++) {
-        pts[i].x = f->landmarks[i].x;
-        pts[i].y = f->landmarks[i].y;
-    }
-    liveness_service_on_face(pts, n, (int32_t)f->faceQuality.score);
-}
-
 /* ---- 检测回调:脸框 → EV_VISION_FACE_BOX(150ms 节流)/ 离开 → FACE_LOST ---- */
 static bool s_face_present;                 /* 边沿检测:只在"有→无"时发 LOST */
 
@@ -174,11 +156,9 @@ static void on_det(const RockIvaFaceDetResult *result,
     box.state = DG_BOX_DETECTED;
     rect_to_screen(&best->faceRect, 1280, 720, &box.x, &box.y, &box.w, &box.h);
     EVENT_BUS_PUBLISH(EV_VISION_FACE_BOX, &box);
-
-    feed_liveness(best);                /* 关键点回灌活体(B7 记账 / B8 判定) */
 }
 
-/* 命中发布前的总闸:口径一致(模型没换) + 活体通过(B7 pass 恒真) */
+/* 命中发布前的总闸:口径一致(反欺骗/活体判定在检索路径) */
 static bool publish_gate(void)
 {
     if (!vision_service_features_compatible()) {
@@ -188,10 +168,7 @@ static bool publish_gate(void)
                          "更新 device_config.face_model_tag)");
         return false;
     }
-    if (liveness_service_pass())         /* 活体恒启用(开关已删) */
-        return true;
-    DG_LOGW(TAG, "活体未通过,命中不下发");
-    return false;
+    return true;
 }
 
 /* 1:1 比对(VERIFY_11):与模式目标特征比 → 命中发 EV_VISION_VERIFY_11

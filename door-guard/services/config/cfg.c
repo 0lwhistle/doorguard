@@ -255,7 +255,7 @@ static void defaults_apply(dg_cfg_t *c)
     c->face_det_threshold = 0.60;       /* 检测器出框阈值(空场景幻检 0.5x) */
     c->face_lost_hold_ms = 200;         /* LOST 滞回:防单帧漏检闪框(2026-09-26 起
                                            从代码魔数 600 提为配置,默认收紧到 200) */
-    /* liveness/antispoof 两开关已删:活体恒启用(cfg.h 删除注) */
+    /* liveness/antispoof 两开关已删:活体=反欺骗模型恒启用(cfg.h 删除注) */
     c->antispoof_threshold = 0.50;       /* 真脸分数下限(降级方案下可调严) */
     /* 后端名/口径留空 = 用"第一个注册的后端"+该后端自带口径:同一份模板在
      * PC(sim)与板上(rockiva)都成立,不用两套配置 */
@@ -755,7 +755,7 @@ int cfg_load(const char *default_path, const char *cur_path)
 
     const dg_cfg_t *c = cfg_get();
     DG_LOGI(TAG, "配置就绪: door=%dms standby=%ds face_dup=%.2f face_match=%.2f "
-                 "web=%d lang=%s(活体恒启用)",
+                 "web=%d lang=%s(反欺骗恒启用)",
             c->door_open_ms, c->standby_timeout_s, c->face_dup_threshold,
             c->face_match_threshold, c->web_port, c->language);
     return load_rc;

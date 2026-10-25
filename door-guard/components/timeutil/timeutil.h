@@ -2,7 +2,7 @@
  * timeutil.h — 公共时基(components;2026-09-28 C2 收口)
  *
  * 此前 app/modules/services 六处各自 static now_ms(),且时钟语义分裂:
- * 看门狗心跳链(main/netcore)用 REALTIME,耗时测量(liveness/mdns/vision)
+ * 看门狗心跳链(main/netcore)用 REALTIME,耗时测量(mdns/vision)
  * 用 MONOTONIC——netcore 注释记录过混用事故(换 MONOTONIC 与看门狗相差
  * 整个纪元基数,心跳必判超龄误重启)。本组件把两种语义显式分成两个函数,
  * 调用方按用途选,编译期消灭"再抄一份"与"抄错时钟"两个坑。

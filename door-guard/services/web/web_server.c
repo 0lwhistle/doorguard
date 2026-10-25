@@ -2046,7 +2046,7 @@ static const web_set_item_t s_set_items[] = {
     { "lost_hold_ms",      "脸框消失滞回",    "ms", false,   50,   200 },
     { "min_face_px",       "识别最小人脸",    "px", false,   10,    80 },
     { "face_dup_threshold", "录入人脸查重阈值", "",  true,  0.01,  0.50 },
-    /* liveness_enable 不在此列:活体恒启用(开关已删),POST 该键 = 未知键 */
+    /* liveness_enable 不在此列:活体=反欺骗模型恒启用(开关已删),POST 该键 = 未知键 */
     { "face_match_threshold", "1:N 识别阈值",    "",  true,  0.01,     0 },
     { "det_threshold",     "检测出框阈值",    "",   true,  0.01,     0 },
     { "det_score_min",     "检测分下限",      "",   true,  0.01,     0 },

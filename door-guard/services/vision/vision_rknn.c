@@ -42,7 +42,6 @@
 #include "timeutil.h"
 #include "event_bus.h"
 #include "events.h"
-#include "liveness_service.h"
 #include "modules/camera/camera.h"
 #include "modules/jpeg/dg_jpeg.h"
 #include "storage.h"
@@ -217,18 +216,7 @@ static void pub_face_lost(void)
  * 此前"逆映射到横向原始帧再 rect_to_screen 转 90°"的两段式映射已删——
  * 域一多就出对不齐的 bug,让检测域=显示域,错误无法表示。 */
 
-/* 5 关键点回灌活体(万分比坐标;B8 的 yaw/pitch 几何估计按 5 点设计) */
-static void feed_liveness(const rknn_face_t *f, int src_w, int src_h)
-{
-    dg_face_pt_t pts[RKNN_FACE_KPS];
-    for (int i = 0; i < RKNN_FACE_KPS; i++) {
-        pts[i].x = (int32_t)(f->kps[i][0] * 10000.0f / (float)src_w);
-        pts[i].y = (int32_t)(f->kps[i][1] * 10000.0f / (float)src_h);
-    }
-    liveness_service_on_face(pts, RKNN_FACE_KPS, 0);
-}
-
-/* 命中发布前的总闸(与 ROCKIVA 后端同语义):口径一致 + 活体通过 */
+/* 命中发布前的总闸:口径一致(反欺骗/活体判定在 search/verify 路径) */
 static bool publish_gate(void)
 {
     if (!vision_service_features_compatible()) {
@@ -238,10 +226,7 @@ static bool publish_gate(void)
                          " face_model_tag)");
         return false;
     }
-    if (liveness_service_pass())         /* 活体恒启用(开关已删) */
-        return true;
-    DG_LOGW(TAG, "活体未通过,命中不下发");
-    return false;
+    return true;
 }
 
 /* 质量事件(拍摄页实时提示/禁拍,其它页面忽略):verdict 变化即发,不变
@@ -926,8 +911,6 @@ static void process_frame(const uint8_t *data, int w, int h, uint32_t frame_id)
 
     /* 检测与识别都用完了,归还缓冲 */
     camera_nv12_release(frame_id);
-
-    feed_liveness(&src, rw, rh);
 
     /* 检出分数节流日志(调 face.det_threshold 用) */
     {
