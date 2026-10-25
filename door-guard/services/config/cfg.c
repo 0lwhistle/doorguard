@@ -316,7 +316,9 @@ static void defaults_apply(dg_cfg_t *c)
 }
 
 /* ---- 元表驱动:json → 快照(键缺失走默认,类型错 WARN 回退) ----
- * 按元表定位字段用显式映射而非 offsetof 魔法,编译器可查;12 个键一次列全 */
+ * 按元表定位字段用显式映射而非 offsetof 魔法,编译器可查。**新增 META 键
+ * 必须同步下面 CK_INT 的两条链**(set/加载共用本函数)——只加 META 行不
+ * 加映射 = set 返回 OK 但快照永远不更新,静默丢值(B8-6 实测踩中) */
 static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
 {
     if (m->kind == CK_INT) {
@@ -332,6 +334,9 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "lost_hold_ms"))         cur = c->face_lost_hold_ms;
         else if (!strcmp(m->key, "web_port"))             cur = c->web_port;
         else if (!strcmp(m->key, "ota_auto_update"))      cur = c->ota_auto_update;
+        else if (!strcmp(m->key, "liveness_actions_min")) cur = c->liveness_actions_min;
+        else if (!strcmp(m->key, "liveness_actions_max")) cur = c->liveness_actions_max;
+        else if (!strcmp(m->key, "liveness_timeout_ms"))  cur = c->liveness_timeout_ms;
         else return;
         v = clamp_int(v, m->lo, m->hi, cur, m->key);
         if (!strcmp(m->key, "door_open_ms"))              c->door_open_ms = v;
@@ -343,6 +348,9 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "lost_hold_ms"))         c->face_lost_hold_ms = v;
         else if (!strcmp(m->key, "web_port"))             c->web_port = v;
         else if (!strcmp(m->key, "ota_auto_update"))      c->ota_auto_update = v;
+        else if (!strcmp(m->key, "liveness_actions_min")) c->liveness_actions_min = v;
+        else if (!strcmp(m->key, "liveness_actions_max")) c->liveness_actions_max = v;
+        else if (!strcmp(m->key, "liveness_timeout_ms"))  c->liveness_timeout_ms = v;
     } else if (m->kind == CK_DBL) {
         if (!cJSON_IsNumber(item))
             return;
