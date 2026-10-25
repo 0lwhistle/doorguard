@@ -23,6 +23,7 @@
 #include "widgets/dg_avatar.h"
 #include "widgets/dg_popup.h"
 
+#include <stdio.h>
 #include <string.h>
 
 extern void presenter_home_register(void);
@@ -43,6 +44,46 @@ extern void presenter_about_register(void);
 extern void presenter_device_data_register(void);
 
 static lv_obj_t *s_page_root = NULL;
+
+/* ---- 动作活体顶层提示条(B8)----
+ * 挂 lv_layer_top:主页/验证弹窗/管理员认证页都要能看到「请点头」这类指令
+ * (活体是认证管线强制阶段,提示被页面挡住 = 用户不知道做什么)。与页面
+ * 生命周期无关,由 EV_LIVENESS_PROMPT 的 STEP/PASSED/HIDE 三相驱动显隐 */
+static lv_obj_t *s_live_chip;
+static lv_obj_t *s_live_lbl;
+
+static void liveness_chip_create(void)
+{
+    s_live_lbl = lv_label_create(lv_layer_top());
+    lv_label_set_text(s_live_lbl, "");
+    lv_obj_set_style_text_font(s_live_lbl, DG_FONT_CN, 0);
+    lv_obj_set_style_text_color(s_live_lbl, DG_COL_BG(), 0);
+    lv_obj_set_style_bg_color(s_live_lbl, DG_COL_SCRIM(), 0);
+    lv_obj_set_style_bg_opa(s_live_lbl, DG_OPA_SCRIM, 0);
+    lv_obj_set_style_radius(s_live_lbl, DG_RADIUS, 0);
+    lv_obj_set_style_pad_hor(s_live_lbl, 14, 0);
+    lv_obj_set_style_pad_ver(s_live_lbl, 10, 0);
+    lv_obj_align(s_live_lbl, LV_ALIGN_BOTTOM_MID, 0, -150);
+    lv_obj_clear_flag(s_live_lbl, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_live_lbl, LV_OBJ_FLAG_HIDDEN);
+    s_live_chip = s_live_lbl;            /* label 自带底色,无需再包容器 */
+}
+
+static void liveness_chip_apply(const ev_liveness_t *lv)
+{
+    if (!s_live_chip)
+        return;
+    if (lv->phase == DG_LIVE_PHASE_STEP) {
+        char txt[64];
+        snprintf(txt, sizeof(txt), "%s %d/%d",
+                 lv->action == DG_LIVE_ACTION_NOD ? _("请点头") : _("请摇头"),
+                 lv->step, lv->total);
+        lv_label_set_text(s_live_lbl, txt);
+        lv_obj_clear_flag(s_live_chip, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_live_chip, LV_OBJ_FLAG_HIDDEN);
+    }
+}
 
 /* 开机指纹数量一致性检查的告知(fp_sync,2026-10-11):检查在 provider 线程
  * 里跑完,可能早于 UI 就绪;event_bus 不回放,所以这里拉取式补弹——
@@ -81,6 +122,8 @@ static void ui_evt_pump_cb(lv_timer_t *t)
         if (evt.kind == UI_EVT_GOTO_PAGE) {
             dg_popup_close();               /* 弹窗属当前页,切页即收(top layer 不随页销毁) */
             navigator_switch(evt.page.page); /* 栈内回退/平级切换 */
+        } else if (evt.kind == UI_EVT_LIVENESS) {
+            liveness_chip_apply(&evt.liveness); /* 顶层提示条,页面之外(见上) */
         } else {
             /* 录入结果终态的头像缓存集中失效:web 上传(与任何未来的录入
              * 路径)改 DB 头像时设备端没有任何页面在场,各页面自己的
@@ -139,6 +182,7 @@ int ui_init(const dg_ui_args_t *args)
     presenter_device_data_register();
 
     bridge_init();
+    liveness_chip_create();              /* 顶层提示条在 bridge 之后(事件随到随渲染) */
     /* 触摸按下沿 → EV_UI_TOUCH:任何页面的触摸都算「有操作」
      * (清待机/菜单无操作计数;此前只有待机页自己发,菜单里摸屏不算操作) */
     display_set_touch_listener(bridge_touch);

@@ -41,6 +41,11 @@ typedef struct {
     double antispoof_threshold; /**< 反欺骗"真脸"分数下限,0~1:多帧平滑分低于它
                                      即判疑似假体(降级方案下误拒只多验一道,
                                      可放心调严),默认 0.50,须板上假体标定 */
+    /* 动作活体序列参数(B8,2026-10-25;动作活体本身恒启用无开关):
+     * 随机出 min~max 步(点头/摇头),每步限时 timeout_ms,全过才放行命中 */
+    int liveness_actions_min;   /**< 序列最少步数,1~3,默认 2 */
+    int liveness_actions_max;   /**< 序列最多步数,1~3,默认 3(载入时 <min 抬到 min) */
+    int liveness_timeout_ms;    /**< 单步限时 ms,1000~10000,默认 5000 */
     /* 视觉后端(json-only,不经 set/迁移:换模型/换后端属部署参数,见 services/vision/README.md) */
     char face_backend[16];     /**< 想要的后端名("rockiva"/"rknn"/"sim"),空=第一个注册的 */
     char face_model_dir[128];  /**< 模型目录,默认 /usr/lib(env DG_IVA_MODEL_DIR 优先) */

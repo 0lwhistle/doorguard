@@ -55,6 +55,9 @@ static const cfg_meta_t META[] = {
     { "det_threshold",       "face.det_threshold",        CK_DBL, 0.30,  0.95 },
     { "lost_hold_ms",        "face.lost_hold_ms",         CK_INT,    0,  2000 },
     { "antispoof_threshold",  "face.antispoof_threshold", CK_DBL,  0.0,  1.00 },
+    { "liveness_actions_min", "face.liveness_actions_min", CK_INT,  1,     3 },
+    { "liveness_actions_max", "face.liveness_actions_max", CK_INT,  1,     3 },
+    { "liveness_timeout_ms",  "face.liveness_timeout_ms",  CK_INT, 1000, 10000 },
     { "standby_timeout_s",    "ui.standby_timeout_s",     CK_INT,   15,    60 },
     { "menu_timeout_s",       "ui.menu_timeout_s",        CK_INT,    5,   120 },
     { "brightness",           "ui.brightness",            CK_INT,   10,   100 },
@@ -257,6 +260,11 @@ static void defaults_apply(dg_cfg_t *c)
                                            从代码魔数 600 提为配置,默认收紧到 200) */
     /* liveness/antispoof 两开关已删:活体恒启用(cfg.h 删除注) */
     c->antispoof_threshold = 0.50;       /* 真脸分数下限(降级方案下可调严) */
+    /* 动作活体序列参数(B8):步数 2~3、单步限时 5s;snapshot_rebuild 里有
+     * max<min 归一,JSON 侧写反也不至于出「0 步序列」 */
+    c->liveness_actions_min = 2;
+    c->liveness_actions_max = 3;
+    c->liveness_timeout_ms = 5000;
     /* 后端名/口径留空 = 用"第一个注册的后端"+该后端自带口径:同一份模板在
      * PC(sim)与板上(rockiva)都成立,不用两套配置 */
     c->face_backend[0] = '\0';
@@ -505,6 +513,9 @@ static void snapshot_rebuild(void)
     json_apply_extra(dst, s_def_root);
     json_apply_table2(dst, s_cur_root);
     json_apply_extra(dst, s_cur_root);
+    /* 跨键归一:META 只能约束单键域,min/max 的相对关系在这里收口 */
+    if (dst->liveness_actions_max < dst->liveness_actions_min)
+        dst->liveness_actions_max = dst->liveness_actions_min;
     s_idx ^= 1;
 }
 

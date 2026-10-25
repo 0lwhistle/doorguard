@@ -44,6 +44,9 @@ extern "C" {
 #define EV_VISION_SET_MODE   EV_DEF(DG_MODULE_ID_VISION, 0x0005) /**< 工作模式切换(access→vision) */
 #define EV_VISION_QUALITY    EV_DEF(DG_MODULE_ID_VISION, 0x0006) /**< 人脸质量判定(拍摄页实时提示) */
 
+/* LIVENESS:动作活体指令(services/liveness → UI/access;B8 实装) */
+#define EV_LIVENESS_PROMPT   EV_DEF(DG_MODULE_ID_LIVENESS, 0x0001) /**< 动作指令/通过/隐藏(ev_liveness_t) */
+
 /* SYSTEM:系统/装配层(看门狗 → UI/web 上位机) */
 #define EV_SYS_SERVICE_STATE EV_DEF(DG_MODULE_ID_SYSTEM, 0x0010) /**< 看门狗处置/存储巡检/relay 开门失败(2026-09-30 起有订阅:UI bridge 故障提示 + access FSM 人脸禁用) */
 #define EV_SYS_REBOOT        EV_DEF(DG_MODULE_ID_SYSTEM, 0x0011) /**< 设备重启请求(ev_sys_reboot_t) */
@@ -224,6 +227,28 @@ typedef struct {
     int32_t mode;                         /**< dg_vision_mode_t */
     char    user_id[DG_UID_LEN];          /**< VERIFY_11:比对目标用户 */
 } ev_vision_mode_t;
+
+/** EV_LIVENESS_PROMPT:动作活体一拍(B8;liveness → UI 顶层提示 / access 步计时)。
+ *  action/phase 取值见 dg_live_action_t/dg_live_phase_t;动作几何由 5 关键点
+ *  估计,106 点后端(ROCKIVA)布局未映射前走降级放行(见 liveness_service.c) */
+typedef enum {
+    DG_LIVE_ACTION_NONE = 0,
+    DG_LIVE_ACTION_NOD = 1,               /**< 点头(纵向比例往返) */
+    DG_LIVE_ACTION_SHAKE = 2,             /**< 摇头(yaw 偏移往返) */
+} dg_live_action_t;
+
+typedef enum {
+    DG_LIVE_PHASE_STEP = 0,               /**< 出题/换步:按 action/step/total 显示 */
+    DG_LIVE_PHASE_PASSED = 1,             /**< 序列全过(UI 收起提示;access 开判定窗) */
+    DG_LIVE_PHASE_HIDE = 2,               /**< 离场/失活(UI 收起提示) */
+} dg_live_phase_t;
+
+typedef struct {
+    int8_t action;                        /**< dg_live_action_t(STEP 时有效) */
+    int8_t step;                          /**< 当前步,1 起(STEP 时有效) */
+    int8_t total;                         /**< 序列总步数(STEP 时有效) */
+    int8_t phase;                         /**< dg_live_phase_t */
+} ev_liveness_t;
 
 /** EV_ENROLL_REQUEST:op 决定语义(枚举与请求结构见上方 ENROLL 段) */
 
@@ -564,6 +589,7 @@ _Static_assert(sizeof(ev_face_box_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_face_box_t
 _Static_assert(sizeof(ev_vision_quality_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_vision_quality_t 超限");
 _Static_assert(sizeof(ev_match_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_match_t 超限");
 _Static_assert(sizeof(ev_vision_mode_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_vision_mode_t 超限");
+_Static_assert(sizeof(ev_liveness_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_liveness_t 超限");
 _Static_assert(sizeof(ev_capture_state_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_capture_state_t 超限");
 _Static_assert(sizeof(ev_enroll_request_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_enroll_request_t 超限");
 _Static_assert(sizeof(ev_enroll_progress_t) <= EVENT_BUS_MAX_EVENT_SIZE, "ev_enroll_progress_t 超限");

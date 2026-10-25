@@ -28,6 +28,8 @@ dg_add_test(test_cfg dg_config)
 set_tests_properties(test_cfg PROPERTIES TIMEOUT 60)
 dg_add_test(test_auth_fsm dg_access)
 set_tests_properties(test_auth_fsm PROPERTIES TIMEOUT 60)
+dg_add_test(test_liveness dg_liveness dg_log)
+set_tests_properties(test_liveness PROPERTIES TIMEOUT 60)
 dg_add_test(test_uart_mock dg_uart)
 
 dg_add_test(test_fp_proto dg_fp_as608)

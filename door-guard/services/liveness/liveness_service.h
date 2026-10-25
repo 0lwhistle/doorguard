@@ -1,18 +1,20 @@
 /*
- * liveness_service.h — 动作活体(单目 RGB 动作指令式;PROJECT_PLAN §二)
+ * liveness_service.h — 动作活体(单目 RGB 动作指令式;PROJECT_PLAN §4.4)
  *
- * 数据流(B7 已通,B8 填算法):
- *   vision_rockiva(analyse 回调)──liveness_service_on_face(106 点)──▶ 本模块
- *   本模块 ──liveness_service_pass()──▶ vision 发布命中前的门禁
+ * 数据流(B8 已实装):
+ *   vision 后端(逐帧)──liveness_service_on_face(5 关键点)──▶ 本模块状态机
+ *   本模块 ──EV_LIVENESS_PROMPT──▶ UI 顶层提示 + access(FSM 判定窗/步计时)
+ *   本模块 ──liveness_service_pass()──▶ vision 命中发布前的门禁
  *
- * B7 语义(留口,勿在 B8 之前改口):算法未实现 →
- *   - on_face 记账(最近一次关键点/质量),供 B8 状态机与调试;
- *   - pass() 恒 true(等价旧的 DG_LIVE_SKIP/未启用),不开门失败;
- *   - 打一条告警(明示"算法未实装,本次放行"),避免"以为开着活体
- *     其实没开"的静默失效。
- * 2026-10-04:cfg liveness_enable 开关删除,活体恒启用(B8 实装即强制)。
- * B8 落地:随机 2~3 动作序列(眨眼 EAR 边沿/点头纵向位移比/摇头 yaw 往返),
- *   每步 5s 超时,全过置 pass;cfg liveness_actions_min/max/timeout_ms 生效。
+ * 门禁语义(活体恒启用,开关 2026-10-04 删除):
+ *   - 人脸在场即随机出 2~3 步动作(点头/摇头),每步限时(cfg),全过才
+ *     pass()==true,vision 的命中才允许发布(FSM 的 1.5s 判定窗也由
+ *     PASSED 事件武装——见 auth_fsm.c);
+ *   - 超时/未按要求 = 本步作废、重出新序列(照片挡门只会被反复出题,
+ *     不产生失败弹窗/日志——判定窗没开,FSM 看不到命中);
+ *   - 关键点非 5 点的后端(ROCKIVA 106 点,布局未映射)降级放行并告警,
+ *     与单帧反欺骗「模型缺失自动放行」同一取舍(见 README)。
+ * 动作判定全用同轴比例(yaw 用 x/x、点头用 y/y),与帧宽高比无关。
  */
 #ifndef DG_LIVENESS_SERVICE_H
 #define DG_LIVENESS_SERVICE_H
@@ -28,7 +30,7 @@ extern "C" {
 
 int liveness_service_start(void);
 
-/* ---- B7 留口:关键点回灌与命中门禁 ----
+/* ---- 关键点回灌与命中门禁 ----
  * (旧接口 liveness_check()/dg_liveness_result_t 已删:B7 改口后零调用者,
  *  2026-09-28;命中门禁走下方 pass(),结果语义 bool) */
 
@@ -39,22 +41,26 @@ typedef struct {
 
 #define DG_LANDMARK_MAX 106
 
+/* rknn 主线的 5 点布局(万分之一):0 左眼 / 1 右眼 / 2 鼻尖 / 3 左嘴角 /
+ * 4 右嘴角(RetinaFace 标准序)。本模块的几何判定按这个序取点。 */
+#define DG_LIVE_KPS 5
+
 /**
- * 视觉后端每帧(质量合格的人脸)回灌关键点。
+ * 视觉后端每帧(检出人脸)回灌关键点。
  * @param pts     关键点数组(万分比);可为 NULL(仅回灌质量)
- * @param n       点数(>DG_LANDMARK_MAX 截断)
- * @param quality 人脸质量分(0~100;ROCKIVA faceQuality.score)
+ * @param n       点数(>DG_LANDMARK_MAX 截断;n != 5 走降级判定,见文件头)
+ * @param quality 人脸质量分(0~100;rknn 主线暂传 0,几何判定不用质量)
  * @return DG_OK / DG_ERR_PARAM
  */
 int liveness_service_on_face(const dg_face_pt_t *pts, uint32_t n, int32_t quality);
 
 /**
  * 命中门禁:true = 允许发布/放行。
- * B7 恒 true(算法未实现,见文件头);B8 返回动作序列判定结果。
+ * 仅当「当前在场的动作序列已全过」(或非 5 点后端降级)时为 true。
  */
 bool liveness_service_pass(void);
 
-/** 最近一次回灌的年龄(ms;无回灌返回 -1)——B8 超时判定与联调观测用 */
+/** 最近一次回灌的年龄(ms;无回灌返回 -1)——联调观测与陈旧保护用 */
 int64_t liveness_service_last_face_age_ms(void);
 
 #ifdef __cplusplus

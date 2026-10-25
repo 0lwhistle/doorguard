@@ -280,6 +280,19 @@ static int on_brightness(const event_t *e, void *ud)
     return 0;
 }
 
+/* 动作活体一拍(B8)→ 顶层提示条:出题显示动作与进度,通过/离场收起。
+ * 渲染在 ui.c 的顶层(lv_layer_top),弹窗/切页都盖不住「请点头」这类指令 */
+static int on_liveness(const event_t *e, void *ud)
+{
+    (void)ud;
+    ui_evt_t evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.kind = UI_EVT_LIVENESS;
+    evt.liveness = *(const ev_liveness_t *)e->data;
+    ui_evt_push(&evt);
+    return 0;
+}
+
 /* 前置:设备数据回执的 handler 与出站函数同段(排在 bridge_init 之后) */
 static int on_data_op_result(const event_t *e, void *ud);
 
@@ -309,7 +322,8 @@ void bridge_init(void)
     event_bus_subscribe(EV_NET_OTA_UPDATE, on_ota_update, NULL);
     event_bus_subscribe(EV_MQTT_STATE, on_mqtt_state, NULL);
     event_bus_subscribe(EV_SYS_DATA_OP_RESULT, on_data_op_result, NULL);
-    DG_LOGI("[BRIDGE]", "事件桥就绪(23 订阅)");
+    event_bus_subscribe(EV_LIVENESS_PROMPT, on_liveness, NULL);
+    DG_LOGI("[BRIDGE]", "事件桥就绪(24 订阅)");
 }
 
 void bridge_btn(const ev_ui_btn_t *btn)

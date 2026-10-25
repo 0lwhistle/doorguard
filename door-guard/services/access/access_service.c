@@ -438,6 +438,19 @@ static int on_face_lost(const event_t *e, void *ud)
     return 0;
 }
 
+/* 动作活体一拍(B8):PASSED = 序列全过,FSM 的 1.5s 判定窗从这里武装;
+ * 出题/通过沿同时视作「用户在操作」,给验证流程内的 5s 步计时续命 */
+static int on_liveness(const event_t *e, void *ud)
+{
+    (void)ud;
+    const ev_liveness_t *lv = (const ev_liveness_t *)e->data;
+    if (lv->phase == DG_LIVE_PHASE_STEP || lv->phase == DG_LIVE_PHASE_PASSED)
+        fsm_feed(FSM_EV_LIVENESS_ACT, NULL);
+    if (lv->phase == DG_LIVE_PHASE_PASSED)
+        fsm_feed(FSM_EV_LIVENESS_PASS, NULL);
+    return 0;
+}
+
 /* 相机断流(capture 服务)→ FSM:人脸 1:1 步据此立即 reason=9(spec §5-113) */
 static int on_capture_state(const event_t *e, void *ud)
 {
@@ -730,6 +743,7 @@ int access_service_start(void)
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_FINGER_VERIFY_11, on_finger_verify, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_IC_CARD, on_ic_card, NULL);
     s_subs[s_sub_cnt++] = event_bus_subscribe(EV_FINGER_STATUS, on_finger_status, NULL);
+    s_subs[s_sub_cnt++] = event_bus_subscribe(EV_LIVENESS_PROMPT, on_liveness, NULL);
 
     if (tasker_task_init_li(&s_tick_node, 1000, TASK_CNT_INF, "access_tick",
                             tick_task, NULL) != TASK_OK ||

@@ -94,6 +94,12 @@ static void face_detected(void)
     auth_fsm_handle(&s_fsm, FSM_EV_FACE_DETECTED, &d);
 }
 
+/* 通用:动作活体序列全过(B8)——1.5s 判定窗由此武装,检出不再开窗 */
+static void liveness_pass(void)
+{
+    auth_fsm_handle(&s_fsm, FSM_EV_LIVENESS_PASS, NULL);
+}
+
 /* 通用:走完 UID 流程到方式选择 */
 static void uid_flow(const char *uid, bool found, int32_t role, uint32_t flags)
 {
@@ -232,6 +238,7 @@ static void t02_match_timeout(void)
     printf("[F02] 1.5s 未命中→红框+红弹窗 reason=1\n");
     fsm_reset();
     face_detected();
+    liveness_pass();                        /* B8:窗由活体通过武装 */
     /* 定时器请求发出:1.5s 窗口 */
     const act_rec_t *tr = last_act(FSM_ACT_SET_TIMER);
     DG_CHECK(tr && tr->d.timer.timer_id == FSM_TMR_MATCH_WINDOW);
@@ -874,6 +881,7 @@ static void t13_presence_window(void)
     /* --- 路过(<1.5s 离开):不弹窗、不落日志(此前会"人走了才弹失败") --- */
     fsm_reset();
     face_detected();
+    liveness_pass();                        /* B8:窗由活体通过武装 */
     face_detected();                        /* 10Hz 连续上报:不得重置窗口 */
     face_lost();
     DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 0);
@@ -887,6 +895,7 @@ static void t13_presence_window(void)
     /* --- 陌生人站着不走:1.5s 恰好判一次;结果弹窗关掉后不重复弹 --- */
     fsm_reset();
     face_detected();
+    liveness_pass();                        /* B8:窗由活体通过武装 */
     timer_fire(FSM_TMR_MATCH_WINDOW);       /* 1.5s 未命中 */
     DG_CHECK(s_fsm.state == ST_RESULT);
     DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 1);
@@ -913,6 +922,7 @@ static void t13_presence_window(void)
     /* --- 离开再回来:重新武装,新的在场重新判定 --- */
     face_lost();
     face_detected();
+    liveness_pass();                        /* B8:新在场做完全套动作 */
     DG_CHECK(last_act(FSM_ACT_SET_TIMER)->d.timer.timer_id == FSM_TMR_MATCH_WINDOW);
     timer_fire(FSM_TMR_MATCH_WINDOW);
     DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 1);   /* 第二次在场:又判一次 */
@@ -925,6 +935,7 @@ static void t13_presence_window(void)
     timer_fire(FSM_TMR_RESULT_3S);
     DG_CHECK(s_fsm.state == ST_NORMAL);
     face_detected();
+    liveness_pass();                        /* B8:重新通过活体才重新判定 */
     DG_CHECK(last_act(FSM_ACT_SET_TIMER)->d.timer.timer_id == FSM_TMR_MATCH_WINDOW);
 }
 
@@ -1010,6 +1021,7 @@ static void t14_presence_dedup_and_touch(void)
     DG_CHECK(tw->d.timer.timer_id != FSM_TMR_MATCH_WINDOW);  /* 不补判 */
     face_lost();
     face_detected();
+    liveness_pass();                        /* B8:新在场重新通过 */
     DG_CHECK(last_act(FSM_ACT_SET_TIMER)->d.timer.timer_id ==
              FSM_TMR_MATCH_WINDOW);                     /* 新在场重新判定 */
 }
@@ -1100,6 +1112,55 @@ static void t16_vision_down(void)
     DG_CHECK(s_fsm.step == V_FACE_1V1);
 }
 
+/* ================= 17 动作活体接线(B8,2026-10-25) ================= */
+
+static void t17_liveness_window(void)
+{
+    printf("[F17] 判定窗只由活体通过武装;无脸不武装;ACT 续 5s 步计时\n");
+
+    /* 检出但活体未过:不开窗(照片挡门不产生「陌生人失败」) */
+    fsm_reset();
+    face_detected();
+    face_detected();
+    DG_CHECK(last_act(FSM_ACT_SET_TIMER)->d.timer.timer_id != FSM_TMR_MATCH_WINDOW);
+    DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 0);
+
+    /* 无脸时收到活体通过(face_present=false):不武装 */
+    fsm_reset();
+    liveness_pass();
+    DG_CHECK(count_act(FSM_ACT_SET_TIMER) == 0);
+
+    /* 在场 + 活体通过:武装 1.5s 窗;离场撤窗 */
+    fsm_reset();
+    face_detected();
+    liveness_pass();
+    const act_rec_t *tr = last_act(FSM_ACT_SET_TIMER);
+    DG_CHECK(tr && tr->d.timer.timer_id == FSM_TMR_MATCH_WINDOW);
+    DG_CHECK(tr->d.timer.ms == 1500);
+    face_lost();
+    timer_fire(FSM_TMR_MATCH_WINDOW);       /* 已撤:旧 seq 到期作废 */
+    DG_CHECK(s_fsm.state == ST_NORMAL);
+    DG_CHECK(count_act(FSM_ACT_POPUP_FAIL) == 0);
+
+    /* 1:1 人脸子步内,活体动作沿续 5s 步计时(动作没做完不超时) */
+    fsm_reset();
+    uid_flow("10001", true, DG_ROLE_NORMAL, DG_AUTH_FACE | DG_AUTH_PWD);
+    method_pick(DG_METHOD_FACE_11);
+    DG_CHECK(s_fsm.step == V_FACE_1V1);
+    const act_rec_t *t0 = last_act(FSM_ACT_SET_TIMER);
+    DG_CHECK(t0->d.timer.timer_id == FSM_TMR_STEP_5S);
+    auth_fsm_handle(&s_fsm, FSM_EV_LIVENESS_ACT, NULL);
+    const act_rec_t *t1 = last_act(FSM_ACT_SET_TIMER);
+    DG_CHECK(t1->d.timer.timer_id == FSM_TMR_STEP_5S);
+    DG_CHECK(t1->d.timer.seq != t0->d.timer.seq);   /* 新表起,旧表作废 */
+    fsm_event_data_t td;
+    memset(&td, 0, sizeof(td));
+    td.timer.timer_id = FSM_TMR_STEP_5S;
+    td.timer.seq = t0->d.timer.seq;                 /* 旧 seq 到期不得拉回普通 */
+    auth_fsm_handle(&s_fsm, FSM_EV_TIMER, &td);
+    DG_CHECK(s_fsm.state == ST_VERIFY);
+}
+
 
 int main(void)
 {
@@ -1126,6 +1187,7 @@ int main(void)
     t14_presence_dedup_and_touch();
     t15_cam_down();
     t16_vision_down();
+    t17_liveness_window();
 
     DG_TEST_EXIT();
 }
