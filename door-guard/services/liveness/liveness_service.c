@@ -89,8 +89,6 @@ static struct {
     int32_t quality;
 } s_last;
 
-static bool warned_stub;                 /* 旧桩语义的告警位(B8 前放行提示) */
-
 /* ---- cfg 兜底读取(键缺失/越界一律回内置默认,防 0 值把限时变 0) ---- */
 
 static int cfg_actions_min(void)
