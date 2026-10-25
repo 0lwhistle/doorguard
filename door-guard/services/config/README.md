@@ -30,9 +30,6 @@ cur_config.json(现用配置,稀疏覆盖;板上 /userdata/doorguard/cur_config.
 | det_score_min | face.det_score_min | 0.30~1.00 | 0.70 |
 | det_threshold | face.det_threshold | 0.30~0.95 | 0.60(检测出框线;i8 模型空场景有 0.5x 幻检) |
 | antispoof_threshold | face.antispoof_threshold | 0~1.00 | 0.50(真脸分数下限,多帧平滑分低于它即降级;误拒只多验一道,可调严。注:liveness/antispoof 两开关键已删,活体恒启用——cfg.c 删除注) |
-| liveness_actions_min | face.liveness_actions_min | 1~3 | 2(动作活体随机序列最少步数,B8) |
-| liveness_actions_max | face.liveness_actions_max | 1~3 | 3(最多步数;载入时小于 min 抬到 min) |
-| liveness_timeout_ms | face.liveness_timeout_ms | 1000~10000 | 5000(单步限时,超时重出新序列) |
 | standby_timeout_s | ui.standby_timeout_s | 15~60 | 30 |
 | menu_timeout_s | ui.menu_timeout_s | 5~120 | 15 |
 | language | ui.language | zh-CN/en-US | zh-CN |

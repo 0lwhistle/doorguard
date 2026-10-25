@@ -356,11 +356,10 @@ if(NOT DG_SIM AND NOT DG_BUILD_TESTS)
     target_link_libraries(rknn_spoof_test PRIVATE dg_npu dg_rknn_face)
 endif()
 
-# liveness:动作活体(B8 动作状态机 on_face/pass + EV_LIVENESS_PROMPT)
+# liveness:动作活体(B7 留口 on_face/pass;B8 状态机)
 add_library(dg_liveness STATIC services/liveness/liveness_service.c)
 target_include_directories(dg_liveness PUBLIC ${CMAKE_SOURCE_DIR}/services/liveness)
-target_include_directories(dg_liveness PRIVATE ${CMAKE_SOURCE_DIR}/services/vision)
-target_link_libraries(dg_liveness PUBLIC dg_proto dg_config dg_timeutil dg_event_bus)
+target_link_libraries(dg_liveness PUBLIC dg_proto dg_config dg_timeutil)
 
 # mongoose:第三方网络库(GPLv2/商业双许可,单文件 vendored;本项目按 GPLv2 开源路线使用)
 # 统一网络层的唯一传输引擎(web/OTA/NTP/mDNS 全走 modules/net 的 netcore 事件循环;

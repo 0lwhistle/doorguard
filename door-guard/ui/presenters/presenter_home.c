@@ -123,8 +123,6 @@ static void home_on_evt(const ui_evt_t *evt)
     case UI_EVT_OTA_STATUS:
     case UI_EVT_MQTT_STATE:
         break;              /* OTA/broker 状态由关于设备页消费,主页显式忽略 */
-    case UI_EVT_LIVENESS:
-        break;              /* 活体指令由 ui.c 顶层提示条消费(页面之外),主页忽略 */
     case UI_EVT_FACE_BOX:
         page_home_set_facebox(evt->box.state, evt->box.x, evt->box.y,
                               evt->box.w, evt->box.h);

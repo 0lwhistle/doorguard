@@ -462,28 +462,12 @@ void auth_fsm_handle(auth_fsm_t *fsm, fsm_event_t ev, const fsm_event_data_t *da
             d.facebox.state = DG_BOX_DETECTED;
             emit(fsm, FSM_ACT_FACEBOX, &d);
         }
-        /* 判定窗不再在检出时开(B8 动作活体):命中要等活体序列全过才会被
-         * 视觉放行,窗若仍在检出时刻开 1.5s,人还在做动作就会先弹「陌生人
-         * 失败」。窗改由 FSM_EV_LIVENESS_PASS 武装;这里只跟踪在场+画框 */
-        return;
-
-    case FSM_EV_LIVENESS_PASS:
-        /* 动作活体全过(B8):视觉侧从这一刻起放行命中,判定窗从这里开。
-         * 活体没过 = 命中永远不到 = 窗不开、不弹窗、不落日志(照片挡门
-         * 只会被反复出题,不产生「陌生人失败」噪音)。人已离场则忽略
-         * (PASS 与 LOST 在总线上天然保序,这里再按 face_present 兜一道) */
-        if (fsm->state == ST_NORMAL && fsm->match_enabled && !fsm->window_done &&
-            fsm->face_present &&
+        /* 1.5s 判定窗:一次在场只开一次(每帧 DETECTED 都重置会让窗永远
+         * 打不响,人走了才补一枪——表现为「人已离开却弹验证失败」+垃圾日志)。
+         * 已出过判定(window_done)或窗还开着时不重开;LOST 复位重新武装 */
+        if (fsm->state == ST_NORMAL && !fsm->window_done &&
             fsm->timer_active[FSM_TMR_MATCH_WINDOW] == 0)
             set_timer(fsm, FSM_TMR_MATCH_WINDOW, 1500);
-        return;
-
-    case FSM_EV_LIVENESS_ACT:
-        /* 动作出题/通过沿 = 用户在做动作:验证流程内的 5s 无操作步计时
-         * 续命(1:1 人脸子步里,完成 2~3 步动作可能超过 5s)。只有完成沿
-         * 才续——照片站在镜头前只会原地超时,无法借此把子步无限挂住 */
-        if (fsm->state == ST_VERIFY && fsm->timer_active[FSM_TMR_STEP_5S])
-            set_timer(fsm, FSM_TMR_STEP_5S, 5000);
         return;
 
     case FSM_EV_FACE_LOST:

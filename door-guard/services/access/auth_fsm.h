@@ -82,13 +82,6 @@ typedef enum {
                                      1:1 步立即 reason=9,不空等 5s 超时) */
     FSM_EV_VISION_STATE,        /**< 识别后端可用态(data: vision_ready;
                                      看门狗禁用后端时同上 reason=9) */
-    FSM_EV_LIVENESS_PASS,       /**< 动作活体序列全过(B8;无载荷)。1:N 命中
-                                     此刻起才会被视觉放行,1.5s 判定窗从这里
-                                     武装(FACE_DETECTED 只跟踪在场,不开窗) */
-    FSM_EV_LIVENESS_ACT,        /**< 动作活体出题/通过沿(B8;无载荷)。等于
-                                     「用户在操作」:验证流程内的 5s 无操作
-                                     步计时据此续命(仅动作完成沿,照片无法
-                                     借此把子步无限挂住) */
 } fsm_event_t;
 
 typedef struct {

@@ -42,8 +42,6 @@ typedef enum {
                                 检查更新按钮可用性) */
     UI_EVT_DATA_OP_RESULT, /**< 设备数据维护回执(EV_SYS_DATA_OP_RESULT;设备
                                 数据页弹成功/失败) */
-    UI_EVT_LIVENESS,       /**< 动作活体指令一拍(EV_LIVENESS_PROMPT;顶层
-                                提示条出题/收起,B8) */
 } ui_evt_kind_t;
 
 typedef struct {
@@ -68,7 +66,6 @@ typedef struct {
     ev_ota_update_t ota;           /* UI_EVT_OTA_STATUS */
     ev_mqtt_state_t mqtt_state;    /* UI_EVT_MQTT_STATE */
     ev_sys_data_op_t data_op;      /* UI_EVT_DATA_OP_RESULT */
-    ev_liveness_t liveness;        /* UI_EVT_LIVENESS */
 } ui_evt_t;
 
 /** 入队(任意线程;队满直接丢弃,无计数器——C6-4 注释对齐实况) */
