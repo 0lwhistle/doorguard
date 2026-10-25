@@ -29,6 +29,7 @@ set_tests_properties(test_cfg PROPERTIES TIMEOUT 60)
 dg_add_test(test_auth_fsm dg_access)
 set_tests_properties(test_auth_fsm PROPERTIES TIMEOUT 60)
 dg_add_test(test_liveness dg_liveness dg_log)
+target_include_directories(test_liveness PRIVATE ${CMAKE_SOURCE_DIR}/services/vision)
 set_tests_properties(test_liveness PROPERTIES TIMEOUT 60)
 dg_add_test(test_uart_mock dg_uart)
 

@@ -12,6 +12,7 @@
 #include "events.h"
 #include "event_bus.h"
 #include "cfg.h"
+#include "vision_service.h"              /* DG_VMODE_*(头文件枚举,不链 dg_vision) */
 
 #include <stdio.h>
 #include <stdlib.h>
