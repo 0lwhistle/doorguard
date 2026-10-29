@@ -17,7 +17,14 @@ OTA A/B 升级与 MQTT 接入,单仓打通固件 → 驱动 → 算法 → 应�
 | **用户编辑(人脸已录入)** | **记录查询(开门日志)** |
 | ![用户编辑](deliverables/ui-walkthrough/05_user_edit.png) | ![记录查询](deliverables/ui-walkthrough/07_access_logs.png) |
 
-更多截图见 `deliverables/ui-walkthrough/`(含多因子验证方式选择弹窗)。
+更多截图见 `deliverables/ui-walkthrough/`(含多因子验证方式选择弹窗);真机(板上实拍)走查见 `deliverables/lvgl9-c3-board-walkthrough/`。
+
+## 核心成果与验证
+
+- **NPU 三模型推理链**:RetinaFace 检测(6.7ms/帧)+ ArcFace 识别(56ms)+ MiniFASNet 反欺骗活体,RKNN 量化部署 + RGA 硬件预处理,512 维特征 1:N / 1:1 检索;
+- **门禁业务全覆盖**:人脸/密码/指纹多因子录入与验证、2000 用户容量、权限管理与门禁日志,SQLite 加密存储;
+- **MQTT 无感 OTA**:retain 版本公告 + LWT 上下线感知 → 定长直链下载 → 流式 SHA256 校验 → A/B 双槽原子切换;坏包 15 秒内 3 次秒退自动回滚,已通过真实升级与坏包回滚双重演练;
+- **单仓全栈交付**:Buildroot 裁剪 / DTS 屏幕触摸适配 / 交叉编译工具链 / 应用 / LVGL9 UI / Vue3 Web 上位机 / 部署脚本,`source env/env.sh` 后 `dg-*` 一条命令完成编译、部署、测试。
 
 ## 仓库内容
 
