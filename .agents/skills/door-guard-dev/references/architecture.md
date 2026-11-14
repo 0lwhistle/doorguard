@@ -40,7 +40,7 @@ UI 层        ui/ 页面与弹窗(LVGL;PC 模拟器 + 板上双构建)
   UI→enroll 用户生命周期(A1 收口)、UI 设置页→config 同步读写(A2 拍板
   方案 B)、enroll→vision 特征库增删(A3 拍板方案 A,2026-09-28);另有
   UI 出站动作一律经 ui/bridge(C4 收口,页面零 EVENT_BUS_PUBLISH))
-- 事件命名:`EV_<域>_<动作>`(如 `EV_AUTH_RESULT`、`EV_ENROLL_DONE`、`EV_NET_OTA_PROGRESS`)
+- 事件命名:`EV_<域>_<动作>`(如 `EV_AUTH_RESULT`、`EV_ENROLL_DONE`、`EV_FINGER_STATUS`;示例只举活契约事件,删事件见 events.h 注记)
 - 新建模块步骤:本文档登记职责 → proto/ 定义接口与事件 → 实现 → 测试 → README + 使用示例
 - **netcore 登记(2026-09-22)**:modules/net/netcore,mongoose 7.23 胶水层,零业务;
   单 loop 线程独占全部网络 I/O(web 上位机/OTA 收包/mDNS/SNTP);对外仅
