@@ -185,7 +185,7 @@ door-guard/
 ├── components/     tasker event_bus holder logger registry(M2 已落)
 ├── proto/          events/types/valid/err(跨层契约,唯一横切层)
 ├── third_party/    lvgl9、lvgl_lib、mongoose 7.23、stb、cjson、
-│                   Silent-Face-Anti-Spoofing、AS608 资料(无 civetweb/lv_drivers)
+│                   Silent-Face-Anti-Spoofing、AS608 资料(清单以实际目录为准)
 ├── models/         视觉模型清单(README+sha256;**二进制不入库**,板上放
 │                   /userdata/doorguard/models)
 ├── tools/          npu_probe(模型探针)、rknn_det_test / rknn_rec_test(离线对拍)
@@ -266,7 +266,7 @@ door-guard/
   - 头部姿态:由 5 关键点几何估计 yaw/pitch(左右眼-鼻尖水平距比、鼻-眼垂直比),滑动窗口平滑;
     摇头=yaw 振荡过阈;左/右转=yaw 定向偏移;点头=pitch 先增后回。
   - 张嘴:需要嘴部 landmark(首版可用"框高变化+嘴部区域纹理变化"过渡,二期接 98 点 landmark rknn 模型)。
-- **能力边界(明确写入产品需求)**:可防静态照片、基础屏幕重放(随机动作+限时);**不能**防高清屏定向重放、高仿真头模。若量产安全等级要求高,升级路径:IR 双目模组(rgb+ir 交叉活体),架构上 liveness_service 接口不变,换实现。
+- **能力边界(明确写入产品需求)**:可防静态照片、基础屏幕重放(随机动作+限时);**不能**防高清屏定向重放、高仿真头模。若量产安全等级要求高,升级路径:IR 双目模组(rgb+ir 交叉活体),架构上活体=识别管线内反欺骗模型(face_antispoof),升级=换模型/加模组(2026-11-14 权威层销账:liveness_service 接口提法随 cf9ca5c 删除失效;本段能力边界仍为现行产品需求,其余小节为弃用存档)。
 - 防体验作弊:动作顺序随机、限时、动作间强校验(未按指令做即失败)。
 
 ### 4.5 指纹模块(预留接口)

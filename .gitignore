@@ -46,7 +46,14 @@ docs/tech/B7_FACE_HANDOFF.md
 docs/tech/CAPTURE_AVATAR_HANDOFF.md
 docs/tech/HW_BRINGUP_VM_TASK.md
 docs/tech/OTA_PLAN.md
-.agents/
+# AI 项目技能(本地)——分层豁免链:仅 door-guard-dev/references/(业务规格=权威源+AUTHORITY.md)
+# 随公开仓分发享受 diff 审查(2026-11-14 文档权威层拍板);SKILL.md 等其余维持本地
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/door-guard-dev/
+/.agents/skills/door-guard-dev/*
+!/.agents/skills/door-guard-dev/references/
 
 # 过时阶段产物留档(本地保留)
 docs/img/
