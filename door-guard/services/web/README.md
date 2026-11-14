@@ -127,18 +127,20 @@ netcore 契约下不存在。(历史上 civetweb 时代靠"推送线程 + 连接
 
 ```bash
 # 前端逻辑与产物(需要 node/npm;不需要板子)
-cd services/web/frontend && npx vitest run    # 45 项
+cd services/web/frontend && npx vitest run    # 59 项(静态 it/test 计数,以运行输出为准)
 
 # 交付面静态检查(不需要 node)
 python3 door-guard/tests/web/frontend_check.py
 
 # 接口级验收(自动起 PC 模拟器,打真接口)
-door-guard/tests/web/web_test.sh                 # 63 项
+door-guard/tests/web/web_test.sh                 # 77 处断言(以脚本输出为准)
 ```
 
-- **vitest(45 项)**:`api/client`(token/401/参数编码)、`api/logs`(查询拼装)、
+- **vitest(59 项)**:`api/client`(token/401/参数编码)、`api/logs`(查询拼装)、
   `api/ws`(重连退避状态机)、`stores/{session,device,events}`、`utils/format`、
-  组件(EventFeed/DataTable/AppField/StatusPill/StatValue)、路由守卫与 401 跳转,以及
+  `views/users-view`(IC 卡挂起态 UI)、
+  组件(EventFeed/DataTable/AppField/StatusPill/StatValue)、路由守卫与 401 跳转
+  (integration/app.spec.js),以及
   **`tests/integration/bundle.spec.js`:把 `pages/assets/app.js` 这份将编进固件的字节直接
   丢进 jsdom 执行**,跑通"挂载 → 登录 → 概览 → WebSocket 事件上屏"。
 - **frontend_check.py**:资源表↔`pages/` 一致、MIME、`endpoints.js`↔`web_server.c` 路由对照、
@@ -172,9 +174,11 @@ door-guard/tests/web/web_test.sh                 # 63 项
   mongoose 3MB 收包上限会显式断连,客户端以 X-OTA-Offset 续传(有界失败)
 - 页面文案只有中文(设备端 `ui/lang/*.json` 那套 i18n 未接入前端);要接的话在
   `frontend/src/` 加文案表即可。
-- 监控画面**已实装**(web_stream:MJPEG 推流,camera_latest 取帧;2026-10-04 起):
-  浏览器拉 `/api/stream/mjpeg`,WS 控制订阅起停。
+- 监控画面**已实装**(WS 二进制 JPEG 快照流,camera_latest 取帧;2026-10-14 起
+  05a8025):订阅走 WS 文本命令 video_on/video_off;帧为 WS 二进制 JPEG 快照
+  (web_server.c video_push_cb 100ms 定时、seq 去重、2s ping/5s 判死);
+  **无 HTTP MJPEG 端点**。
 - web 端用户管理已开放(CRUD/改密/清人脸,2026-09-27 a275a1f:与设备端同源
   校验;删除/清人脸经 enroll 服务事件,DB+特征库+头像一起动)。
-- 产物未做 gzip 内嵌(131KB JS,gzip 后 51KB):局域网直发可接受;若要省,可在构建时
+- 产物未做 gzip 内嵌(164KB JS,gzip 后 62KB,预算 ≤300KB/60KB 内):局域网直发可接受;若要省,可在构建时
   同时内嵌 `.gz` 并按 `Accept-Encoding` 返回。

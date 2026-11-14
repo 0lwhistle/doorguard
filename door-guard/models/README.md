@@ -51,7 +51,7 @@ cd <SDK>/rockiva_data_rk3576 && sha256sum *.data > sha256sums.txt
 | `4_0_0_80x80_MiniFASNetV1SE.rknn` | 单帧反欺骗(scale 4.0) | 同上 | 1.5 MB(F16) |
 
 反欺骗两个模型 2026-09-27 上板:转换/输入域/对拍基准见
-`tools/convert_antispoof/README.md`(头号坑:官方 to_tensor 无 /255,
+**仓库根** `tools/convert_antispoof/README.md`(头号坑:官方 to_tensor 无 /255,
 输入是 BGR 原域);运行时接入见 `services/vision/README.md` 反欺骗段。
 板上三方对拍:真脸样例 real=0.9937、假脸样例 real=0.0729,与 WSL
 onnxruntime 偏差 <0.001。

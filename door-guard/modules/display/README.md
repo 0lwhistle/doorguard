@@ -1,18 +1,17 @@
 # modules/display — 显示与触摸输入模块
 
 同一份 `ui/` 代码跑 PC 模拟器与板上(spec-ui),本模块按端提供后端。
-构建开关 `DG_USE_LVGL9` 选择 LVGL 代际(2026-09-23 迁移,契约见
-`docs/superpowers/specs/lvgl9-migration-contract.md`),display.h API 两代冻结不变:
+LVGL 9.5 单代(vendored third_party/lvgl9;2026-09-23 迁移,契约见
+`docs/superpowers/specs/lvgl9-migration-contract.md`);`DG_USE_LVGL9` 开关与
+8.3 回退通道已删(2026-10-25 B5-3),display.h API 冻结不变:
 
 | 文件 | 端 | 代际 | 说明 |
 |---|---|---|---|
 | `display_sim_v9.c` | DG_SIM(宿主) | v9 | SDL2 窗口 720×1280,v9 PARTIAL 渲染逐脏区更新纹理;`DG_SIM_DUMP_BMP=<路径>` 首个刷新周期后导图取证 |
 | `display_drm_v9.c` | 板 | v9 | v9 内置 Linux DRM 驱动(dumb buffer×2,DIRECT 双缓冲 + atomic 翻转 + vblank 等待),XRGB8888;薄封装只做设备打开/分辨率核对/触摸注册 |
-| `display_sim.c` | DG_SIM(宿主) | v8 | SDL2 窗口 720×1280,SDL 鼠标 → LVGL pointer |
-| `display_drm.c` | 板 | v8 | DRM dumb-buffer + legacy modeset,full_refresh 双缓冲页翻转;**不用 /dev/fb0**(B4 固件 mmap EBUSY,实测) |
 | `lvgl9_smoke.c` | 两端 | v9 | 最小渲染验证入口(`dg_lvgl9_smoke`,不依赖 ui 层):`DG_SMOKE_FRAMES=<n>` 跑 n 轮退出;验证画面覆盖纯色/圆角/多字号/控件/持续动画 |
-| video plane | 板 | 两代 | NV12 dma-buf 直送 VOP2(实验已回退):四桩 `display_has_video_plane/show/hide/clear_fbs` 保持原样,恒不可用;LVGL9 后以 git f519b1e 为基础重启 |
-| `touch_evdev.c` | 板 | 两代 | evdev 触摸 → LVGL pointer,`#ifdef DG_USE_LVGL9` 切注册方式(解析/校准完全共用,见下) |
+| video plane | 板 | v9 | NV12 dma-buf 直送 VOP2:plane 双模默认关(`DG_UI_PLANE=1` 才发现/启用,失败永久降级软渲染) |
+| `touch_evdev.c` | 板 | v9 | evdev 触摸 → LVGL pointer(解析/校准完全共用,见下) |
 | `touch_activity.c` | 两端 | 无关 | 按下沿通知转发(display.h 冻结契约,与 LVGL 代际无关) |
 
 **为什么 v9 不用内置 evdev/SDL 输入驱动**:display.h 冻结契约要求触摸

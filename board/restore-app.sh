@@ -8,7 +8,7 @@
 # 首次安装,之后日常改代码再走 dg-deploy。
 #
 # 用法(WSL 侧运行,资产都在 WSL):
-#     bash board/restore-app.sh [板IP]        # 缺省 $DOORGUARD_IP 或 192.168.2.96
+#     bash board/restore-app.sh [板IP]        # 缺省 $DOORGUARD_IP 或 192.168.2.95
 #
 # 可覆盖的环境变量:
 #     DG_BIN          应用二进制(缺省取 ~/dg-build/aarch64-*/door-guard 里最新的)
@@ -20,7 +20,7 @@
 # 幂等:可重复执行;已存在的槽位/资源被覆盖,不会重复建结构。
 set -euo pipefail
 
-IP="${1:-${DOORGUARD_IP:-192.168.2.96}}"
+IP="${1:-${DOORGUARD_IP:-192.168.2.95}}"
 SSHOPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10)
 # DOORGUARD_SSH_PORT(dg-deploy 同名约定):空 = 直连 22
 [ -n "${DOORGUARD_SSH_PORT:-}" ] && SSHOPTS+=(-p "$DOORGUARD_SSH_PORT")
@@ -73,16 +73,7 @@ scp "${SSHOPTS[@]}" -q "$DG_REC_DIR/w600k_r50.rknn"             "root@$IP:/userd
 scp "${SSHOPTS[@]}" -q "$DG_AP/2.7_80x80_MiniFASNetV2.rknn"     "root@$IP:/userdata/doorguard/models/"
 scp "${SSHOPTS[@]}" -q "$DG_AP/4_0_0_80x80_MiniFASNetV1SE.rknn" "root@$IP:/userdata/doorguard/models/"
 
-# IC 卡驱动 .ko:内核模块不在 rootfs 镜像里(重刷即丢),来源是
-# sync-driver.sh 的交付目录 ~/k7-deliverables/;S60doorguard 启动时从这里 insmod
-DG_KO="${DG_KO:-$HOME/k7-deliverables/k7_rc522.ko}"
-if [ -f "$DG_KO" ]; then
-    echo "==> 推 IC 卡驱动 .ko"
-    sshx 'mkdir -p /userdata/doorguard'
-    scp "${SSHOPTS[@]}" -q "$DG_KO" "root@$IP:/userdata/doorguard/k7_rc522.ko"
-else
-    echo "!! 跳过 IC 卡驱动(缺 $DG_KO;在 WSL 跑 ~/k7-tools/sync-driver.sh 产出)"
-fi
+# RC522 内核驱动已退役(用户态 iccard_daemon 走 spidev),不再推 .ko(2026-11-14 审计清理)
 
 echo "==> 禁 lv_demo(它会占住屏幕)"
 sshx 'bash -s' <<'REMOTE'

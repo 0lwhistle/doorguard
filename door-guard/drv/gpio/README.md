@@ -1,8 +1,8 @@
 # gpio_hal — 门控 GPIO(sysfs)
 
-> 2026-09-28 A4 起业务上层不再直调本 HAL:开门继电器包成 modules/relay
-> (access_service 开门脉冲、main 安全停机都走 relay 接口);本 HAL 是它的
-> 底座,接口/语义不变。
+> 开门继电器路径已收口进 modules/relay(2026-09-28 A4;access_service 开门
+> 脉冲、main 安全停机都走 relay 接口);指纹 WAK 边沿等待仍为本 HAL 直接
+> 用户(services/verify/fingerprint/fp_link_uart.c 直调 gpio_hal_edge_wait)。
 
 ## 实现
 
@@ -31,6 +31,8 @@ rootfs 升级带 libgpiod 后迁移(gpio_hal.h 接口不变,只换 .c)。
 gpio_hal_init(cfg_get()->relay_gpio_line);  /* 导出+设输出 */
 gpio_hal_door_pulse(3000);                  /* 拉高 3s 后拉低(阻塞) */
 gpio_hal_get_level(&lv);                    /* 对拍/自检 */
+gpio_hal_edge_wait(line, timeout_ms, &lv);  /* 等输入引脚边沿(指纹 WAK;阻塞至多 timeout_ms) */
+gpio_hal_edge_abort();                      /* 解除阻塞中的 edge_wait */
 gpio_hal_deinit();                          /* unexport */
 ```
 

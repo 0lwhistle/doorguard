@@ -149,7 +149,7 @@ enroll_service ──vision_service_library_add/remove──▶ ops->lib_add/lib
 
 硬性义务(违反会在换模型/降级时爆):
 
-1. 单条特征 ≤ `DG_FEATURE_MAX`(512);超限**必须显式报错并丢弃**,不得静默;
+1. 单条特征 ≤ `DG_FEATURE_MAX`(2048,proto/types.h:30);超限**必须显式报错并丢弃**,不得静默;
 2. 出站一律 `EVENT_BUS_PUBLISH`(回调在推理线程,禁止碰 LVGL/长事务);
 3. 发布 1:N/1:1 命中前必须查 `vision_service_features_compatible()`,
    false 时不得发布 —— **宁可不开门,不可错开门**;
@@ -191,9 +191,9 @@ RK3576 上的通行做法(见 `sdk-guide/README.md §5`):
 
 自建后端要注意的差异点:
 
-- **特征长度**:ArcFace 类 512 维 float32 = 2048 B > `DG_FEATURE_MAX=512`,
-  要把 `proto/types.h` 的 `DG_FEATURE_MAX` 提到实际长度(表是 BLOB,免迁移);
-  服务层的槽位/库/DB 都是按这个宏走长度校验的,提一处即可;
+- **特征长度**:ArcFace 类 512 维 float32 = 2048 B,`DG_FEATURE_MAX` **已提至
+  2048**(proto/types.h:30;表是 BLOB,免迁移);
+  服务层的槽位/库/DB 都是按这个宏走长度校验的,新后端只需复核不超限;
 - **比较器**:embedding 用余弦相似度阈值得分(0~1),自己写 `compare` 注入,
   阈值建议单独一个 cfg 键,不要复用 ROCKIVA 的 0.42;
 - **关键点**:`has_landmarks=true` 时输出给对齐/诊断;活体不依赖关键点
@@ -246,7 +246,8 @@ scale 2.7/4.0 两次取景 → 双 80×80 MiniFASNet 推理 → real 概率相�
 - **输入域头号坑**:官方 to_tensor 不做 /255——输入是 **BGR 原域 [0,255]**,
   板上喂 uint8 BGR(RGA 产 RGB 需转通道),rknn config 不设归一化;
 - 模型加载失败只降级一次 ERROR(spoof_ready=false,行为同未启用),
-  识别主链路不受影响;加载在启动即做,`antispoof_enable` 运行时可改即生效;
+  识别主链路不受影响;加载在启动即做,活体恒启用无开关(`antispoof_enable` 开关
+  2026-10-04 删除,vision_rknn.c:574);
 - 对拍基准(T1 真 0.9937 / F1 假 0.0729)与转换链路:
   `tools/convert_antispoof/README.md`;
 - 阈值标定:看 2s 节流日志「反欺骗 real=」,用真人+打印照片+手机屏幕

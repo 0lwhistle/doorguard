@@ -5,8 +5,8 @@ v4 注入库与部分脚本为 video plane 直通重启(2026-09-25/26)迭代。
 
 ## 环境
 
-- 板端:RK3576 K7,SSH root@<板IP>(网线直插笔记本 ICS,IP 由 DHCP 分配,
-  **重启后可能变化,以 `ip addr` 实际为准**);屏幕 720x1280(XRGB/ARGB8888,
+- 板端:RK3576 K7,SSH root@<板IP>(2026-10-14 起板走路由器 DHCP,IP 以
+  `doorguard.local` 解析/`DOORGUARD_IP` 为准);屏幕 720x1280(XRGB/ARGB8888,
   stride=行宽×4)。
 - 宿主:WSL(工具链 `~/dg-toolchain`,env 见仓库 `env/env.sh`);持久文件放
   `/root/dg_walk/`(WSL 与板上 `/tmp` 都会在 VM/板重启后清空)。

@@ -11,7 +11,8 @@
 │ user_id   TEXT NOT NULL UNIQUE     ← 业务 ID(DUP_UID)        │
 │ user_name TEXT NOT NULL                                        │
 │ face_vec  BLOB    ← AES-256-CTR(设备密钥) 加密特征          │
-│ finger_vec BLOB   ← 同上                                       │
+│ finger_vec BLOB   ← 加密备份副本(仅备份/回灌),唯一事实源      │
+│                     =fingerprints 表(见下)                    │
 │ pwd_hash  BLOB NOT NULL ← PBKDF2-HMAC-SHA256(10000 iters)    │
 │ pwd_salt  BLOB NOT NULL ← 每用户 16B 随机盐                   │
 │ ic_card   TEXT UNIQUE              ← 明文(展示掩码**1234)    │
@@ -30,6 +31,14 @@
 │ key TEXT PK / value TEXT NOT NULL / updated_at INTEGER        │
 │ 表已冻结(v2 决议):仅首启迁移读一次,业务配置走 cur_config.json│
 │ (仍在用此表的:web 凭据、mdns 主机名、face_model_tag 口径登记)│
+└────────────────────────────────────────────────────────────────┘
+┌──────────────────────── fingerprints ─────────────────────────┐
+│ id INTEGER PK AUTOINCREMENT                                   │
+│ user_id   TEXT NOT NULL            ← 业务 ID(INDEX idx_fp_user)│
+│ page_id   INTEGER NOT NULL UNIQUE  ← 模组 PageID(每用户 ≤3 枚) │
+│ finger_vec BLOB   ← AES-256-CTR 加密副本(仅备份/换模组回灌)   │
+│ created_at INTEGER                                            │
+│ 注:本表=指纹唯一事实源;users.finger_vec 仅是加密备份副本       │
 └────────────────────────────────────────────────────────────────┘
 ```
 

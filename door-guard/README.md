@@ -9,8 +9,8 @@ RK3576 K7 人脸识别门禁主应用。业务规格唯一权威:仓库根 `.age
 source env/env.sh            # 仓库根执行
 dg-build                     # 板上(aarch64)构建,-c 全新配置
 dg-build-pc [-r]             # PC 模拟器(SDL2 720×1280),调 UI 一律先过模拟器
-dg-test [--tsan]             # 宿主 ctest 全量(34 用例,含 demo 冒烟);--tsan 并发检查
-dg-deploy [-r] <IP>          # 推板运行(默认 192.168.2.96,漂移时以 doorguard.local 为准)
+dg-test [--tsan]             # 宿主 ctest 全量(静态注册 55:36 dg_add_test+16 add_test+3 demo,以 `ctest -N` 实跑为准);--tsan 并发检查
+dg-deploy [-r] <IP>          # 推板运行(目标取 $DOORGUARD_IP,env/env.sh 缺省 192.168.2.95;漂移时以 doorguard.local 为准)
 dg-ota-upload <IP> <包>       # OTA 上传+校验闭环
 tests/web/web_test.sh        # web 上位机功能验收
 ```
@@ -43,10 +43,10 @@ tests/web/web_test.sh        # web 上位机功能验收
 | `services/mqtt/` | MQTT 上位机通道(mg_mqtt on netcore,默认关;命令订阅/事件上报/扩展口) | services/mqtt/README.md |
 | `modules/net/` | 网络模块(net_info 网口信息 + **netcore** 统一事件循环:web/OTA/NTP/mDNS/MQTT 的唯一传输层) | modules/net/README.md |
 | `modules/audio/` | 语音播报(MAX98357 I2S 功放:播放器+WAV/正弦+ALSA/sink 双后端,硬件未接自动降级) | modules/audio/README.md |
-| `ui/` | LVGL 十页面+widgets+theme+多语言+生成字体 | ui/README.md |
+| `ui/` | LVGL 十六页面+widgets+theme+多语言+生成字体 | ui/README.md |
 | `configs/default.json` | 设备配置出厂模板(现用值落 /userdata 的 cur_config.json 稀疏覆盖;DB 已冻结) | services/config/README.md |
 | `tests/` | ctest 用例(宿主 gcc;test_i18n 键覆盖/裸中文=0/字形覆盖) | — |
-| `third_party/` | lvgl 8.3 / cjson / mongoose 7.23(GPLv2)/ stb_image / lv_drivers(drm) / 字体生成工具说明 | 各 LICENSE |
+| `third_party/` | lvgl9(9.5 vendored)/ lvgl_lib / cjson / mongoose 7.23(GPLv2)/ stb_image / Silent-Face-Anti-Spoofing / AS608 资料 / 字体生成工具说明 | 各 LICENSE |
 
 ## 验证状态机快速入口
 
@@ -55,4 +55,5 @@ tests/web/web_test.sh        # web 上位机功能验收
 
 ## 待硬件确认清单(动态)
 
-继电器引脚/类型 · 指纹与读卡协议(UART) · 摄像头 rkaiq+V4L2 链路(B6/B7) · 触摸 GT9xx(待 B5 固件)
+继电器引脚确认 · IC 卡写通道硬件排查
+(已打通在用:触摸 fts_ts、摄像头 rkaiq+V4L2 链路、指纹 AS608 板上实测)

@@ -42,7 +42,7 @@ reason→文案映射、键盘与输入校验见 spec-ui §6。
 | `bridge/` | 唯一后端入口:事件入站编组、动作出站(**收发都经 bridge**,2026-09-28 C4 收口后页面零 `EVENT_BUS_PUBLISH`/零 `event_bus.h`)、_( ) 文案;只有本层 include 后端头 | 总线线程调 LVGL |
 | `presenters/` | 每页一个 presenter:注册页面、on_evt 渲染内容、弹窗文案、导航决策 | — |
 | `pages/` | 纯视图:建控件 + setter;点击转 bridge 动作 | include 后端头;直碰 event_bus |
-| `widgets/` | 通用控件 dg_btn/dg_popup/dg_kbd(数字+字母两页)/dg_list | 页面私有逻辑 |
+| `widgets/` | 通用控件 dg_btn/dg_popup/dg_kbd(数字+字母两页)/dg_list/dg_avatar/dg_preview | 页面私有逻辑 |
 | `valid_ui.c` | 输入校验的文案包装(规则在 proto/valid.h,文案走 _()) | 规则本身 |
 | `theme.h` | 色值/字号/间距 token(spec-ui §1;全项目唯一色值来源) | — |
 | `i18n.h/.c` + `lang/` | _() 翻译;字体经 font/gen.sh 生成(键=原文) | — |
