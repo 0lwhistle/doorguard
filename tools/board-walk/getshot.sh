@@ -2,7 +2,7 @@
 # getshot.sh <名字> [前置等待秒] —— 板上触发一次性导图,取回转 PNG 到 Windows 侧
 NAME=$1
 WAIT=${2:-0}
-IP="${DOORGUARD_IP:-192.168.2.96}"
+IP="${DOORGUARD_IP:-192.168.2.95}"
 sleep "$WAIT"
 ssh root@$IP "rm -f /tmp/dg_walk/dg_screen.raw; touch /tmp/dg_shot; i=0; while [ ! -f /tmp/dg_walk/dg_screen.raw ] && [ \$i -lt 40 ]; do sleep 0.1; i=\$((i+1)); done; mv /tmp/dg_walk/dg_screen.raw /tmp/dg_walk/$NAME.raw" || { echo "BOARD_FAIL"; exit 1; }
 scp -q root@$IP:/tmp/dg_walk/$NAME.raw /root/dg_walk/$NAME.raw || { echo "SCP_FAIL"; exit 1; }

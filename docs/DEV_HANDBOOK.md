@@ -223,7 +223,7 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 
 ### 7.1 Windows 侧推板(WSL 到板网络不通时的备用路径,2026-09-27 实测)
 
-- 前提:WSL 的 ssh 私钥已拷到 Windows ~/.ssh/(git bash 可直连 root@192.168.2.96;WSL→板直连在新网段同样实测可达,2026-10-14)
+- 前提:WSL 的 ssh 私钥已拷到 Windows ~/.ssh/(git bash 可直连 root@192.168.2.95;WSL→板直连在新网段同样实测可达,2026-10-14)
 - **2026-09-29 起构建目录默认在 WSL ext4**(env.sh 自动 export):交叉产物在
   `~/dg-build/aarch64-<仓库路径哈希>/door-guard`,宿主测试/PC 模拟器在
   `~/dg-build/{tests,pc}-<哈希>/`(两克隆各一份缓存不串)。dg-deploy 默认直取
@@ -251,7 +251,7 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 ### 7.2 局域网访问(2026-10-14 随路由器直连更新)
 
 - web 上位机:http://doorguard.local(默认 80,板端 mDNS 服务广播,Windows 解析
-  实测可达;IP 直连 http://192.168.2.96 等价,租约漂移后以 doorguard.local 为准)。
+  实测可达;IP 直连 http://192.168.2.95 等价,租约漂移后以 doorguard.local 为准)。
   非 root 回退 8080 时为 http://doorguard.local:8080
 - 板网络现状:网线直连路由器,eth0 DHCP;net_cfg 开机按 cur_config.json →
   default.json 的 network 段应用(现无覆盖,出厂 dhcp)。2026-09-27 之前的
