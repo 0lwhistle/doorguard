@@ -4,6 +4,8 @@
 > SDK 本体(19GB)只在编译 VM:`~/Linux/rk3576/Rk3576-SDK/rk3576_data/rk3576-linux-2026091008`,
 > 本指南所有路径均相对该目录。文中提到的官方 PDF 不随本仓库分发,按文件名向官方 SDK 文档目录(`docs/cn/`、`docs/en/`)或 Rockchip 资料页索取。
 
+> **⚠️ 本指南=SDK 调研存档(2026-09 立项期),先读这条再往下**:**项目最终未采用官方 RKADK/ROCKIVA 应用层方案**——取流/上屏为自写 rkaiq+V4L2(MMAP),人脸主线为自组 rknn(RetinaFace+ArcFace,2026-09-21 起)。下文「已采用」「本项目采用」「直接基于它」等均为当时调研结论,**与项目现状相反处以本横幅为准**;ROCKIVA 仅存备选后端(`vision_rockiva.c`,缺模型自降级)。触摸 IC 当前屏为 FocalTech fts_ts(GT9xx 为 DTS 共存驱动/早期屏)。
+
 ## 0. 一页速查:我要做 X,用哪个?
 
 | 你要做的事 | 用什么 | 位置 |
@@ -14,7 +16,7 @@
 | LVGL 界面 | lvgl_demo + LVGL 官方指南 | `app/lvgl_demo`,`docs/` 有 PDF |
 | NPU 推理(C API) | rknpu2 runtime + examples | `external/rknpu2` |
 | 模型转换(PC 端) | rknn-toolkit2 | `external/rknn-toolkit2` |
-| 人脸识别(官方方案,**已采用**) | ROCKIVA | `external/iva` |
+| 人脸识别(官方方案,**未采用,仅备选后端**) | ROCKIVA | `external/iva` |
 | ISP 3A / 画质调优 | camera_engine_rkaiq | `external/camera_engine_rkaiq` |
 | 快速验证视频管线 | gstreamer-rockchip | `external/gstreamer-rockchip` |
 | 图像缩放/裁剪/格式转换(硬件) | linux-rga | `external/linux-rga` |
@@ -55,8 +57,8 @@
 ## 2. RKADK:应用开发套件(取流+显示最快路径)
 
 **是什么**:Rockchip 把"摄像头取流(VI)→ 显示(VO)→ 编码(VENC)→ 播放器 → 存储"
-封装成的简单 C 接口库,内部已是 V4L2+DRM 零拷贝管线。**门禁的预览+显示直接基于它,
-不要自己从 V4L2 裸写。**
+封装成的简单 C 接口库,内部已是 V4L2+DRM 零拷贝管线。**门禁曾计划直接基于它,
+最终未采用——现自写 V4L2(MMAP)+RGA/DRM(见顶部横幅)。**
 
 **位置**:`app/rkadk`,含 `include/`(API 头文件)、`examples/`(15 个可跑样例)、`docs/`(中英开发指南 PDF)。
 
@@ -84,7 +86,7 @@
 
 **怎么用**:先读 `sdk-guide/docs/Rockchip_Developer_Guide_Linux_LVGL_CN.pdf`(官方 LVGL 移植指南:
 如何对接显示后端/触摸输入);显示后端对接 DRM(双平面方案见 PROJECT_PLAN.md §4.1),
-触摸走 evdev(GT9xx 驱动内核原生)。
+触摸走 evdev(当前屏 FocalTech fts_ts;GT9xx 为 DTS 共存驱动/早期屏,见 DEV_HANDBOOK §2)。
 
 **本项目对应**:Phase B8(UI 上屏)。
 

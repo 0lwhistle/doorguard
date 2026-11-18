@@ -11,7 +11,7 @@
 - **目标**:RK3576 人脸识别门禁(LVGL 界面 + 自组 rknn 人脸识别 + 活体检测(反欺骗模型) + 预留指纹/IC 卡)
 - **硬件**:KickPi K7(RK3576,6T NPU)+ 5 寸 MIPI 屏 F050008M01(720×1280,触摸 IC 随屏组装为 FocalTech/GT9xx)+ 官方 IMX415 摄像头
 - **系统**:Buildroot 无桌面 Linux(内核 6.1,vendor 分支),LVGL 直跑 DRM,无 X11/Wayland
-- **技术栈已定**:UI=LVGL;取流/上屏=RKADK/RGA→DRM;远程推流=GStreamer RTSP;**人脸=自组 rknn(RetinaFace 检测 + ArcFace 识别,rknn-toolkit2 转换,2026-09-21 起为主线)**(ROCKIVA 备选,本版 SDK 缺 rk3576 人脸模型);数据库=SQLite;联网=以太网(主)
+- **技术栈已定**:UI=LVGL;取流=自写 rkaiq 3A + V4L2(MMAP)→NV12 环形缓冲,上屏=RGA→DRM(不经 RKADK,官方应用层方案未采用,见 `sdk-guide/README.md` 顶部横幅);远程推流=web_stream WS 二进制 JPEG 快照(RTSP 暂缓);**人脸=自组 rknn(RetinaFace 检测 + ArcFace 识别,rknn-toolkit2 转换,2026-09-21 起为主线)**(ROCKIVA 备选,本版 SDK 缺 rk3576 人脸模型);数据库=SQLite;联网=以太网(主)
 
 ---
 
@@ -34,11 +34,11 @@
 | 指纹 WAK(2026-10-03 实测) | GPIO 94 sysfs 可读,**静息=0**,应用启动自校准得按下=1(采样 12:0);`finger.wak_active_level` 默认 **-1=自动**(fp_provider wak_calibrate),产线已知极性可写 0/1 强制。按压→电平相关性仍待真人复测;等待已带 ~1s 电平直读兜底,边沿丢失不再卡死 |
 | 指纹 WAK 双向不可信(2026-10-15 定性) | 克隆模组触摸前端两个方向都会说谎:①**未按压即翻转**(悬停/掠过,press_hold_ms=500 确认窗过滤);②**持续按压中自行掉回静息**——录入抬手只认电平会「未抬手即提示请再按一次」,已改双道闸(释放指示+GetImage 成像复核,`finger.lift_timeout_ms=10s` 兜底)。结论:**WAK 只能当唤醒沿用,「手指在不在传感器上」的事实源是 GetImage 确认码** |
 | 显示/渲染硬件(2026-09-22 实测) | **VOP2**:6 plane(3 Primary+3 Overlay),crtc 100(720×1280 DSI)上空闲 Overlay 132(Esmart3)/148(Cluster0)均支持 **NV12+缩放**,zpos 0..7 可写、alpha/CSC 齐;**Esmart/Cluster 均无 90° 硬件旋转**(仅 rotate-0/reflect)→ 旋转靠 RGA。**GPU**:Mali-G52(libmali-bifrost blob,EGL/GLES/OpenCL 可用,**无 Vulkan**),当前未使用。**dma_heap**:/dev/dma_heap/reserved(CMA)+ system,可导 dmabuf 给 DRM |
-| LVGL8 透明陷阱(实测) | ①`screen_transp` 运行时开关被编译宏 **LV_COLOR_SCREEN_TRANSP**(lv_conf.h)门控,宏不开则渲染脏区前被 bg_color(白)预填,ARGB fb 永不透明;②页容器 `remove_style_all` 本透明,页面"白底"实为 screen/display 层自带(lv_disp bg_opa 默认 COVER)——透明化须三层同改(ui.c scr+disp、navigator 页容器、dg_preview 透明页) |
+| LVGL8 透明陷阱(2026-11-18 注:LVGL8.3 回退通道已删(B5-3),本条转历史存档) | ①`screen_transp` 运行时开关被编译宏 **LV_COLOR_SCREEN_TRANSP**(lv_conf.h)门控,宏不开则渲染脏区前被 bg_color(白)预填,ARGB fb 永不透明;②页容器 `remove_style_all` 本透明,页面"白底"实为 screen/display 层自带(lv_disp bg_opa 默认 COVER)——透明化须三层同改(ui.c scr+disp、navigator 页容器、dg_preview 透明页) |
 
 ---
 
-## 3. 当前固件(20260917-B4)
+## 3. 当前固件(20260917-B4,出厂基线——板上现行为 OTA A/B 槽滚动版,现查三连见 §7.4 验收链)
 
 - 位置:仓库 `deliverables/firmware/20260917-B4/`(update.img 一键包 + 分区五件套 + parameter.txt + md5sums)
 - **烧录前必做**:`md5sum -c md5sums.txt`
@@ -51,7 +51,7 @@
      它要 `/usr/lib/face_landmark5.data`、`face_quality_v2.data`(之后还有识别模型);
      从 SDK `external/iva/librockiva/rockiva-rk3576-Linux/models/rockiva_data_rk3576/`
      拷入 /usr/lib 即可(应用降级不崩,只记 `vision_backend=ERROR` 继续跑)。
-     **下一版固件(B10)应在 buildroot IVA 包里补全,别让运维手工拷模型**
+     **下一版固件(B10)应在 buildroot IVA 包里补全,别让运维手工拷模型**(2026-11-18 注:ROCKIVA 已降备选后端、主线自组 rknn,本缺口不再排期,留档)
 - rootfs 内已预置:LVGL(+demo 自启,后续换 door-guard)、ROCKIVA(含模型)、RKADK、rkaiq、rknpu2、GStreamer+RTSP server、SQLite、dropbear、chrony、gdb 调试链
 
 ### B5 验收状态
@@ -70,7 +70,7 @@
 ## 4. 板端速查
 
 - **网络(2026-10-14 起路由器直连 DHCP;2026-10-20 起地址稳定)**:镜像里 `/etc/network/interfaces` 的静态 .100 已注释成保底备注;出厂 `default.json` 即 `net_mode:"dhcp"`。**开机偶发"连不上"的根因是 buildroot 双 DHCP 栈赛跑**(S40 ifup 的 udhcpc 与 S41 dhcpcd 同管 eth0,client-id 不同=路由器两个租户互踢,且租约不持久→地址逐次漂移 .96→.98→.95)。已由 S60 `net_govern()` 根治:dhcpcd 停、udhcpc 独管 eth0 并以 `-r /userdata/doorguard/last_ip` 请求上次地址,**实测连续重启 IP 稳定**(当前 192.168.2.95)。DHCP 事件因 `-S` 进 syslog(`/var/log/messages`),排障先看它。mDNS `doorguard.local` 仍是稳定入口:连不上先在 Windows 侧 `ping doorguard.local` 拿新 IP(WSL 侧 mDNS 不保证解析),再核对 env/env.sh 的 DOORGUARD_IP。**注意:S60 治理只随 dg-deploy 分发,VM 打新固件时必须把本版 board/rootfs-overlay 带进 buildroot,否则重刷退回双栈**
-- **SSH**:`root` / 密码 **已脱敏**(2026-11-14 入库分层:口令在开发机记忆与本地 DEVLOG,不进公开仓;WSL 公钥已装,`dg-deploy` 免密)。注意 dropbear 主机钥**不持久化**,板子重启/重刷后 key 会变 → 开发机先 `ssh-keygen -R <板IP>` 再连(板换新 IP 后,旧 IP 的 known_hosts 条目同样要先删)
+- **SSH**:`root` / 密码 **已脱敏**(2026-11-14 入库分层:口令在开发机记忆与本地 DEVLOG,不进公开仓;WSL 公钥已装,`dg-deploy` 免密)。注意 dropbear 主机钥**不持久化**,板子重启/重刷后 key 会变 → 开发机先 `ssh-keygen -R <板IP>` 再连(板换新 IP 后,旧 IP 的 known_hosts 条目同样要先删);**脚本化推板前还须 `ssh-keyscan -H <板IP> >> ~/.ssh/known_hosts` 预播种**,否则 dg-deploy 卡死在 ssh 交互确认(2026-10-20 实踩)
 - **重刷/裸板后恢复应用层**:`bash board/restore-app.sh [板IP]`(WSL 侧跑)。应用层**不烘进固件**,重刷即归零,此时 `dg-deploy` 用不了(它只做已装应用的 A/B 换槽);首次安装走这个脚本(幂等),之后日常改码再用 `dg-deploy`
 - 串口 **1500000 8N1**(不是 115200);dropbear 拒绝空密码
 - **走查/取证工具**:仓库 `tools/board-walk/`(注入库/七页走查脚本/CPU 采样/导图,README 含坐标表与编译命令);LVGL 走查方法论与坑见该 README + `docs/superpowers/specs/2026-09-26-useredit-crash-debug.md` §8
@@ -204,13 +204,17 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 
 ## 7. 开发工作流
 
-- **代码流转只经 git**:WSL(写代码/单测)→ push → **GitHub origin**(`git@github.com:0lwhistle/doorguard.git`)→ VM pull 交叉编译
+- **代码流转只经 git(2026-11-18 勘误,现行)**:Windows 克隆(`Desktop\doorguard\doorguard`)改码 → commit+push **origin**(`git@github.com:0lwhistle/doorguard.git`,master)→ WSL `/home/olwhistle/doorguard` pull → `dg-build`+`dg-deploy` 推板;push 被拒不带 merge 时 `git pull --rebase`;收尾两端 `git rev-parse HEAD` 对账。**VM 仅承担 SDK 全量固件编译(§6),不再是应用主编译机**——旧「WSL 写码→push→VM pull 编译」提法作废
+- **全局剧本路由(2026-11-18)**:命中 work-playbooks 剧本卡(PB1 开发/PB2 调试/PB5 发布部署/PB7 服务器运维)时,领域规范以本手册+door-guard-dev 技能为唯一权威源:OTA 发版=§7.4(PB5 通用验收仅作补充),Windows 备用推板=§7.1,板访问=§4
+- **文档权威层纪律(doc-authority,2026-11-18)**:改对外契约(配置键/事件/端点/路径/删模块)动手前 `doc-authority.sh scan <旧符号>` → 销账 → 收尾 `verify` exit=0 + `log` 记账(协议正文见 `~/.agents/skills/doc-authority/`;项目配置=仓库 `.agents/skills/door-guard-dev/references/AUTHORITY.md`);全量 P-A 审计节奏≈每 20 commit 或两周一次
+- **web 前端构建流转**:前端(`services/web/frontend/`)只能在 WSL 权威克隆构建(npm 无网须先 `npm ci`;node 须 nvm24 显式 source):Windows 提交源码 → WSL pull 构建 → WSL commit 产物;禁止 Windows 侧 npm install
 - ⚠️ **Gitea 已停更(2026-09-18 历史重写)**:为上 GitHub,固件/工具链大 blob 已从历史剥离,
   本地与 Gitea 历史分叉。**VM 勿直接 pull gitea**(会撞回旧历史);等 VM 能直连 GitHub 后
   `git fetch origin && git reset --hard origin/master` 一次性切换。Gitea 旧历史是固件镜像
   (update/rootfs/boot.img 等)唯一异地副本,保留勿覆盖;换机取镜像从 Gitea 或本地盘
 - **WSL 快速循环**(door-guard 应用):`source env/env.sh` → `dg-build` → `dg-deploy -r <板子IP>`;
-  工具链安装/更新 `dg-tc-install`;技术细节见 `docs/tech/TOOLCHAIN.md`
+  工具链安装/更新 `dg-tc-install`;技术细节见 `docs/tech/TOOLCHAIN.md`。
+  `dg-deploy` 三档:`-all`=资源+程序(默认;S60/rootfs-overlay 变更后或首次必用) / `-app`=只走 OTA 槽(日常改码) / `-res`=只推语言包;web 前端编译进 app,无独立升级件
 - SDK(19GB)**只在 VM 存一份**;SDK 改动走分支+补丁(见 §6)
 - 板端部署:scp 可执行文件 / buildroot 包;固件迭代走"增量编译 → 只刷对应分区"
 - VM 大文件纪律:任何 >1GB 产物 md5 连读两次一致才算有效;传输用流式
@@ -287,6 +291,7 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 ### 7.4 固件自动升级(MQTT OTA)生产部署(2026-10-15 定版,板上全链实测)
 
 > 完整技术细节(两侧实现/硬契约/验收成果/运维手册)= `docs/tech/MQTT_OTA.md`;本节只留部署速查。
+> **主从声明(2026-11-18)**:OTA 发版的唯一领域权威源=本节(点分 tag 铁律+回滚清 retain);work-playbooks PB5 发布部署卡的通用验收仅作补充,与本章冲突时以本节为准。
 
 - **服务器组件**(homeserver 192.168.2.150,docker,`--restart unless-stopped`):
   - `mosquitto-doorguard`:eclipse-mosquitto:2,端口 1883,账号 `doorguard`,

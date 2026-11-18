@@ -25,8 +25,9 @@ ST_VERIFY ←──每步 5s 超时/用户取消──(各子步)
 任何子步失败 → ST_RESULT(红色,约 3s 自动回)→ ST_NORMAL
 ```
 
-标志位(2026-09-21 起实况:已落 `services/access/auth_fsm.h/.c` 注入式状态机,
-`ui/page_home.c` 仅做渲染与事件翻译):
+标志位(2026-09-21 起实况:已落 `services/access/auth_fsm.h/.c` 注入式状态机;
+UI 侧双层=pages 纯视图+presenters 编排,主页的编排/事件翻译在 `ui/presenters/presenter_home.c`,
+`ui/pages/page_home.c` 只建控件与 setter 渲染):
 
 | 标志 | 含义 |
 |---|---|
@@ -126,7 +127,7 @@ ST_VERIFY ←──每步 5s 超时/用户取消──(各子步)
 - 弹窗渲染在高图层,背后摄像头推流**持续刷新**(LVGL:推流 canvas 在底层定时刷新,不因弹窗暂停)
 - 任意时刻只有一个弹窗;新验证请求先取消旧流程(清理定时器、复位标志)
 - 超时统一用 `timer_seq` 机制:状态迁移使旧定时器全部失效,禁止"上个状态的 5s 超时把新状态拉回去"
-- 验证成功后开门时长 `door_open_ms`(device_config),期间重复验证请求忽略但不报错
+- 验证成功后开门时长 `door_open_ms`(cfg 配置键 `access.door_open_ms`,默认值见 cfg.c;device_config 表已冻结不承载配置),期间重复验证请求忽略但不报错
 - 密码连错锁定:同一 user_id 连续错 N 次(默认 5)锁定 S 秒(默认 60),期间密码方式直接提示锁定;锁定计数掉电可丢(内存即可)
 - 黑名单命中任何路径都失败并落日志;陌生人(无 ID)落日志 user_id=NULL
 - 摄像头断流/识别服务未就绪:主页显示"摄像头未就绪"占位,所有验证路径立刻失败(reason=9),不得卡死等待

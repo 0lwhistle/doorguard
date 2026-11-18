@@ -16,7 +16,7 @@
   不得直接 fetch);色值只取 `styles/tokens.css`(与设备端 `ui/theme.h` 同源)
 - 前端用 hash 路由:设备端只提供固定资源表,不需要为前端路由配服务端回退;
   未知路径回落到单页应用,`/api/` 前缀才回 JSON 404
-- 路由(方法严格校验,改状态接口只接受 POST,不符回 405):
+- 路由(方法严格校验,改状态接口只接受 POST,不符回 405)。**下表为现行路由节选**——未列入条目(如 /api/users CRUD、/api/access_set、/api/users/ic_set|ic_clear、/api/users/pwd、/api/ota/fw 系列)以 `web_server.c` 路由表为准:
 
   | 方法 | 路径 | 鉴权 | 说明 |
   |---|---|---|---|

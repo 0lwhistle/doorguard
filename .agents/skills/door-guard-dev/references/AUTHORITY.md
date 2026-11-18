@@ -18,6 +18,7 @@
 | web 路由/端点 | door-guard/services/web/web_server.c 路由表 | 文档与代码对表 |
 | UI 页面清单 | door-guard/ui/presenters/*.c 的 navigator_register 调用（上限=navigator.h NAV_MAX_PAGES） | 写「N 页」必须现数 |
 | 模型清单/校验 | door-guard/models/README.md + sha256sums.txt | |
+| 本地层指针 | 主克隆 docs/ 下本地层文件(DEVLOG/tech/superpowers/prompts/img 等,gitignore 豁免链保留、公开仓不含) | tracked 文档指向本地层文件**合法,不加括注**;公开仓读者不可见即预期 |
 
 ## 契约文件哨兵（L2 判定：工作区 diff 命中即提示出示销账记录）
 
@@ -40,6 +41,8 @@
 | DOORGUARD_IP 缺省 .95 | grep "DOORGUARD_IP:-" env/env.sh | 192.168.2.95 | 2026-11-14 |
 
 ## 灭绝词汇表（现行声明命中即漂移报警；历史区命中属预期，人工判断）
+- EV_ENROLL_DONE（2026-11-18 retire：2026-11-18:events.h 无此事件(活契约=EV_ENROLL_RESULT),architecture.md 事件命名示例误引已销账）
+- liveness（2026-11-18 retire：2026-11-18:裸词补录——architecture.md:14/:93 把已删服务当现行(cf9ca5c 删,灭绝词只录了 liveness_service 漏网);现行提法=活体=识别路径反欺骗模型 face_antispoof）
 
 - liveness_service（2026-11-14 retire：cf9ca5c 删除空壳模块，动作活体 bad656d 弃用）
 - civetweb（2026-11-14 retire：2026-09-22 退役改 mongoose 7.23）
@@ -60,9 +63,14 @@
 - docs/DOCUMENT-AUDIT-2026-11-14.md
 - docs/lvgl9-migration-LOG.md
 - docs/REVIEW-TODO-2026-10-24.md
+- docs/PENDING_DECISIONS.md
+- docs/RESUME_PROJECT.md
+- docs/architecture-v2-proposal.md
 - docs/review-2026-10-24/
 - docs/superpowers/
 - docs/prompts/
+- docs/tech/
+- docs/img/
 
 注意：PROJECT_PLAN.md §4.4 弃用存档块、architecture-v2-proposal 历史登记节、S60doorguard 内「已退役」注释属**活文件内的历史段落**，哨兵会命中——按「被当作现行事实才算漂移」人工判断，勿机械清零。
 
@@ -76,5 +84,6 @@
 
 ## 更新日志（L2/L3 记账，append-only）
 
+- 2026-11-18 L3 工作流重构+二轮审计收口：P-A 三代理审计抓出 11-14 漏网漂移并全部销账（sdk-guide 横幅、DEV_HANDBOOK 技术栈行/流转勘误+§7 新增剧本路由与 doc-authority 纪律、architecture liveness/EV_ENROLL_DONE、PROJECT_PLAN auth_provider/chrony/指纹 IC 实况/SSOT 让位 AUTHORITY、spec-auth device_config、spec-ui §4 目录树、net README、README 死指针）；灭绝词 retire liveness(裸词)+EV_ENROLL_DONE；历史区白名单补 5 项；路由表新增「本地层指针」行。
 - 2026-11-14 L3 全仓审计收口：文档漂移 45 条修复（df6b1be）、PROJECT_PLAN+DEV_HANDBOOK 脱敏入库（6447c32）、AUTHORITY.md 建立、灭绝词汇表录入 11 词。
 - 2026-11-14 L2 文档权威层落地:AUTHORITY.md 建立(11 灭绝词/6 注册表行/5 行级豁免);首轮 verify 抓出并修复 9 处 .96 缺省 IP 残留+PROJECT_PLAN liveness 残留销账

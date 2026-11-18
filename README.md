@@ -17,7 +17,7 @@ OTA A/B 升级与 MQTT 接入,单仓打通固件 → 驱动 → 算法 → 应�
 | **用户编辑(人脸已录入)** | **记录查询(开门日志)** |
 | ![用户编辑](deliverables/ui-walkthrough/05_user_edit.png) | ![记录查询](deliverables/ui-walkthrough/07_access_logs.png) |
 
-更多截图见 `deliverables/ui-walkthrough/`(含多因子验证方式选择弹窗);真机(板上实拍)走查见 `deliverables/lvgl9-c3-board-walkthrough/`。
+更多截图见 `deliverables/ui-walkthrough/`(含多因子验证方式选择弹窗);真机(板上实拍)走查截图在 `deliverables/lvgl9-c3-board-walkthrough/`(**本地层目录,不入公开仓**)。
 
 ## 核心成果与验证
 

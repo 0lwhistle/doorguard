@@ -1,11 +1,13 @@
 # RK3576 K7 人脸识别门禁系统 — 项目方案与执行手册
 
-> 更新:2026-09-23(LVGL9.5 迁移 C1/C2 完成,C3 过半)。本文档是项目的唯一事实来源(Single Source of Truth)。
-> 每次会话开工前先读本文档恢复上下文;完成阶段后更新"进度快照"。
+> 更新:2026-11-18(文档权威层落地后口径勘误)。本文档=**方案与里程碑总览,不再是唯一事实来源**——事实权威源分工见 `.agents/skills/door-guard-dev/references/AUTHORITY.md` 路由表(接口/配置键=代码;业务语义=references/spec-*.md;操作流程=docs/DEV_HANDBOOK;历史决策=DEVLOG+git log)。
+> 每次会话开工先恢复时间线(本地层 `docs/DEVLOG.md` tail;公开仓无此文件),再读本文档恢复方案上下文;完成阶段后更新"进度快照"。
 
 ---
 
 ## 一、项目快照(每次开工先看这里)
+
+> 2026-11-18 注:本节为立项期以来的**历史叙事混排**(⑤a-⑤h 修复史、旧行数/阈值口径),现行事实以 AUTHORITY 路由表指向的权威源与 DEVLOG 各条为准;整体瘦身为现状表另排任务。
 
 | 项 | 状态 |
 |---|---|
@@ -105,7 +107,7 @@ WSL pull 构建产物→WSL 提交产物)。 |
 
 - 人脸识别门禁:刷脸(1:N)+ 活体检测(单目 RGB,反欺骗模型;2026-10-25 拍板,原动作指令式弃用)→ 开锁
 - 5 寸触摸屏显示:摄像头实时预览 + 识别结果 + 动作引导动画/文字
-- 模块化预留:指纹模块(UART)、IC 读卡器(UART/SPI)后续接入,与人脸走同一认证抽象接口
+- 模块化:指纹模块(UART)**已接入**(services/verify/fingerprint,2026-10-01 板上全链跑通);IC 读卡器**已落地暂挂起**(iccard.enabled=0,硬件待查);与流程详见 DEV_HANDBOOK §8 与各自 README
 - 系统:**Buildroot 无桌面 Linux**(LVGL 直跑 DRM,无 X11/Wayland),开发期即产品形态
 
 ---
@@ -132,7 +134,7 @@ WSL pull 构建产物→WSL 提交产物)。 |
 ├─────────────────────────────────────────────────────┤
 │  模块层 modules/(注册进 holder)                        │
 │   camera  display  sqlite  net(net_info)             │
-│   touch/as608/mfrc522 随硬件接入                       │
+│   touch/as608 已接入,mfrc522 随硬件接入                │
 ├─────────────────────────────────────────────────────┤
 │  驱动层 drv/(总线级薄封装,可替换,sim 同接口)            │
 │   uart  gpio  npu(i2c/spi/pwm 随硬件接入)              │
@@ -167,7 +169,7 @@ IMX415 ─MIPI→ RKISP(rkaiq 3A)→ NV12 帧
 
 ### 3.3 关键设计原则
 
-1. **认证抽象**:`auth_provider` 统一接口(verify/enroll/abolish),face/finger/card 各自实现,access_service 只面向接口 —— 后接指纹和读卡器零改动。
+1. **认证编排(2026-11-18 勘误)**:旧 `auth_provider` 统一接口提案已废(未实施);现行=事件总线 + `services/access/auth_fsm` 注入式状态机,face/fingerprint/ic/password 各 provider 在 verify 服务内注册,access 只面向 FSM——后接新认证方式零改动。
 2. **帧只拷一次**:ISP→RGA→NPU/RGA→DRM 全程零拷贝(drmPrime/dma-buf),CPU 不碰像素。
 3. **UI 与视觉解耦**:UI 订阅事件总线,不直接调视觉模块;视觉不依赖 UI。
 4. **模块独立成静态库**,main 只做装配,便于单元测试与替换。
@@ -180,9 +182,9 @@ door-guard/
 ├── ui/             LVGL 界面(bridge/presenters/pages/widgets/navigator/lang/font)
 ├── services/       access alarm capture config enroll mdns mqtt ntp ota
 │                   sysctl verify vision web(13 个;liveness 已删)
-├── modules/        camera display sqlite net(net_info);touch/as608/mfrc522 待接
+├── modules/        camera display sqlite net(net_info+netcore);touch/as608 已接,mfrc522 待接
 ├── drv/            uart gpio **npu**(rknn 薄封装 npu_model + RGA letterbox npu_pre)
-├── components/     tasker event_bus holder logger registry(M2 已落)
+├── components/     tasker event_bus holder logger timeutil registry(M2 已落;timeutil 2026-09-28 收编,共 6 组件)
 ├── proto/          events/types/valid/err(跨层契约,唯一横切层)
 ├── third_party/    lvgl9、lvgl_lib、mongoose 7.23、stb、cjson、
 │                   Silent-Face-Anti-Spoofing、AS608 资料(清单以实际目录为准)
@@ -269,32 +271,32 @@ door-guard/
 - **能力边界(明确写入产品需求)**:可防静态照片、基础屏幕重放(随机动作+限时);**不能**防高清屏定向重放、高仿真头模。若量产安全等级要求高,升级路径:IR 双目模组(rgb+ir 交叉活体),架构上活体=识别管线内反欺骗模型(face_antispoof),升级=换模型/加模组(2026-11-14 权威层销账:liveness_service 接口提法随 cf9ca5c 删除失效;本段能力边界仍为现行产品需求,其余小节为弃用存档)。
 - 防体验作弊:动作顺序随机、限时、动作间强校验(未按指令做即失败)。
 
-### 4.5 指纹模块(预留接口)
+### 4.5 指纹模块(已接入,2026-10-01 板上全链跑通)
 
-- 选型建议:UART 光学模组(AS608/ZFM 系,3.3V TTL,协议公开简单),识别在模组内完成,不占 NPU。
-- 封装 `finger_provider: enroll(id)/verify()->(id,score)`;与人脸绑定同一 user_id。
+- 实装:AS608 光学模组(UART,3.3V TTL),识别在模组内完成不占 NPU;落位 `services/verify/fingerprint/`(协议契约 docs/tech/FINGERPRINT_PROTOCOL.md 与 AS608 笔记均在本地层 docs/tech/)。
+- 板上数量一致性策略已固化(0/N 清模组、N/0 清板端、读失败绝不折算 0,`fp_sync.c` 纯判定+测试);克隆模组上传/下载为空实现,**回灌永久不可行**;WAK 只当唤醒用,「手指在不在」的事实源=GetImage 确认码(2026-10-15 定性)。
 
-### 4.6 IC 读卡器(预留接口)
+### 4.6 IC 读卡器(已落地,暂挂起待硬件)
 
-- 选型建议:UART 串口读头(直接吐 UID,最省事)或 RC522(SPI,自写驱动);M1 卡读 UID+扇区校验可选。
-- 封装 `card_provider: poll()->card_id`;卡号↔user_id 映射入库。
+- 实装:RC522(SPI,自写驱动),落位 `drv/iccard` + `services/verify/ic`;协议契约=docs/tech/ICCARD_PROTOCOL.md(本地层)。
+- **挂起中(2026-10-14 起)**:`iccard.enabled=0` + S60 flag 门控;硬件待查=线缆边际接触(判据 tools/rc522_wr_test ≥45/50);恢复三步=配置置 true+touch flag+推板重启(见 DEV_HANDBOOK §8 与记忆)。
 
 ### 4.7 门控与存储
 
 - 开锁:sysfs GPIO(`drv/gpio/gpio_hal`)+ `modules/relay` 包装(`relay_door_pulse`/`relay_reset`/`relay_level`,脉冲时长可配);门磁反馈输入可选。
-- 记录:SQLite(`BR2_PACKAGE_SQLITE=y` 已启用)存开门日志/告警/特征库;RTC + chrony(NTP)校时。
+- 记录:SQLite(`BR2_PACKAGE_SQLITE=y` 已启用)存开门日志/告警/特征库;校时=**应用内 SNTP**(rootfs 常驻 chrony 已停用;板 RTC 无电池,校时结论见 DEV_HANDBOOK §2)
 
 ### 4.8 网络与联网(门禁必需,已核实)
 
 - **以太网**:RK3576 GMAC 内核原生支持;DHCP 由 dhcpcd(`network.config` 已启用)
 - **WiFi**:wifibt 片段已启用,作备选链路
-- **时间同步**:chrony(NTP)——门禁日志强依赖正确时间,部署时必配 NTP 服务器
+- **时间同步**:**应用内 SNTP**——门禁日志强依赖正确时间,rootfs 常驻 chrony 已停用(spec-network §3 拍板),部署时在配置指定 NTP 服务器
 - **远程运维**:dropbear(SSH)+ SFTP(`network.config` 已启用)
-- **管理面规划**:首版以 SSH + 配置文件交付;二期加局域网 Web 管理接口(人脸/卡/指纹库管理、日志查询)
+- **管理面**:局域网 Web 管理接口**已上线**(2026-09-27:用户 CRUD/人脸/指纹/密码/IC 管理、日志查询、OTA 槽;规格见 references/spec-network.md);SSH+配置文件为运维通道
 
 ---
 
-## 五、固件编译计划(下次会话执行)
+## 五、固件编译计划(2026-09 立项期存档——B1-B9 已执行、B7 已被自组 rknn 取代;现行编译命令以 DEV_HANDBOOK §6 为准)
 
 > 编译机 = 本 VM。SDK 顶层 `./build.sh`;板级 defconfig 位于
 > `device/rockchip/.chips/rk3576/rockchip_rk3576_kickpi_k7_buildroot_defconfig`
@@ -323,6 +325,8 @@ door-guard/
 
 ## 六、工程纪律(本机踩坑固化)
 
+> 大文件双读/流式传输/内存排查细则的权威源=DEV_HANDBOOK §6-§7;本节为速览,冲突时以手册为准。
+
 1. **大文件双读校验**:任何 >1GB 的产物(镜像/压缩包),`md5sum` 连读两次一致才算有效——本机 USB 时代曾 5 读 5 值,烧坏镜像排查代价极高。
 2. **大文件传输用流式**(tar 管道/直接解压),不做"先拷包再解压"的中转。
 3. **若再出现文件异常**:第一时间跑 `sudo memtester 4G 1` 排查内存(此疑点未最终排除),再查盘。
@@ -337,7 +341,7 @@ door-guard/
 | 风险 | 等级 | 对策 |
 |---|---|---|
 | Buildroot 缺包/配置遗漏导致迭代重编 | 中(已接受) | doorGuard defconfig 一次配全常用工具;缺啥补 defconfig 重编 rootfs;复杂探索性工作放 PC 交叉环境 |
-| 单目 RGB 活体防不住高级重放 | 中(产品定位相关) | 已声明边界;预留 IR 双目升级路径,liveness 接口不变 |
+| 单目 RGB 活体防不住高级重放 | 中(产品定位相关) | 已声明边界;升级路径=IR 双目模组或换反欺骗模型(活体=识别管线内 face_antispoof,见 §4.4 修订注) |
 | i8 量化后识别阈值漂移 | 中 | 量化后必做 ROC 标定,阈值进配置文件 |
 | 编译机内存 7.2G 偏小 | 低 | -j6;必要时加 swap |
 | 触摸/屏幕排线硬件差异 | 低 | dtsi 与官方屏一一对应;不亮先查排线 |

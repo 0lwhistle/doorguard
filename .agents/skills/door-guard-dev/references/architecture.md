@@ -9,10 +9,9 @@ UI 层        ui/ 页面与弹窗(LVGL;PC 模拟器 + 板上双构建)
              只发事件/收事件,不做业务决策
 ──────────────────────────────────────────────────
 服务层       services/(注册进 registry,已落地;线程归属表见 proposal §3.3)
-             capture   取流:rkaiq 3A + V4L2/RKADK → NV12 环形缓冲(dma-buf)
+             capture   取流:rkaiq 3A + V4L2(MMAP)→ NV12 环形缓冲(dma-buf;自写取流,不经 RKADK)
              vision    检测/质量闸门/特征/1:N 检索、1:1 比对(后端可插拔契约)
-             liveness  动作活体状态机(认证管线强制阶段)
-             verify    认证编排 + provider:face/fingerprint/ic/password
+             verify    认证编排 + provider:face/fingerprint/ic/password(活体=识别路径反欺骗模型 face_antispoof,见 PROJECT_PLAN §4.4)
              access    门控决策、开门、日志落库(验证事件的唯一出口)
              enroll    用户/特征录入管理(调用 storage 与算法查重)
              config    配置服务;web/ota/mdns/ntp/mqtt 网络服务族(基于 modules/net)
@@ -40,7 +39,7 @@ UI 层        ui/ 页面与弹窗(LVGL;PC 模拟器 + 板上双构建)
   UI→enroll 用户生命周期(A1 收口)、UI 设置页→config 同步读写(A2 拍板
   方案 B)、enroll→vision 特征库增删(A3 拍板方案 A,2026-09-28);另有
   UI 出站动作一律经 ui/bridge(C4 收口,页面零 EVENT_BUS_PUBLISH))
-- 事件命名:`EV_<域>_<动作>`(如 `EV_AUTH_RESULT`、`EV_ENROLL_DONE`、`EV_FINGER_STATUS`;示例只举活契约事件,删事件见 events.h 注记)
+- 事件命名:`EV_<域>_<动作>`(如 `EV_AUTH_RESULT`、`EV_ENROLL_RESULT`、`EV_FINGER_STATUS`;示例只举活契约事件,删事件见 events.h 注记)
 - 新建模块步骤:本文档登记职责 → proto/ 定义接口与事件 → 实现 → 测试 → README + 使用示例
 - **netcore 登记(2026-09-22)**:modules/net/netcore,mongoose 7.23 胶水层,零业务;
   单 loop 线程独占全部网络 I/O(web 上位机/OTA 收包/mDNS/SNTP);对外仅
@@ -90,7 +89,7 @@ FreeRTOS 依赖被隔离在 port 层,移植 = 实现对应 pthread port,不动�
 
 ## 4. 目录索引(door-guard/,v2 迁移后随落地滚动更新)
 
-`app/` 装配启动 · `ui/` 界面 · `services/{capture,vision,liveness,verify,access,enroll,config,web,ota,mdns,ntp,mqtt,sysctl}` ·
+`app/` 装配启动 · `ui/` 界面 · `services/{capture,vision,verify,access,enroll,config,web,ota,mdns,ntp,mqtt,sysctl}` ·
 `modules/{camera,display,sqlite,jpeg,net(net_info+netcore),sysctl,relay(开门继电器,2026-09-28 A4),audio(语音播报,2026-10-04)}` · `drv/{uart,gpio,iccard,npu}` ·
 `components/{tasker,event_bus,holder,logger,timeutil,registry}` · `proto/` 消息与事件契约 ·
 `configs/default.json` · `tests/` · `tools/` · `third_party/`

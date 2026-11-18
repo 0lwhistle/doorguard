@@ -3,7 +3,7 @@
 | 文件 | 职责 |
 |---|---|
 | `net_info.c/h` | 网口只读信息:主网口 IPv4/接口名/在线状态;UI 网络图标与 web 共用 |
-| `net_cfg.c/h` | **网络配置应用**(2026-09-27):静态 IP/掩码/网关 + DHCP 切换,与 dhcpcd 协调;开机按 device_config net_* 恢复静态 |
+| `net_cfg.c/h` | **网络配置应用**(2026-09-27):静态 IP/掩码/网关 + DHCP 切换,与 dhcpcd 协调;开机按 cfg `network.*` 恢复(仅 net_mode=static 时动作,出厂即 DHCP) |
 | `netcore.c/h` | **统一网络事件循环**(mongoose 7.23 胶水层,零业务) |
 
 ## netcore 是什么

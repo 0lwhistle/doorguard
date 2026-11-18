@@ -226,18 +226,17 @@ door-guard/ui/
 ├── theme.h            色值/字号/间距 token
 ├── i18n.h/.c          _() 与语言表加载(json)
 ├── lang/              zh-CN.json en-US.json
-├── widgets/           dg_btn / dg_popup / dg_kbd(数字键盘)/ dg_list
-├── page_home.c        主页面(含验证状态机,逻辑见 spec-auth-business.md)
-├── page_standby.c     待机页
-├── page_menu.c        菜单主页
-├── page_users.c       用户管理
-├── page_device.c      设备管理
-├── page_access_set.c  门禁设置
-└── page_logs.c        记录查询
+├── bridge/            UI↔服务动作出站唯一通道(页面零 EVENT_BUS_PUBLISH)
+├── navigator/         页面管理器(register/dispatch;页面上限=NAV_MAX_PAGES 16)
+├── presenters/        每页一个 presenter:注册页面、on_evt 渲染编排、弹窗文案、导航决策(逻辑见 spec-auth-business.md)
+├── pages/             纯视图:建控件+setter;点击转 bridge 动作(page_home/page_standby/page_menu/…共 16 页)
+├── widgets/           dg_btn / dg_popup / dg_kbd(数字键盘)/ dg_list / dg_avatar / dg_edit_nav / dg_preview / dg_font_clock
+├── font/              gen.sh 生成的中文字形库(改语言表后必跑,见 §3)
+└── port.c/.h          LVGL 移植层
 ```
 
-- 页面间跳转走页面管理器(`ui/page_mgr.h`:push/pop),事件经 event_bus 发布订阅
-- UI 层**不做业务决策**:按钮事件发事件给 access/enroll 服务,结果经事件回 UI 渲染
+- 页面间跳转走页面管理器(`ui/navigator/`:register/dispatch),事件经 event_bus 发布订阅
+- UI 层**不做业务决策**(决策全在 access FSM):按钮事件经 bridge 发事件给 access/enroll 服务,结果经事件回 UI 渲染
 - PC 模拟器构建:`cmake -DDG_SIM=ON`(SDL2 窗口 720×1280),与板上共用全部 ui/ 代码;
   模拟器专用输入源(视频/图片循环)由 camera 模块(`modules/camera`)的 sim 后端提供
 
