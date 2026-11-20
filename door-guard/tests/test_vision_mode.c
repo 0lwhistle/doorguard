@@ -113,7 +113,7 @@ int main(void)
     u.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
     memcpy(u.face_vec, "dummy-face-10001", 16);
     u.face_vec_len = 16;
-    DG_CHECK(db_user_set_password(&u, "1234") == DG_OK);
+    DG_CHECK(db_user_set_password(&u, "123456") == DG_OK);
     DG_CHECK(db_user_add(&u) == DG_OK);
 
     user_rec_t adm;
@@ -124,7 +124,7 @@ int main(void)
     adm.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;   /* 下面要走 1:1 人脸子步 */
     memcpy(adm.face_vec, "dummy-face-00001", 16);
     adm.face_vec_len = 16;
-    DG_CHECK(db_user_set_password(&adm, "8888") == DG_OK);
+    DG_CHECK(db_user_set_password(&adm, "888888") == DG_OK);
     DG_CHECK(db_user_add(&adm) == DG_OK);
 
     /* 普通态:1:N(先让 access 心跳把模式刷回基线) */

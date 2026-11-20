@@ -77,9 +77,9 @@ if [ "${SKIP_FRONTEND_UNIT:-0}" = "1" ]; then
     echo "(跳过:已设 SKIP_FRONTEND_UNIT=1)"
 elif [ -d services/web/frontend/node_modules ]; then
     if (cd services/web/frontend && npx vitest run --silent > /tmp/dg_webtest/vitest.out 2>&1); then
-        chk "前端 44 项单测通过" true
+        chk "前端 59 项单测通过" true
     else
-        chk "前端 44 项单测通过" false
+        chk "前端 59 项单测通过" false
         tail -25 /tmp/dg_webtest/vitest.out
     fi
 else

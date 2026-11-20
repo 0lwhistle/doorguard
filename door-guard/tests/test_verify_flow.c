@@ -245,7 +245,7 @@ int main(void)
     DG_CHECK(vision_backend_start(false) == DG_OK);
     DG_CHECK(access_service_start() == DG_OK);
 
-    add_user("10001", "张三", DG_ROLE_NORMAL, DG_AUTH_FACE | DG_AUTH_PWD, "1234");
+    add_user("10001", "张三", DG_ROLE_NORMAL, DG_AUTH_FACE | DG_AUTH_PWD, "123456");
 
     /* ---- 1. 空库(无管理员)点菜单:免认证进菜单 + 提示先建管理员 ---- */
     memset(&s_rec, 0, sizeof(s_rec));
@@ -280,7 +280,7 @@ int main(void)
     DG_CHECK(!strcmp(r.input_pwd_uid, "10001"));
 
     /* ---- 5. 密码正确 → 结果弹窗(成功)+ 开门 + 用户名 ---- */
-    input_pwd("10001", "1234");
+    input_pwd("10001", "123456");
     wait_cnt(f_result, 1, 2000);
     s_get(&r, NULL);
     DG_CHECK(r.result == 1 && r.result_ok);
@@ -305,7 +305,7 @@ int main(void)
     sleep(4);
 
     /* ---- 7. 有管理员后:点菜单要管理员认证;管理员验证通过进菜单 ---- */
-    add_user("00001", "管理员A", DG_ROLE_ADMIN, DG_AUTH_PWD, "8888");
+    add_user("00001", "管理员A", DG_ROLE_ADMIN, DG_AUTH_PWD, "888888");
     memset(&s_rec, 0, sizeof(s_rec));
     btn(DG_BTN_MENU);
     for (int i = 0; i < 400; i += 5) {     /* 等 HINT(管理员认证) */
@@ -323,7 +323,7 @@ int main(void)
     wait_cnt(f_pick, 1, 2000);
     pick(DG_METHOD_PWD);
     wait_cnt(f_pwd, 1, 2000);
-    input_pwd("00001", "8888");
+    input_pwd("00001", "888888");
     wait_cnt(f_menu, 1, 2000);
     s_get(&r, NULL);
     DG_CHECK(r.goto_menu == 1);            /* 管理员 → 进菜单 */
@@ -347,7 +347,7 @@ int main(void)
     wait_cnt(f_pick, 1, 2000);
     pick(DG_METHOD_PWD);
     wait_cnt(f_pwd, 1, 2000);
-    input_pwd("10001", "1234");            /* 密码正确,但不是管理员 */
+    input_pwd("10001", "123456");            /* 密码正确,但不是管理员 */
     wait_cnt(f_result, 1, 2000);
     s_get(&r, NULL);
     DG_CHECK(r.result == 1 && !r.result_ok);
@@ -368,7 +368,7 @@ int main(void)
     wait_cnt(f_pick, 1, 2000);
     pick(DG_METHOD_PWD);
     wait_cnt(f_pwd, 1, 2000);
-    input_pwd("00001", "8888");
+    input_pwd("00001", "888888");
     wait_cnt(f_menu, 1, 2000);
     const int menu_n = s_get(NULL, f_menu);
     DG_CHECK(menu_n == 1 && s_get(NULL, f_home) == 0);   /* 已在菜单里 */

@@ -96,7 +96,8 @@ static void test_layering(void)
         "  \"ui\": { \"language\": \"en-US\", \"standby_timeout_s\": 45 },"
         "  \"network\": { \"web_port\": 8081,"
         "                \"ntp_server\": \"pool.ntp.org\" },"
-        "  \"face\": { \"face_dup_threshold\": 0.85 } }") == 0);
+        "  \"face\": { \"face_dup_threshold\": 0.85,"
+        "              \"min_face_px\": 120 } }") == 0);
     DG_CHECK(write_file(s_cur,
         "{ \"access\": { \"door_open_ms\": 2000 } }") == 0);
     DG_CHECK(cfg_load(s_def, s_cur) == DG_OK);
@@ -107,6 +108,8 @@ static void test_layering(void)
     DG_CHECK(strcmp(cfg_get()->ntp_server, "pool.ntp.org") == 0);
     DG_CHECK(cfg_get()->face_dup_threshold > 0.849
              && cfg_get()->face_dup_threshold < 0.851);
+    /* min_face_px 是 CK_INT:此前 CK_INT 分派缺键静默失效恒 80(2026-11-21 修) */
+    DG_CHECK(cfg_get()->face_min_px == 120);
     /* cur 没有的键回落模板;模板也没有的键回落内置 */
     DG_CHECK(cfg_get()->pwd_fail_lock_n == 5);
 }

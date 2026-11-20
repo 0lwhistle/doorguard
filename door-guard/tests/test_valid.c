@@ -47,15 +47,17 @@ static void t_name(void)
 
 static void t_pwd(void)
 {
-    printf("[V3] password:4~31 位可见 ASCII、无空格\n");
-    DG_CHECK(dg_valid_pwd("1234") == DG_OK);
-    DG_CHECK(dg_valid_pwd("pwd1") == DG_OK);
+    printf("[V3] password:6~31 位可见 ASCII、无空格(2026-11-21 下限 4→6,存量登录不受影响)\n");
+    DG_CHECK(dg_valid_pwd("123456") == DG_OK);
+    DG_CHECK(dg_valid_pwd("pwd123") == DG_OK);
     DG_CHECK(dg_valid_pwd("Abc123!@#") == DG_OK);
     DG_CHECK(dg_valid_pwd("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == DG_OK); /* 31 位 */
 
     DG_CHECK(dg_valid_pwd(NULL) == DG_ERR_BAD_PWD);
     DG_CHECK(dg_valid_pwd("") == DG_ERR_BAD_PWD);
     DG_CHECK(dg_valid_pwd("123") == DG_ERR_BAD_PWD);          /* 太短 */
+    DG_CHECK(dg_valid_pwd("1234") == DG_ERR_BAD_PWD);         /* 旧下限 4:现拒绝 */
+    DG_CHECK(dg_valid_pwd("pwd1") == DG_ERR_BAD_PWD);
     DG_CHECK(dg_valid_pwd("pass word") == DG_ERR_BAD_PWD);    /* 空格 */
     DG_CHECK(dg_valid_pwd("密码1234") == DG_ERR_BAD_PWD);      /* 中文(键盘打不出) */
     DG_CHECK(dg_valid_pwd("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == DG_ERR_BAD_PWD);

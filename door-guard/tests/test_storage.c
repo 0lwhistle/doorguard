@@ -81,7 +81,7 @@ static void test_add(void)
     DG_CHECK(storage_set_feature_cmp(cmp_bytes, cmp_bytes, NULL) == DG_OK);
 
     /* 正常(方式位不变式:无凭据的 FACE 位在建号时被拒,默认只带密码位) */
-    user_rec_t u1 = make_user("10001", "张三", "pwd1");
+    user_rec_t u1 = make_user("10001", "张三", "pwd111");
     u1.role = DG_ROLE_ADMIN;
     u1.auth_flags = DG_AUTH_PWD;
     DG_CHECK(db_user_add(&u1) == DG_OK);
@@ -100,33 +100,33 @@ static void test_add(void)
     DG_CHECK(db_user_count_role(DG_ROLE_BLACKLIST, &n) == DG_OK && n == 0);
 
     /* user_id 重复 */
-    user_rec_t dup = make_user("10001", "别人", "pwd2");
+    user_rec_t dup = make_user("10001", "别人", "pwd222");
     DG_CHECK(db_user_add(&dup) == DG_ERR_DUP_UID);
 
     /* IC 重复 */
-    user_rec_t ic1 = make_user("10002", "李四", "pwd3");
+    user_rec_t ic1 = make_user("10002", "李四", "pwd333");
     snprintf(ic1.ic_card, sizeof(ic1.ic_card), "0134567890");
     DG_CHECK(db_user_add(&ic1) == DG_OK);
-    user_rec_t ic2 = make_user("10003", "王五", "pwd4");
+    user_rec_t ic2 = make_user("10003", "王五", "pwd444");
     snprintf(ic2.ic_card, sizeof(ic2.ic_card), "0134567890");
     DG_CHECK(db_user_add(&ic2) == DG_ERR_DUP_IC);
 
     /* 人脸查重命中 */
-    user_rec_t f1 = make_user("20001", "甲", "pwdf1");
+    user_rec_t f1 = make_user("20001", "甲", "pwdf11");
     memset(f1.face_vec, 0xAA, 64);
     f1.face_vec_len = 64;
     DG_CHECK(db_user_add(&f1) == DG_OK);
-    user_rec_t f2 = make_user("20002", "乙", "pwdf2");
+    user_rec_t f2 = make_user("20002", "乙", "pwdf22");
     memset(f2.face_vec, 0xAA, 64);              /* 同特征(加密后密文不同,靠解密比较) */
     f2.face_vec_len = 64;
     DG_CHECK(db_user_add(&f2) == DG_ERR_DUP_FACE);
 
     /* 指纹查重同 */
-    user_rec_t g1 = make_user("30001", "丙", "pwfg1");
+    user_rec_t g1 = make_user("30001", "丙", "pwfg11");
     memset(g1.finger_vec, 0x55, 32);
     g1.finger_vec_len = 32;
     DG_CHECK(db_user_add(&g1) == DG_OK);
-    user_rec_t g2 = make_user("30002", "丁", "pwfg2");
+    user_rec_t g2 = make_user("30002", "丁", "pwfg22");
     memset(g2.finger_vec, 0x55, 32);
     g2.finger_vec_len = 32;
     DG_CHECK(db_user_add(&g2) == DG_ERR_DUP_FINGER);
@@ -277,15 +277,15 @@ static void test_field_valid(void)
     fresh_setup();
 
     /* 非法 ID */
-    user_rec_t u = make_user("12", "张三", "1234");          /* 太短 */
+    user_rec_t u = make_user("12", "张三", "123456");          /* 太短 */
     DG_CHECK(db_user_add(&u) == DG_ERR_BAD_UID);
-    u = make_user("-abc", "张三", "1234");                    /* 首字符非字母数字 */
+    u = make_user("-abc", "张三", "123456");                    /* 首字符非字母数字 */
     DG_CHECK(db_user_add(&u) == DG_ERR_BAD_UID);
-    u = make_user("ab cd", "张三", "1234");                   /* 空格 */
+    u = make_user("ab cd", "张三", "123456");                   /* 空格 */
     DG_CHECK(db_user_add(&u) == DG_ERR_BAD_UID);
 
     /* 非法姓名 */
-    u = make_user("10001", " 张三", "1234");                  /* 前导空格 */
+    u = make_user("10001", " 张三", "123456");                  /* 前导空格 */
     DG_CHECK(db_user_add(&u) == DG_ERR_BAD_NAME);
 
     /* 非法密码(长度/字符集)在 set_password 就拦(故这里不经 make_user) */
@@ -647,7 +647,7 @@ static void test_avatar(void)
 {
     printf("[S8] avatar: set/get roundtrip, encrypted at rest, clear, oversize, cases\n");
     fresh_setup();
-    user_rec_t u = make_user("20001", "李四", "pwd1");
+    user_rec_t u = make_user("20001", "李四", "pwd111");
     DG_CHECK(db_user_add(&u) == DG_OK);
 
     /* 未录头条 = NOT_FOUND(调用方显示占位) */
@@ -727,13 +727,13 @@ static void test_user_list_ids(void)
     fresh_setup();
 
     user_rec_t u;
-    u = make_user("abc", "字母ID", "pwd1");
+    u = make_user("abc", "字母ID", "pwd111");
     DG_CHECK(db_user_add(&u) == DG_OK);
-    u = make_user("007", "前导零", "pwd2");
+    u = make_user("007", "前导零", "pwd222");
     DG_CHECK(db_user_add(&u) == DG_OK);
-    u = make_user("10001", "超两千", "pwd3");
+    u = make_user("10001", "超两千", "pwd333");
     DG_CHECK(db_user_add(&u) == DG_OK);
-    u = make_user("123", "普通数字", "pwd4");
+    u = make_user("123", "普通数字", "pwd444");
     DG_CHECK(db_user_add(&u) == DG_OK);
 
     char ids[8][DG_UID_LEN];
@@ -763,8 +763,8 @@ static void test_finger(void)
 {
     printf("[S9] fingerprints: add/dup-page/count/alloc/reverse/list/del/cascade\n");
     fresh_setup();
-    user_rec_t u1 = make_user("30001", "王五", "pwd1");
-    user_rec_t u2 = make_user("30002", "赵六", "pwd2");
+    user_rec_t u1 = make_user("30001", "王五", "pwd111");
+    user_rec_t u2 = make_user("30002", "赵六", "pwd222");
     DG_CHECK(db_user_add(&u1) == DG_OK);
     DG_CHECK(db_user_add(&u2) == DG_OK);
 
@@ -848,8 +848,8 @@ static void test_clear_all(void)
     printf("[S11] db_finger_clear_all(回收方式位)/ db_user_del_all\n");
     fresh_setup();
 
-    user_rec_t u1 = make_user("40001", "甲", "pwd1");   /* 密码有长度下限,别用短串 */
-    user_rec_t u2 = make_user("40002", "乙", "pwd2");
+    user_rec_t u1 = make_user("40001", "甲", "pwd111");   /* 密码有长度下限,别用短串 */
+    user_rec_t u2 = make_user("40002", "乙", "pwd222");
     u1.auth_flags = DG_AUTH_PWD;          /* db_user_add 按不变式只收有凭据的位 */
     u2.auth_flags = DG_AUTH_PWD;
     DG_CHECK(db_user_add(&u1) == DG_OK);

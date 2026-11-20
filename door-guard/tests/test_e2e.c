@@ -146,7 +146,7 @@ int main(void)
     snprintf(u.user_name, sizeof(u.user_name), "张三");
     u.role = DG_ROLE_NORMAL;
     u.auth_flags = DG_AUTH_PWD;
-    DG_CHECK(db_user_set_password(&u, "1234") == DG_OK);
+    DG_CHECK(db_user_set_password(&u, "123456") == DG_OK);
     DG_CHECK(db_user_add(&u) == DG_OK);
 
     /* ---- E2E-1 录入:请求 → 抓取 → **草稿就绪(不落库)** → commit → 库内可查
@@ -179,6 +179,7 @@ int main(void)
     snprintf(m.user_id, sizeof(m.user_id), "10001");
     snprintf(m.user_name, sizeof(m.user_name), "张三");
     m.role = DG_ROLE_NORMAL;
+    m.auth_flags = DG_AUTH_FACE;   /* FSM 查方式位(2026-11-21) */
     m.score_permille = 950;
     {
         fsm_event_data_t unused;                /* 占位说明:match 经总线投递 */
@@ -255,7 +256,7 @@ int main(void)
     memset(&in, 0, sizeof(in));
     in.kind = DG_INPUT_PWD;
     snprintf(in.uid, sizeof(in.uid), "10001");
-    snprintf(in.text, sizeof(in.text), "1234");
+    snprintf(in.text, sizeof(in.text), "123456");
     EVENT_BUS_PUBLISH(EV_UI_TEXT_INPUT, &in);
     wait_until(3000, &s_result_cnt, 4);
     DG_CHECK(s_results[3].result == DG_RESULT_PASS);

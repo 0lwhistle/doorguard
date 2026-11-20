@@ -161,7 +161,7 @@ int main(void)
     u.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
     u.face_vec_len = sizeof(feat);
     memcpy(u.face_vec, feat, sizeof(feat));
-    DG_CHECK(db_user_set_password(&u, "1234") == DG_OK);
+    DG_CHECK(db_user_set_password(&u, "123456") == DG_OK);
     DG_CHECK(db_user_add(&u) == DG_OK);
 
     user_rec_t dup;
@@ -172,7 +172,7 @@ int main(void)
     dup.auth_flags = DG_AUTH_FACE | DG_AUTH_PWD;
     dup.face_vec_len = sizeof(feat);            /* 同长 → mock_cmp 判重 */
     memcpy(dup.face_vec, feat, sizeof(feat));
-    DG_CHECK(db_user_set_password(&dup, "1234") == DG_OK);
+    DG_CHECK(db_user_set_password(&dup, "123456") == DG_OK);
     DG_CHECK(db_user_add(&dup) == DG_ERR_DUP_FACE);
 
     /* ---- 4. 口径校验:换 tag 重启 → 命中被屏蔽 ---- */

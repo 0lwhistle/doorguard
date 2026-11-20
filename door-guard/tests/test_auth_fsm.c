@@ -73,6 +73,8 @@ static ev_match_t mk_match(const char *uid, const char *name, int32_t role, bool
     snprintf(m.user_id, sizeof(m.user_id), "%s", uid);
     snprintf(m.user_name, sizeof(m.user_name), "%s", name);
     m.role = role;
+    /* 全方式开(2026-11-21 起 FSM 人脸 1:N 查 DG_AUTH_FACE,后端必填) */
+    m.auth_flags = DG_AUTH_FACE | DG_AUTH_FINGER | DG_AUTH_PWD | DG_AUTH_IC;
     m.score_permille = 950;
     return m;
 }
@@ -223,6 +225,24 @@ static void t01_normal_hit(void)
     /* 绿框动作存在 */
     const act_rec_t *fb = last_act(FSM_ACT_FACEBOX);
     DG_CHECK(fb && fb->d.facebox.state == DG_BOX_MATCHED);
+}
+
+/* ================= 1b 人脸方式位关闭 → 拒绝(2026-11-21 审查修复 M2) ==== */
+
+static void t01b_face_method_disabled(void)
+{
+    printf("[F01b] 命中但 FACE 方式位关→拒 reason=6 不开门\n");
+    fsm_reset();
+    face_detected();
+    ev_match_t m = mk_match("10001", "张三", DG_ROLE_NORMAL, true);
+    m.auth_flags &= ~(uint32_t)DG_AUTH_FACE;    /* 管理员关闭了人脸方式 */
+    handle_match(m);
+    DG_CHECK(s_fsm.state == ST_RESULT);
+    DG_CHECK(count_act(FSM_ACT_OPEN_DOOR) == 0);   /* 不得开门 */
+    const act_rec_t *log = last_act(FSM_ACT_WRITE_LOG);
+    DG_CHECK(log != NULL);
+    DG_CHECK(log->d.log.result == DG_RESULT_REJECT);
+    DG_CHECK(log->d.log.reason == DG_REASON_METHOD_DISABLED);
 }
 
 /* ================= 2 1.5s 未命中 ================= */
@@ -1104,6 +1124,7 @@ static void t16_vision_down(void)
 int main(void)
 {
     t01_normal_hit();
+    t01b_face_method_disabled();
     t02_match_timeout();
     t03_blacklist_hit();
     t03b_challenge_flow();
