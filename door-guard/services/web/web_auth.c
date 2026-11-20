@@ -135,10 +135,14 @@ int web_auth_verify(const char *user, const char *pwd)
     if (cred_load(cur, sizeof(cur), salt, expect, &def) != DG_OK)
         return DG_ERR_NOT_INIT;
 
-    /* 账号比对与口令比对都算"验证失败":对外统一措辞,不泄露账号是否存在 */
+    /* 账号比对与口令比对都算"验证失败":对外统一措辞,不泄露账号是否存在。
+     * 先新后旧双算(2026-11-21 审查修复:迭代 10k→100k,存量走 LEGACY 兜底) */
     if (strcmp(cur, user) != 0)
         return DG_ERR_WRONG_PASSWORD;
-    if (dg_pbkdf2_sha256(pwd, salt, sizeof(salt), DG_PBKDF2_ITERS, calc) != DG_OK)
+    if (dg_pbkdf2_sha256(pwd, salt, sizeof(salt), DG_PBKDF2_ITERS, calc) == DG_OK &&
+        dg_constant_time_cmp(calc, expect, HASH_LEN) == 0)
+        return DG_OK;
+    if (dg_pbkdf2_sha256(pwd, salt, sizeof(salt), DG_PBKDF2_ITERS_LEGACY, calc) != DG_OK)
         return DG_ERR_INTERNAL;
     return (dg_constant_time_cmp(calc, expect, HASH_LEN) == 0)
                ? DG_OK : DG_ERR_WRONG_PASSWORD;

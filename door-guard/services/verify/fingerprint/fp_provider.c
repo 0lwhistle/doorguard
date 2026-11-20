@@ -1037,9 +1037,13 @@ static void run_sync_check(void)
     case FP_SYNC_MISMATCH:
         DG_LOGW(TAG, "指纹数量出错:模组 %u / 板端 %u,仅提示不动手", n_mod, n_db);
         fp_sync_push_notice(FP_NOTICE_MISMATCH);
+        /* P3(2026-11-21 审查):一次性弹窗管理员不在场即丢,持久化到
+         * device_config 供 /api/device 常查;数量恢复一致时自然清除 */
+        db_config_set("fp_mismatch", "1");
         break;
     default:
         DG_LOGI(TAG, "指纹数量一致:模组 %u / 板端 %u", n_mod, n_db);
+        db_config_set("fp_mismatch", "0");
         break;
     }
 

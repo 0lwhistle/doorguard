@@ -18,8 +18,11 @@ extern "C" {
 #endif
 
 /** PBKDF2 迭代次数:spec-database §3 下限即 spec 值;非业务参数不进配置文件,
- *  防误配置削弱安全基线 */
-#define DG_PBKDF2_ITERS 10000u
+ *  防误配置削弱安全基线。2026-11-21 审查修复:10k→100k(OWASP 现行量级),
+ *  存量 10k 哈希验证走 DG_PBKDF2_ITERS_LEGACY 兜底(先新后旧双算),
+ *  随用户改密自然收敛到 100k,无格式变化 */
+#define DG_PBKDF2_ITERS 100000u
+#define DG_PBKDF2_ITERS_LEGACY 10000u
 
 /** 初始化:加载或首次生成设备密钥(文件 0600;父目录须已 0700)。
  *  key 文件存在但尺寸非 32B 视为损坏,返回 DG_ERR_IO(不静默重建——重建会使

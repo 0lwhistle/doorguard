@@ -14,7 +14,9 @@
 #define DG_UID_MIN_LEN  3
 #define DG_UID_MAX_LEN  (DG_UID_LEN - 1)     /* 31:留 '\0' */
 #define DG_NAME_MAX_LEN (DG_NAME_LEN - 1)    /* 63 */
-#define DG_PWD_MIN_LEN  4
+/* 2026-11-21 审查修复:4→6(OWASP 弱口令基线;仅约束新增/改密——登录路径
+ * 直查哈希不走本校验,存量 4~5 位口令登录不受影响,改密时再生效) */
+#define DG_PWD_MIN_LEN  6
 #define DG_PWD_LIMIT    (DG_PWD_MAX_LEN - 1) /* 31:明文输入上限见 types.h */
 
 static bool is_uid_char(unsigned char c)

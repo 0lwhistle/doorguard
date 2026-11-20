@@ -275,9 +275,13 @@ static void *door_pulse_thread(void *arg)
         s_relay_fault = false;
         publish_relay_state(false);
     }
-    ev_door_state_t ev = { .open = true };
-    EVENT_BUS_PUBLISH(EV_AUTH_DOOR_OPEN, &ev);
-    DG_LOGI(TAG, "开门 %ums", ms);
+    /* 仅在门真开时发布开门事件:失败时照发会让语音播报"门已开"与事实相反
+     * (2026-11-21 审查修复;失败面客反馈=主页"门锁异常"提示+失败日志) */
+    if (rc == DG_OK) {
+        ev_door_state_t ev = { .open = true };
+        EVENT_BUS_PUBLISH(EV_AUTH_DOOR_OPEN, &ev);
+        DG_LOGI(TAG, "开门 %ums", ms);
+    }
     s_pulse_busy = false;
     return NULL;
 }
@@ -583,6 +587,14 @@ static int on_btn(const event_t *e, void *ud)
             fsm_event_data_t d;
             memset(&d, 0, sizeof(d));
             d.admin_count = (int32_t)admins;
+            if (admins == 0) {
+                /* P1(2026-11-21 审查):admins==0 不再一律免认证——
+                 * 「清所有用户」后的设备走 web 通道重建(had_admin 已置位);
+                 * 仅真首启(从未建过管理员)保留免认证进菜单 */
+                char had[8] = "";
+                if (db_config_get("had_admin", had, sizeof(had)) == DG_OK)
+                    d.admin_count = -1;     /* 有过管理员:保守要求认证 */
+            }
             fsm_feed(FSM_EV_ADMIN_COUNT, &d);
         } else {
             DG_LOGW(TAG, "管理员人数查询失败,菜单入口按需认证处理");
@@ -672,9 +684,14 @@ static int on_access_tick(const event_t *e, void *ud)
 {
     (void)e;
     (void)ud;
-    /* 超时阈值每次 tick 从配置快照刷新:设备管理页改完即生效,不必重启 */
+    /* 超时阈值每次 tick 从配置快照刷新:设备管理页改完即生效,不必重启
+     * (2026-11-21 审查修复:door_open_ms/pwd_fail_lock_* 此前只在 init 灌入,
+     * 改完须重启才生效) */
     s_fsm.standby_timeout_s = cfg_get()->standby_timeout_s;
     s_fsm.menu_timeout_s = cfg_get()->menu_timeout_s;
+    s_fsm.door_open_ms = cfg_get()->door_open_ms;
+    s_fsm.pwd_fail_lock_n = cfg_get()->pwd_fail_lock_n;
+    s_fsm.pwd_fail_lock_s = cfg_get()->pwd_fail_lock_s;
     fsm_feed(FSM_EV_TICK, NULL);
     return 0;
 }

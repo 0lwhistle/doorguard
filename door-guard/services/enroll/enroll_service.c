@@ -327,7 +327,12 @@ int enroll_service_user_save(const char *user_id, const char *name,
     const int prc = db_user_set_password(&rec, pwd);
     if (prc != DG_OK)
         return prc;
-    return db_user_add(&rec);
+    const int arc = db_user_add(&rec);
+    /* P1(2026-11-21 审查):记录"曾有过管理员"。device_config 幸存于
+     * 「清所有用户」,使清空后的设备不再免认证开放管理面 */
+    if (arc == DG_OK && role == DG_ROLE_ADMIN)
+        db_config_set("had_admin", "1");
+    return arc;
 }
 
 int enroll_service_user_save_ex(const char *user_id, const char *name,
@@ -366,7 +371,10 @@ int enroll_service_user_save_ex(const char *user_id, const char *name,
     const int prc = db_user_set_password(&rec, pwd);
     if (prc != DG_OK)
         return prc;
-    return db_user_add(&rec);
+    const int arc = db_user_add(&rec);
+    if (arc == DG_OK && role == DG_ROLE_ADMIN)
+        db_config_set("had_admin", "1");     /* 同上:P1 had_admin 置位 */
+    return arc;
 }
 
 /* ---- web 静态图人脸录入(2026-10-04;编排见 enroll_service.h) ---- */

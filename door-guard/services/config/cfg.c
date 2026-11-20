@@ -60,7 +60,7 @@ static const cfg_meta_t META[] = {
     { "brightness",           "ui.brightness",            CK_INT,   10,   100 },
     { "language",             "ui.language",              CK_STR,    0,    15 },
     { "ntp_server",           "network.ntp_server",       CK_STR,    0,    63 },
-    { "web_port",             "network.web_port",         CK_INT, 1024, 65535 },
+    { "web_port",             "network.web_port",         CK_INT, 1, 65535 },
     { "ota_url",              "network.ota_url",          CK_STR,    0,   127 },
     { "ota_auto_update",      "network.ota_auto_update",  CK_INT,    0,     1 },
     { "device_name",          "device.name",              CK_STR,    0,    31 },
@@ -324,6 +324,7 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "lost_hold_ms"))         cur = c->face_lost_hold_ms;
         else if (!strcmp(m->key, "web_port"))             cur = c->web_port;
         else if (!strcmp(m->key, "ota_auto_update"))      cur = c->ota_auto_update;
+        else if (!strcmp(m->key, "min_face_px"))          cur = (int)c->face_min_px;
         else return;
         v = clamp_int(v, m->lo, m->hi, cur, m->key);
         if (!strcmp(m->key, "door_open_ms"))              c->door_open_ms = v;
@@ -335,14 +336,13 @@ static void table_field_set(dg_cfg_t *c, const cfg_meta_t *m, const cJSON *item)
         else if (!strcmp(m->key, "lost_hold_ms"))         c->face_lost_hold_ms = v;
         else if (!strcmp(m->key, "web_port"))             c->web_port = v;
         else if (!strcmp(m->key, "ota_auto_update"))      c->ota_auto_update = v;
+        else if (!strcmp(m->key, "min_face_px"))          c->face_min_px = (int32_t)v;
     } else if (m->kind == CK_DBL) {
         if (!cJSON_IsNumber(item))
             return;
         double v = item->valuedouble;
         if (!strcmp(m->key, "face_dup_threshold"))
             c->face_dup_threshold = clamp_dbl(v, m->lo, m->hi, c->face_dup_threshold, m->key);
-        if (!strcmp(m->key, "min_face_px"))
-            c->face_min_px = (int32_t)clamp_dbl(v, m->lo, m->hi, c->face_min_px, m->key);
         else if (!strcmp(m->key, "blur_min"))
             c->face_blur_min = clamp_dbl(v, m->lo, m->hi, c->face_blur_min, m->key);
         else if (!strcmp(m->key, "det_score_min"))

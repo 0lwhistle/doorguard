@@ -62,7 +62,10 @@ static void on_user_clear(lv_event_t *e)
 static void on_all_clear(lv_event_t *e)
 {
     (void)e;
-    ask_clear(_("确认清除所有数据?"), DG_DATA_OP_ALL_CLEAR);
+    /* P2(2026-11-21 审查):ALL_CLEAR 边界=清用户+恢复默认配置,
+     * 通行记录与 Web 账号保留(审计连续性),文案明示防运维误判已脱敏 */
+    ask_clear(_("确认清除所有数据?(通行记录与Web账号保留)"),
+              DG_DATA_OP_ALL_CLEAR);
 }
 
 static void on_cfg_reset(lv_event_t *e)

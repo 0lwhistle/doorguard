@@ -346,6 +346,10 @@ static void mqtt_cb(struct mg_connection *c, int ev, void *ev_data)
         }
     } else if (ev == MG_EV_MQTT_CMD) {
         s_last_rx_ms = (int64_t)mg_millis();  /* PUBACK/PINGRESP 等也算活性 */
+        /* 收到任何控制包即重臂 PINGREQ(2026-11-21 审查修复:此前 s_ping_out
+         * 只置位不复位,每条连接生命周期内只发一次 PINGREQ,空闲链路会被
+         * broker 按 1.5×keepalive 判死,retained online/offline 周期闪变) */
+        s_ping_out = false;
     } else if (ev == MG_EV_ERROR) {
         DG_LOGW(TAG, "连接失败: %s", (const char *)ev_data);
     } else if (ev == MG_EV_CLOSE) {

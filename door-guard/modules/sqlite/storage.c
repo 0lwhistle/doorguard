@@ -1431,8 +1431,15 @@ int db_verify_password(const char *user_id, const char *pwd, user_rec_t *out)
         return rc;                              /* 含 DG_ERR_NOT_FOUND:用户不存在 */
 
     uint8_t computed[DG_PWD_HASH_LEN];
+    /* 先新后旧双算(2026-11-21 审查修复:迭代 10k→100k):新哈希一次命中;
+     * 存量 10k 哈希走 LEGACY 兜底,随用户改密自然收敛,无存储格式变化 */
     rc = dg_pbkdf2_sha256(pwd, rec.pwd_salt, DG_PWD_SALT_LEN, DG_PBKDF2_ITERS,
                           computed);
+    if (rc == DG_OK &&
+        dg_constant_time_cmp(computed, rec.pwd_hash, DG_PWD_HASH_LEN) == 0)
+        goto matched;
+    rc = dg_pbkdf2_sha256(pwd, rec.pwd_salt, DG_PWD_SALT_LEN,
+                          DG_PBKDF2_ITERS_LEGACY, computed);
     if (rc != DG_OK)
         return rc;
 
@@ -1440,6 +1447,7 @@ int db_verify_password(const char *user_id, const char *pwd, user_rec_t *out)
         dg_secure_wipe(computed, sizeof(computed));
         return DG_ERR_WRONG_PASSWORD;
     }
+matched:
     dg_secure_wipe(computed, sizeof(computed));
 
     if (out)

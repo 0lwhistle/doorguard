@@ -478,6 +478,11 @@ static void handle_device(struct mg_connection *c, struct mg_http_message *hm)
     cJSON_AddNumberToObject(root, "sessions", web_session_count(time(NULL)));
     cJSON_AddNumberToObject(root, "db_bytes", (double)db_bytes);
     cJSON_AddNumberToObject(root, "disk_free_bytes", (double)disk_free);
+    /* P3(2026-11-21 审查):指纹两侧数量不一致的持久化告知
+     * (fp_provider 置位,数量恢复一致自动清除;策略=只告知不动手) */
+    char fpm[8] = "";
+    if (db_config_get("fp_mismatch", fpm, sizeof(fpm)) == DG_OK)
+        cJSON_AddBoolToObject(root, "fp_mismatch", fpm[0] == '1');
 
     cJSON *ntp = cJSON_AddObjectToObject(root, "ntp");
     pthread_mutex_lock(&s_ntp_mtx);
@@ -1833,7 +1838,8 @@ static void handle_users_delete(struct mg_connection *c, struct mg_http_message 
     memset(&ev, 0, sizeof(ev));
     snprintf(ev.user_id, sizeof(ev.user_id), "%s", uid);
     ev.kind = DG_ENROLL_DELETE;
-    ev.seq = (uint32_t)time(NULL);
+    ev.seq = (uint32_t)time(NULL);     /* P5(2026-11-21):同秒两请求 seq 碰撞,
+                                          本路 seq 无消费方配对,维持现状待拍板 */
     EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
     DG_LOGI(TAG, "web 删除用户 %s(经 enroll 服务)", uid);
     json_msg(c, 202, "删除请求已受理");
@@ -1868,7 +1874,7 @@ static void handle_users_face_clear(struct mg_connection *c, struct mg_http_mess
     memset(&ev, 0, sizeof(ev));
     snprintf(ev.user_id, sizeof(ev.user_id), "%s", uid);
     ev.kind = DG_ENROLL_FACE_CLEAR;
-    ev.seq = (uint32_t)time(NULL);
+    ev.seq = (uint32_t)time(NULL);    /* P5(2026-11-21):同秒碰撞无消费方配对,维持待拍板 */
     EVENT_BUS_PUBLISH(EV_ENROLL_REQUEST, &ev);
     DG_LOGI(TAG, "web 清除人脸 %s(经 enroll 服务)", uid);
     json_msg(c, 202, "清除请求已受理");
@@ -2288,6 +2294,15 @@ static void ws_on_client_msg(struct mg_connection *c, void *ev_data)
         return;                              /* 表满被拒的连接:不服务 */
 
     if (strstr(buf, "video_on")) {
+        /* 幂等守卫(2026-11-21 审查修复):重复 video_on 不再 add——计数虚高
+         * 会让"无人订阅零开销"被打破(计数永不归零),且断开只归还一次 */
+        if (s_ws_video[idx]) {
+            char again[128];
+            snprintf(again, sizeof(again),
+                     "{\"type\":\"video\",\"ok\":true,\"msg\":\"监控画面已开启\"}");
+            mg_ws_send(c, again, strlen(again), WEBSOCKET_OP_TEXT);
+            return;
+        }
         int rc = web_stream_viewer_add();
         s_ws_video[idx] = (rc == DG_OK);
         const char *msg = rc == DG_OK ? "监控画面已开启" :
@@ -2369,12 +2384,14 @@ static void http_handler(struct mg_connection *c, int ev, void *ev_data)
     } else if (ev == MG_EV_READ) {
         if (c == s_ota_c) {
             ota_feed_from(c);
-            /* 环满且客户端数据已到齐(不再有 READ):定时重喂兜底 */
-            if (s_ota_c == c && s_ota_remain > 0 && c->recv.len == 0)
+            /* 环满且 recv 滞留(客户端已发完,不再有 READ):定时重喂兜底。
+             * 环满退出的形态恰是 recv.len > 0(2026-11-21 审查修复:此前条件
+             * 写反成 == 0,慢盘+尾包滞留时最后若干 KB 永远喂不进,上传挂死) */
+            if (s_ota_c == c && s_ota_remain > 0 && c->recv.len > 0)
                 netcore_post(ota_retry_cb, NULL);
         } else if (c == s_fw_c) {
             fw_feed_from(c);
-            if (s_fw_c == c && s_fw_remain > 0 && c->recv.len == 0)
+            if (s_fw_c == c && s_fw_remain > 0 && c->recv.len > 0)
                 netcore_post(fw_retry_cb, NULL);
         }
     } else if (ev == MG_EV_WS_MSG) {

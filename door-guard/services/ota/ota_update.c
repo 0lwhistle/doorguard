@@ -511,8 +511,11 @@ void ota_update_stop(void)
     atomic_store(&s_running, false);
     atomic_store(&s_abort_req, true);
     if (atomic_load(&s_busy)) {
-        /* worker 是 detached:等它自认收尾(它每轮检查 abort 请求) */
-        for (int i = 0; i < 300 && atomic_load(&s_busy); i++)
+        /* worker 是 detached:等它自认收尾(它每轮检查 abort 请求)。
+         * 等待上界对齐传输层最长阻塞(2026-11-21 审查修复:此前仅 3s,worker
+         * 若阻塞在 15s SO_RCVTIMEO 的 recv 里,超时强制清 busy 后旧 worker
+         * 会"复活",stop→start 窗口出现双 worker 污染状态) */
+        for (int i = 0; i < 1600 && atomic_load(&s_busy); i++)
             usleep(10 * 1000);
     }
     atomic_store(&s_busy, false);

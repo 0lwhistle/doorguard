@@ -249,6 +249,7 @@
   "确认清除所有指纹?": "Clear all fingerprints?",
   "确认清除所有用户?": "Clear all users?",
   "确认清除所有数据?": "Clear all data?",
+  "确认清除所有数据?(通行记录与Web账号保留)": "Clear all data? (access logs and web account are kept)",
   "确认恢复默认配置?": "Reset to default config?",
   "清除后不可恢复": "Cleared data cannot be recovered",
   "操作失败": "Operation failed",
