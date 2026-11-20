@@ -1,14 +1,17 @@
 # ntp_service — NTP 时间校正(应用内 SNTP)
 
-三触发点(逻辑与 chrony 时代一致,spec-network §3):
-1. **开机自动一次**(延迟 10s 等网络栈就绪;`net_info_is_online` 判定)
-2. 设备菜单 → 设备管理 → NTP 时间矫正(`EV_NET_NTP_TRIGGER`)
-3. web 上位机 → 设备管理(`/api/ntp`,202 受理 + WebSocket 回显结果)
+四触发点(2026-11-21 与代码对齐,spec-network §3 同口径):
+1. **开机自动重试**(延迟 10s 后每 30s 重试至 ~5 分钟,`BOOT_RETRY_S=30`/`BOOT_RETRY_MAX=10`;
+   `net_info_is_online` 判定,成功即停)
+2. **网络地址变化补同步**(`EV_NET_ADDR`,2026-10 起)
+3. 设备菜单 → 设备管理 → NTP 时间矫正(`EV_NET_NTP_TRIGGER`)
+4. web 上位机 → 设备管理(`/api/ntp`,202 受理 + WebSocket 回显结果)
 
 ## 实现(2026-09-22 起)
 
 `mg_sntp_connect`(mongoose,跑在 `modules/net/netcore` 统一事件循环)向
-device_config `ntp_server`(默认 ntp.aliyun.com)发 SNTP 请求:
+cfg(`cur_config.json`,DB 冻结后改走 cfg 层)的 `network.ntp_server`(默认
+ntp.aliyun.com)发 SNTP 请求:
 
 - 成功 → `settimeofday` 步进写系统时间 → `EV_NET_NTP_RESULT(ok=true)`
 - DNS/网络失败(`MG_EV_ERROR`)、8s 超时 → 失败事件(不重试到死)

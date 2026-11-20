@@ -70,3 +70,8 @@ door-guard/services/web/frontend/dist-dev/
 
 # archify 图表产物(本地保留,2026-10-20 起不随公开仓库分发)
 .archify/
+
+# 审查战役工作区(黑板/辩论产物,本地工作目录不进公开仓,2026-11-21)
+combus/
+debate1-findings/
+debate2-fixplan/

@@ -57,10 +57,12 @@ S60 轮询到即装**非活动槽** → 符号链接原子切换 → 重启;新�
 
 ## 生产部署(homeserver MQTT OTA 通道,2026-10-15 全链实测)
 
+> 内网地址不入公开仓:下表 `<homeserver-ip>` 为占位符,真实地址见本地层/服务器侧记录。
+
 | 组件 | 位置 | 说明 |
 |---|---|---|
-| broker | `mqtt://192.168.2.150:1883`(容器 mosquitto-doorguard) | 账号 doorguard,口令只在服务器 `/opt/mosquitto/config/dg.pass` |
-| 分发 | `http://192.168.2.150:8088/door-guard.bin`(容器 nginx-doorguard) | 目录 `/opt/doorguard-fw`,静态定长直出 |
+| broker | `mqtt://<homeserver-ip>:1883`(容器 mosquitto-doorguard) | 账号 doorguard,口令只在服务器 `/opt/mosquitto/config/dg.pass` |
+| 分发 | `http://<homeserver-ip>:8088/door-guard.bin`(容器 nginx-doorguard) | 目录 `/opt/doorguard-fw`,静态定长直出 |
 | 发布 | `env/bin/dg-ota-publish` | 打包产物→上传→retained 公告一条龙;点分版本硬校验 |
 
 板端:`cur_config.json` 的 `mqtt` 段 + `network.ota_auto_update`(默认 0,

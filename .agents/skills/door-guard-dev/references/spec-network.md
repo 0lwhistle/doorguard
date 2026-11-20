@@ -21,9 +21,9 @@
   | 方法 | 路径 | 鉴权 | 说明 |
   |---|---|---|---|
   | GET | `/` `/app.css` `/app.js` `/favicon.ico` | 否 | 单页应用与资源 |
-  | POST | `/api/login` | 否 | 账号+口令 → `{token,expires_in,user,pwd_default}` |
+  | POST | `/api/login` | 否 | 账号+口令 → `{token,expires_in,user,pwd_default}`。会话 TTL 用墙钟 time(NULL)(**有意例外**,2026-11-21 审定:绝对过期语义,NTP 步进会使步进前签发的会话立即过期需重登;登录风控锁定已用单调钟,见 web_auth.c) |
   | POST | `/api/logout` | token | 注销当前 token |
-  | GET | `/api/device` | token | 版本(固件 git describe)/运行时长(读 `/proc/uptime`)/用户数/日志数/IP/接口名/mDNS 名与地址/账号/默认口令标记/NTP 状态/库占用与分区余量 |
+  | GET | `/api/device` | token | 版本(固件 git describe)/运行时长(读 `/proc/uptime`)/用户数/日志数/IP/接口名/mDNS 名与地址/账号/默认口令标记/NTP 状态/库占用与分区余量/指纹两侧数量不一致标记 `fp_mismatch`(2026-11-21:fp_provider 置位,数量恢复一致自动清 false) |
   | GET | `/api/network` | token | 网络配置快照:`{ifname,ip,netmask,gateway,have_ip,online,mode,configured?}`——实际地址来自 net_info,**未拿到统一 `0.0.0.0`**;mode=dhcp/static(持久化配置),静态时附 `configured`(期望值) |
   | POST | `/api/network` | token | 应用网络配置:`{mode:"dhcp"}` 或 `{mode:"static",ip,netmask,gateway(可空)}`。校验(点分/连续掩码)→ 持久化 cfg → 回 **202** → 后台线程应用(net_cfg_apply,system 与 dhcpcd 协调);完成后经 WebSocket `net` 事件推新地址。改 IP 会切走本连接,前端必须提示用新地址重访 |
   | GET | `/api/logs` | token | `from,to,user_id,page,page_size(≤100)` 分页 JSON,字段与 access_logs 一致 |

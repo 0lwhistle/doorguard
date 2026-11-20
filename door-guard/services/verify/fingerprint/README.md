@@ -2,8 +2,8 @@
 
 > 2026-10-01 应用层落地。协议唯一事实源:`docs/tech/FINGERPRINT_PROTOCOL.md`(v1 冻结);
 > 业务方案与决策:`docs/tech/FINGERPRINT_AS608.md`(决策 A/B/C 已拍板)。
-> 硬件状态:模组已接线(uart8/57600、WAK=GPIO2_D6/94),**uart8 时钟修复(DTS 24MHz)
-> 后方可真机联调**——未修复前 provider 停在降级态退避重试,整机不受影响。
+> 硬件状态:模组已接线(uart8/57600、WAK=GPIO2_D6/94),**已接入——2026-10-01
+> 板上全链跑通**(uart8 时钟问题已在板侧解决,详见 PROJECT_PLAN §4.5)。
 
 ## 文件
 

@@ -13,6 +13,8 @@ CREATE TABLE users (
     user_name   TEXT    NOT NULL,
     face_vec    BLOB,                                -- AES-256-CTR 加密的人脸特征向量
     finger_vec  BLOB,                                -- AES-256-CTR 加密的指纹特征向量
+                                                        --   (2026-10-04 起=加密备份副本,
+                                                        --    唯一事实源=fingerprints 表)
     pwd_hash    BLOB    NOT NULL,                    -- PBKDF2-HMAC-SHA256(见加密策略)
     pwd_salt    BLOB    NOT NULL,                    -- 每用户 16B 随机盐
     ic_card     TEXT    UNIQUE,                      -- IC 卡号(明文,理由见 §3)
@@ -21,6 +23,15 @@ CREATE TABLE users (
     created_at  INTEGER NOT NULL,                    -- unix 秒
     updated_at  INTEGER NOT NULL,
     avatar      BLOB                                 -- 160x160 JPEG 头像(AES-256-CTR,2026-09-21;幂等迁移补列)
+);
+
+-- 指纹特征唯一事实源表(2026-10-04 落地,storage.c 幂等迁移;此前 users.finger_vec
+-- 单存,现 finger_vec=加密备份副本——模组页 ID 映射与板端向量都在本表)
+CREATE TABLE fingerprints (
+    user_id     TEXT    NOT NULL,                    -- 属主(级联删除随 users 行)
+    page_id     INTEGER NOT NULL UNIQUE,             -- AS608 模组内页 ID(唯一)
+    finger_vec  BLOB,                                -- AES-256-CTR 加密的指纹特征向量
+    created_at  INTEGER NOT NULL
 );
 ```
 
@@ -47,7 +58,7 @@ CREATE TABLE users (
 |---|---|---|
 | user_id | SQL UNIQUE + 业务预检 | 与任何已有用户重复 → `DG_ERR_DUP_UID` |
 | IC 卡号 | SQL UNIQUE + 业务预检 | 与任何已有用户重复 → `DG_ERR_DUP_IC` |
-| 人脸特征 | **业务层 1:N 查重** | 提取特征后与库内所有 face_vec 比对,相似度 ≥ 阈值(默认 0.75,2026-09-27 真机标定,cfg 键 `face.face_dup_threshold`)→ `DG_ERR_DUP_FACE` |
+| 人脸特征 | **业务层 1:N 查重** | 提取特征后与库内所有 face_vec 比对,相似度 ≥ 阈值(默认 0.50;0.9→0.75→0.50 演进,与 match 0.42 留安全带,见 PROJECT_PLAN §5)→ `DG_ERR_DUP_FACE` |
 | 指纹特征 | **业务层 1:N 查重** | 同上,指纹算法比对分 ≥ 阈值 → `DG_ERR_DUP_FINGER` |
 | 密码 | 不校验 | 允许重复 |
 
@@ -78,7 +89,7 @@ SQL UNIQUE 无法表达;必须复用识别算法(ROCKIVA/指纹算法)做一次�
 
 | 数据 | 策略 | 理由 |
 |---|---|---|
-| 密码 | PBKDF2-HMAC-SHA256,≥10000 次迭代,16B/用户随机盐,存 hash+salt | 口令行业标准;验证时同盐重算恒时比对 |
+| 密码 | PBKDF2-HMAC-SHA256,100000 次迭代(2026-11-21 审查加固,自 10000 上调;存量 10k 哈希验证走 legacy 兜底,随改密收敛),16B/用户随机盐,存 hash+salt | 口令行业标准;验证时同盐重算恒时比对 |
 | 人脸/指纹特征 | AES-256-CTR,设备密钥加密后存 BLOB | 特征等同生物凭据,落盘必须加密;密钥首次开机随机生成,存 `/var/lib/door-guard/dg.key`(0600),内存中按需解密 |
 | IC 卡号 | 明文存储;界面与日志显示掩码 `********1234` | 刷卡验证需按卡号 O(1) 索引查询,加密会退化为全表解密;库文件整体 0600 保护 + 显示脱敏是行业务实做法 |
 | 门禁日志 | 明文,但 user_name 在导出接口可选脱敏 | 便于查询;不含凭据 |

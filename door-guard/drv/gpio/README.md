@@ -19,7 +19,7 @@ rootfs 升级带 libgpiod 后迁移(gpio_hal.h 接口不变,只换 .c)。
 
 ## 引脚配置(待硬件确认!)
 
-- 引脚号:`configs/device.json` → `access.relay_gpio_line`(出厂占位 0)
+- 引脚号:`configs/default.json` → `access.relay_gpio_line`(出厂占位 0)
 - **继电器实际接线引脚未确认**——引脚号确认前不要在未知引脚上做物理对拍
   (2026-09-18 事故:未知引脚写 direction 导致板上内核挂起,需物理断电,
   见 DEVLOG)
