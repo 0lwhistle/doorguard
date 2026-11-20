@@ -154,7 +154,7 @@ JSON,`face_model_tag` 遗留键以 cur_config.json 的 face.model_tag 为准);
 | Buildroot 输出 | `buildroot/output/rockchip_rk3576_kickpi_k7_doorGuard/` |
 | 产物 | `output/firmware/`(分区镜像);update.img 用 `RK_UPDATE=y ./build.sh firmware` 打包 |
 | ESP32 模板(复用 tasker/event_bus/holder) | `/home/olwhistle/dockerNow/esp32/programs/ovs`(WSL 本地;映射表见 skill references/architecture.md) |
-| 中枢仓库 | **origin** = GitHub `git@github.com:0lwhistle/doorguard.git`(2026-09-18 起,源码主仓);**gitea** = `ssh://git@192.168.2.150:222/olwhistle/k7_rk3576.git`(历史归档,唯一含固件/工具链大文件的远程,勿 force push 覆盖) |
+| 中枢仓库 | **origin** = GitHub `git@github.com:0lwhistle/doorguard.git`(2026-09-18 起,源码主仓);**gitea** = `ssh://git@<homeserver-ip>:222/olwhistle/k7_rk3576.git`(历史归档,唯一含固件/工具链大文件的远程,勿 force push 覆盖;真实地址见本地层) |
 
 ### 常用命令
 
@@ -285,25 +285,25 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
   真值(/tmp/dg_inject.log 是注入时间线);帧导出在 DIRECT 双缓冲交替时
   可能取到旧帧,截图与日志矛盾时信日志。raw→png 用 PIL
   `Image.frombytes("RGB",(720,1280),data,"raw","BGRX")` 半尺寸直读。
-- **测试账号**:10001/123456(role=1 管理员,auth_flags=5)在板库长期
-  保留供走查登录。
+- **测试账号**:走查账号见本地层记录,口令不入仓;产线/交付前必须删除
+  板库走查账号(role=1 管理员,auth_flags=5)。
 
 ### 7.4 固件自动升级(MQTT OTA)生产部署(2026-10-15 定版,板上全链实测)
 
 > 完整技术细节(两侧实现/硬契约/验收成果/运维手册)= `docs/tech/MQTT_OTA.md`;本节只留部署速查。
 > **主从声明(2026-11-18)**:OTA 发版的唯一领域权威源=本节(点分 tag 铁律+回滚清 retain);work-playbooks PB5 发布部署卡的通用验收仅作补充,与本章冲突时以本节为准。
 
-- **服务器组件**(homeserver 192.168.2.150,docker,`--restart unless-stopped`):
+- **服务器组件**(homeserver `<homeserver-ip>`,内网地址不入公开仓,docker,`--restart unless-stopped`):
   - `mosquitto-doorguard`:eclipse-mosquitto:2,端口 1883,账号 `doorguard`,
     口令只在服务器 `/opt/mosquitto/config/dg.pass`(600 root);配置/数据/日志
     挂 `/opt/mosquitto/{config,data,log}`。注意 **passwd 文件属主须 1883:1883**
     (实测 root:600 会让 mosquitto 循环崩溃 exit 13)。
   - `nginx-doorguard`:nginx:alpine,端口 8088 → 只读挂载 `/opt/doorguard-fw`
     (静态直出,定长 Content-Length,满足 ota_http 硬契约)。
-  - 服务器 ssh:root 免密已配(WSL 公钥经 olwhistle+sudo 写入;root 密码登录
-    不可用,olwhistle 口令与板相同)。
+  - 服务器 ssh:root 免密已配(WSL 公钥经 sudo 写入;root 密码登录不可用;
+    服务器各账号口令另册管理,不入仓)。
 - **板端配置**:`/userdata/doorguard/cur_config.json` 增 `mqtt` 段
-  (enabled/uri=mqtt://192.168.2.150:1883/topic_prefix=doorguard/账号口令)+
+  (enabled/uri=mqtt://<homeserver-ip>:1883/topic_prefix=doorguard/账号口令)+
   `network.ota_auto_update: 1`;改后 S60 **stop/start 拆两条**重启。
 - **发版**:`source env/env.sh && dg-build -c`(版本注入须 -c)→ `dg-ota-publish`
   (env/bin/,点分校验+上传+retained 公告一条龙;broker 口令全程留在服务器侧)。
@@ -333,5 +333,6 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
 | web 监听端口重启后 80/8080 不定(80 绑定失败即回退 8080,mongoose 启动竞态) | 待查 | 绑定重试或固定端口;web_test/文档端口以设备实际为准 |
 | 应用层不烘进固件(重刷 rootfs 即归零,dg-deploy 也救不回) | 有恢复路径(`board/restore-app.sh`,2026-10-11) | B10 把应用层收编进固件,重刷不再丢 |
 | `/etc/init.d/S60doorguard restart` 自杀坑(旧:stop 末尾 `killall` 兜底连调用者父进程一起 TERM,`start` 永不执行) | **已修复**(2026-10-11 实测确认坑;2026-10-14 commit 2b9fdc0 修复:stop 末尾 `trap '' TERM` + 逐 pid 杀并排除 $$/$PPID) | **可直接用 restart**;历史教训:按名 killall 的兜底必须排除自身与调用方 |
-| `[W][CFG] web_port=80 越界[1024,65535],回退 80`——校验区间排除 80 而回退值又是 80 | 自相矛盾(不阻塞,web 实跑 80) | 校验区间补 80,或默认改 8080 |
+| `[W][CFG] web_port=80 越界[1024,65535],回退 80`——校验区间排除 80 而回退值又是 80 | **已修复**(2026-11-21 审查:META 下界放宽到 1,80 合法不再 WARN,改回 80 也不再被拒) | — |
+| IC 读卡(RC522)挂起 | 已落地暂挂起待硬件(`iccard.enabled=0` + S60 flag 双门控;判据 rc522_wr_test ≥45/50) | 恢复三步=配置置 true + `touch /userdata/doorguard/.iccard_enable` + 推板重启(机制注释见 S60doorguard) |
 | `RetinaFace_rk3576_i8.rknn`(检测模型)不在 git,唯一副本 WSL `/root/reinface/out/` | 单点脆弱 | 备份进 gitea(唯一收大文件的远程) |
