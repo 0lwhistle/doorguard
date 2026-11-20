@@ -84,6 +84,8 @@ static const char *TAG = "[VISION]";
 #define RKNN_BOX_LOG_MS     2000        /* 检出分数日志节流(调阈值用) */
 #define RKNN_SCORE_LOG_MS   2000        /* 1:N 最高分日志节流 */
 #define RKNN_REC_MS         300         /* 识别节流(录入缓存新鲜度 ≤300ms) */
+#define RKNN_SPOOF_MIN_FRAMES 3         /* 1:N 命中发布的反欺骗最少帧数
+                                           (首命中多帧中位数,2026-11-21) */
 #define RKNN_STANDBY_IDLE_MS 10000      /* B1:DETECT_ONLY 持续无人此时长后降帧 */
 #define RKNN_STANDBY_FRAME_MS 100       /* B1:降帧期推理间隔(~10fps) */
 #define RKNN_ROI_MAX        256         /* ROI 裁剪输出上限(边长) */
@@ -163,6 +165,9 @@ static struct {
     size_t   len;
     bool     has;
 } s_still;
+/* worker 私有解码副本(2026-11-21 审查修复:此前 worker 直接读 s_still_jpeg,
+ * 单飞契约一旦被破坏(总线线程覆写)即数据竞争;领取时锁内一次性拷贝) */
+static uint8_t s_still_work[DG_FACE_UPLOAD_MAX];
 
 /* 最新「特征 + 同帧头像大图」成对缓存(analyse 路径同帧写入;录入
  * CAPTURE_REQ 读)。一把锁保护成对性:照片与特征必须出自同一帧,
@@ -361,8 +366,8 @@ static void verify_against_target(const float *feat)
     memset(&rec, 0, sizeof(rec));
     if (db_user_get(uid, &rec) != DG_OK)
         return;
-    if (rec.role == DG_ROLE_BLACKLIST)
-        return;                             /* 黑名单任何路径都失败 */
+    /* 黑名单命中照发(role 随事件),由 FSM 收口为 reason=2 拒绝+带身份审计
+     * (2026-11-21 审查修复:此前提前 return,审计降级为陌生人超时) */
 
     ev_match_t m;
     memset(&m, 0, sizeof(m));
@@ -370,6 +375,7 @@ static void verify_against_target(const float *feat)
     snprintf(m.user_id, sizeof(m.user_id), "%s", rec.user_id);
     snprintf(m.user_name, sizeof(m.user_name), "%s", rec.user_name);
     m.role = rec.role;
+    m.auth_flags = rec.auth_flags;
     m.score_permille = (int32_t)(score * 1000.0f + 0.5f);
     EVENT_BUS_PUBLISH(EV_VISION_VERIFY_11, &m);
     DG_LOGI(TAG, "1:1 通过 %s(%s) %.3f", rec.user_id, rec.user_name, score);
@@ -418,8 +424,13 @@ static void search_1n(const float *feat)
         return;                             /* 分数不足 / 库与 DB 不同步(自愈) */
     if (!publish_gate())
         return;
-    if (rec.role == DG_ROLE_BLACKLIST)
+    /* 反欺骗窗口不满 3 帧:首命中单帧即开门的误放窗口(2026-11-21 审查修复),
+     * 跳过本帧等下个 300ms 周期补满(开门延迟上界 +600ms);模型未装载时
+     * (s_spoof_ready=false,窗口恒空)退化为旧行为,不得卡死人脸链路 */
+    if (s_spoof_ready && s_spoof_smooth.count < RKNN_SPOOF_MIN_FRAMES)
         return;
+    /* 黑名单命中照发(role 随事件),由 FSM 收口为 reason=2 拒绝+带身份审计
+     * (2026-11-21 审查修复:此前提前 return,审计降级为陌生人超时) */
 
     ev_match_t m;
     memset(&m, 0, sizeof(m));
@@ -427,6 +438,7 @@ static void search_1n(const float *feat)
     snprintf(m.user_id, sizeof(m.user_id), "%s", rec.user_id);
     snprintf(m.user_name, sizeof(m.user_name), "%s", rec.user_name);
     m.role = rec.role;
+    m.auth_flags = rec.auth_flags;
     m.score_permille = (int32_t)(best * 1000.0f + 0.5f);
     /* 反欺骗疑似假体:命中照报,由 FSM 收口为"多模态二次验证" */
     m.spoof_challenge = antispoof_challenge() ? 1 : 0;
@@ -679,10 +691,12 @@ static void *vision_worker(void *arg)
             atomic_store(&s_worker_hb_ms, now_mono_ms());
         }
         if (s_still.has) {
-            /* 静态图优先:web 端在等回执,帧晚几帧无感 */
+            /* 静态图优先:web 端在等回执,帧晚几帧无感。JPEG 在锁内拷进
+             * worker 私有副本,解码期间总线线程可安全投递下一张 */
             snprintf(still_uid, sizeof(still_uid), "%s", s_still.uid);
             still_seq = s_still.seq;
             still_len = s_still.len;
+            memcpy(s_still_work, s_still_jpeg, still_len);
             s_still.has = false;
             pthread_mutex_unlock(&s_mb_mtx);
 
@@ -967,9 +981,10 @@ static void process_still(const char *uid, uint32_t seq, size_t jlen)
         return;
     }
 
-    /* 解压炸弹防线:先探原图尺寸选缩放倍率,再按缩放后尺寸分配缓冲 */
+    /* 解压炸弹防线:先探原图尺寸选缩放倍率,再按缩放后尺寸分配缓冲
+     * (输入=worker 私有副本 s_still_work,不再直读共享 s_still_jpeg) */
     int w = 0, h = 0;
-    if (dg_jpeg_dimensions(s_still_jpeg, jlen, &w, &h) != DG_OK || w < 32 || h < 32) {
+    if (dg_jpeg_dimensions(s_still_work, jlen, &w, &h) != DG_OK || w < 32 || h < 32) {
         still_fail(uid, seq, DG_ERR_PARAM);      /* 解不出尺寸 = 不是有效 JPEG */
         return;
     }
@@ -978,13 +993,19 @@ static void process_still(const char *uid, uint32_t seq, size_t jlen)
         denom *= 2;
     const int ew = (w + denom - 1) / denom;
     const int eh = (h + denom - 1) / denom;
+    /* denom 封顶 8 后仍超限(如 65535×65535 声明→8192²,≈201MB):防线收口
+     * (2026-11-21 审查修复:此前仅靠 denom,边长 >12288 时防线失效) */
+    if (ew > RKNN_STILL_MAX_DIM || eh > RKNN_STILL_MAX_DIM) {
+        still_fail(uid, seq, DG_ERR_PARAM);
+        return;
+    }
     uint8_t *rgb = malloc((size_t)ew * (size_t)eh * 3);
     if (!rgb) {
         still_fail(uid, seq, DG_ERR_NO_MEMORY);
         return;
     }
     int dw = 0, dh = 0;
-    int rc = dg_jpeg_decode_rgb(s_still_jpeg, jlen, denom, rgb,
+    int rc = dg_jpeg_decode_rgb(s_still_work, jlen, denom, rgb,
                                 (size_t)ew * (size_t)eh * 3, &dw, &dh);
     if (rc != DG_OK) {
         free(rgb);
@@ -1386,16 +1407,9 @@ static int rknn_start(bool enable_mock)
         goto fail;
     }
 
-    /* ---- 接线与特征库装载 ---- */
-    camera_set_nv12_listener(on_frame_push, NULL);
-    event_bus_subscribe(EV_VISION_CAPTURE_REQ, on_capture_req, NULL);
-    event_bus_subscribe(EV_VISION_STILL_REQ, on_still_req, NULL);
-    db_user_iter_face(lib_load_cb, NULL);
-    pthread_mutex_lock(&s_lib.mtx);
-    const int loaded = s_lib.n;
-    pthread_mutex_unlock(&s_lib.mtx);
-
-    /* worker 线程最后起:s_ready 就位后才有帧可处理(进程生命周期,不 join) */
+    /* worker 线程先起(进程生命周期,不 join):接线在 create 成功之后,
+     * 保证 pthread_create 失败路径无需退订/清库(2026-11-21 审查修复:
+     * 此前接线在前,失败回滚缺失,看门狗重启会双订阅+重复装库) */
     {
         pthread_t tid;
         if (pthread_create(&tid, NULL, vision_worker, NULL) != 0) {
@@ -1404,6 +1418,15 @@ static int rknn_start(bool enable_mock)
         }
         pthread_detach(tid);
     }
+
+    /* ---- 接线与特征库装载(worker 已就位,帧到即可处理) ---- */
+    camera_set_nv12_listener(on_frame_push, NULL);
+    event_bus_subscribe(EV_VISION_CAPTURE_REQ, on_capture_req, NULL);
+    event_bus_subscribe(EV_VISION_STILL_REQ, on_still_req, NULL);
+    db_user_iter_face(lib_load_cb, NULL);
+    pthread_mutex_lock(&s_lib.mtx);
+    const int loaded = s_lib.n;
+    pthread_mutex_unlock(&s_lib.mtx);
 
     s_ready = true;
     s_started = true;

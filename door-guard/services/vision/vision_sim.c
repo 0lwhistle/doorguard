@@ -64,6 +64,7 @@ static void *mock_thread(void *arg)
                     snprintf(m.user_id, sizeof(m.user_id), "%s", "10001");
                     snprintf(m.user_name, sizeof(m.user_name), "%s", "张三");
                     m.role = DG_ROLE_NORMAL;
+                    m.auth_flags = DG_AUTH_FACE;   /* FSM 查方式位(2026-11-21) */
                     m.score_permille = 952;
                     EVENT_BUS_PUBLISH(EV_VISION_MATCH_1N, &m);
                 } else {
@@ -80,6 +81,7 @@ static void *mock_thread(void *arg)
                     snprintf(m.user_id, sizeof(m.user_id), "%s", uid);
                     snprintf(m.user_name, sizeof(m.user_name), "%s", "模拟用户");
                     m.role = DG_ROLE_NORMAL;
+                    m.auth_flags = DG_AUTH_FACE;   /* FSM 查方式位(2026-11-21) */
                     m.score_permille = 930;
                     EVENT_BUS_PUBLISH(EV_VISION_VERIFY_11, &m);
                 }

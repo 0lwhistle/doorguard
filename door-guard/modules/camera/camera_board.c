@@ -170,6 +170,15 @@ static int v4l2_setup(void)
         DG_LOGE(CAM_TAG, "仅支持单平面 NV12,驱动给 %d 平面", s_nplanes);
         return DG_ERR_PARAM;
     }
+    /* 视觉链路(NV12 监听器/三模型输入)全程以 width 充 stride(npu_pre 各入口
+     * 的 stride 形参传 src_w),仅预览路径用 s_stride。配置非 16 对齐宽时
+     * ISP 可能给 stride>width,视觉会拿到逐行错位的剪切帧且无报错——
+     * 此处显式拦截(2026-11-21 审查修复;全链透传 stride 记待拍板 T2) */
+    if (s_stride != s_cap_w) {
+        DG_LOGE(CAM_TAG, "驱动 stride=%d != 宽 %d:视觉链路不支持,请把 "
+                 "DG_CAM_W 配成 16 对齐(如 1280)", s_stride, s_cap_w);
+        return DG_ERR_PARAM;
+    }
 
     req.count = CAM_BUF_CNT;
     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;

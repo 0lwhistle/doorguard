@@ -309,6 +309,10 @@ static void on_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now_ms)
 
     if (m->role == DG_ROLE_BLACKLIST)
         fail_and_back(fsm, DG_METHOD_FACE_1N, DG_REASON_BLACKLIST, now_ms);
+    else if (!(m->auth_flags & DG_AUTH_FACE))
+        /* 人脸方式未开启:拒绝(2026-11-21 审查修复——此前全链无查位,关人脸
+         * 方式的用户仍可刷脸开门;与指纹分支同款,后端现随事件填 auth_flags) */
+        fail_and_back(fsm, DG_METHOD_FACE_1N, DG_REASON_METHOD_DISABLED, now_ms);
     else if (m->spoof_challenge)
         challenge_start(fsm);
     else
@@ -350,10 +354,12 @@ static void on_finger_match_1n(auth_fsm_t *fsm, const ev_match_t *m, int64_t now
         return;
 
     if (!m->matched) {
-        /* 未命中:陌生人失败+日志(§5.1;user_id=NULL) */
-        popup_fail_reason(fsm, DG_REASON_STRANGER);
-        write_log(fsm, NULL, NULL, DG_METHOD_FINGER, DG_RESULT_REJECT,
-                  DG_REASON_STRANGER, now_ms);
+        /* 未命中:陌生人失败+日志(§5.1;user_id=NULL)。2026-11-21 审查修复:
+         * 改走 fail_and_back 迁移状态——此前只弹窗不迁移,失败弹窗期间
+         * 人脸 1:N 照常开门,违反"match_enabled 仅在无弹窗时为真"不变量 */
+        fsm->cur_uid[0] = '\0';        /* 陌生人:user_id=NULL(清上一场残留) */
+        fsm->cur_name[0] = '\0';
+        fail_and_back(fsm, DG_METHOD_FINGER, DG_REASON_STRANGER, now_ms);
         return;
     }
 

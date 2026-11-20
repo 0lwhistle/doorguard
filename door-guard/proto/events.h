@@ -206,7 +206,7 @@ typedef struct {
     char    user_name[DG_NAME_LEN];
     int32_t role;                         /**< dg_role_t(黑名单命中即拒,spec-auth §2) */
     uint32_t auth_flags;                  /**< 方式位(FSM 判"该方式未开启"用;
-                                               vision 后端不填=0,无影响) */
+                                               vision 后端发布前必填,2026-11-21 起) */
     int32_t score_permille;               /**< 相似度千分比(0~1000) */
     int32_t spoof_challenge;              /**< 1 = 反欺骗判"疑似假体":命中不放行,
                                                发起多模态二次验证(2026-09-27);

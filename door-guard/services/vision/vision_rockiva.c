@@ -263,6 +263,7 @@ static void search_1n(const char *feat, uint16_t flen)
     snprintf(m.user_id, sizeof(m.user_id), "%s", rec.user_id);
     snprintf(m.user_name, sizeof(m.user_name), "%s", rec.user_name);
     m.role = rec.role;
+    m.auth_flags = rec.auth_flags;     /* FSM 判 DG_AUTH_FACE 方式位(2026-11-21) */
     m.score_permille = (int32_t)(score * 1000.0f + 0.5f);
     EVENT_BUS_PUBLISH(EV_VISION_MATCH_1N, &m);
     DG_LOGI(TAG, "1:N 命中 %s(%s) %d‰", rec.user_id, rec.user_name,

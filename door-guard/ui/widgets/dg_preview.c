@@ -19,6 +19,7 @@
 typedef struct {
     char tag[10];
     bool plane;                /* true=硬件 plane 直通;false=软渲染回退 */
+    int  plane_fail;           /* plane 泵送连续失败计数(≥3 降级软渲染) */
     bool avail;                /* 相机可用(capture 断流检测置 false 停泵) */
     lv_obj_t *veil;            /* 不可用白幕(半透明白,盖住冻结帧) */
     /* 软渲染路径状态 */
@@ -47,14 +48,38 @@ static void stat_tick(st_t *st, uint32_t now, uint32_t cost_ms)
 
 /* ---- plane 直通路径 ---- */
 
+/* plane 中途失效(导入/提交失败,display 层已永久降级)后本控件承接降级:
+ * 叠建 img 控件转软渲染——否则页存活期间预览区是透明洞(2026-11-21 审查
+ * 修复,兑现 display_drm_v9 注释的 dg_preview 双模承接契约) */
+static void degrade_to_soft(st_t *st)
+{
+    st->plane = false;
+    st->plane_fail = 0;
+    camera_rgb_preview_set(true);           /* 恢复 XRGB 转换供 fallback_blit */
+    lv_obj_t *holder = lv_obj_get_parent(st->veil);
+    lv_obj_t *img = lv_image_create(holder);
+    if (img) {
+        lv_image_set_antialias(img, false);
+        lv_obj_move_to_index(st->veil, -1); /* 白幕保持在 img 之上 */
+        st->img = img;
+    }
+    st->fw = 0;                             /* 触发 pump_fallback 重新 setup */
+    DG_LOGW(st->tag, "plane 泵送连续失败,控件降级软渲染");
+}
+
 static void pump_plane(st_t *st)
 {
     const camera_dmabuf_t *f = camera_latest_dmabuf();
     if (!f || f->seq == st->last_seq)
         return;
     uint32_t t0 = dg_ui_tick_ms();
-    if (display_video_plane_show(f->slot, f->fd, f->w, f->h, f->stride) == DG_OK)
+    if (display_video_plane_show(f->slot, f->fd, f->w, f->h, f->stride) == DG_OK) {
         camera_dmabuf_mark_shown(f->slot);
+        st->plane_fail = 0;
+    } else if (++st->plane_fail >= 3) {
+        degrade_to_soft(st);
+        return;
+    }
     st->last_seq = f->seq;
     stat_tick(st, dg_ui_tick_ms(), dg_ui_tick_ms() - t0);
 }
