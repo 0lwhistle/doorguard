@@ -317,6 +317,41 @@ RK_UPDATE=y ./build.sh firmware # 打包 update.img
   (`mosquitto_pub -r -n -t doorguard/ota/version`)——否则 FAILED 后重启的进程
   重收 retained 坏公告会反复下载形成循环。
 
+### 7.5 公网 OTA 部署(雨云服务器,2026-11-21 起主用;内网 homeserver 保留备用)
+
+> 定位:产品外网环境的 OTA 通道。设备代码零改动(mqtt.uri 指向公网即可);
+> 发布侧经环境变量切换目标,`dg-ota-publish` 一条龙两端通用。
+
+- **服务器**:ssh 别名 `rainyun-ota`(~/.ssh/config:IP/端口 60222/用户 ops/密钥
+  cloud_ops;服务器同机跑 1Panel 生产服务,**勿动 openresty/gitea/rustdesk/frps**)。
+  系统级 mosquitto(1883)+docker `nginx-doorguard`(8089)。
+- **端口口径**:分发=**8089**(非内网 8088——雨云 8088 已被另一项目 OFD 的
+  python http.server 占用,8088 不可动);broker=1883(与内网口径一致)。
+- **mosquitto 基线(2026-11-21 收紧)**:`allow_anonymous false`(原 true,
+  原为另一项目 ofd.conf 所设);账号 `doorguard`(口令只存服务器
+  `/opt/mosquitto/config/dg.pass`,600 root,发布侧经 `sudo cat` 读取);
+  ACL=doorguard 用户仅 `doorguard/#`;保留 ofd 账号(仅 ofd/updates)。
+- **分发**:`/opt/doorguard-fw`(属主 ops,发布 scp 直写)+ nginx 容器只读挂载
+  8089→80;硬契约同内网(定长 Content-Length/Range 206 断点续传,已实测)。
+- **发布侧**(env/env.sh 2026-11-21 起缺省=公网):`DG_FW_HOST=rainyun-ota`/
+  `DG_FW_PORT=8089`/`DG_FW_PUBLIC_HOST=103.236.53.238`(公告 URL 主机名与 ssh
+  别名解耦——设备解析不了 ssh 别名)/`DG_MQTT_PUB_INNER=系统 mosquitto_pub+
+  sudo cat dg.pass`。内网回退=显式覆盖:`DG_FW_HOST=root@<homeserver-ip>
+  DG_FW_PORT=8088 DG_FW_PUBLIC_HOST=<homeserver-ip> DG_MQTT_PUB_INNER="docker
+  exec mosquitto-doorguard mosquitto_pub -h 127.0.0.1 -u doorguard -P \$(cat
+  /opt/mosquitto/config/dg.pass)"`(单次前缀即可)。
+- **板端切换**(2026-11-21 预置,板离线待执行):`cur_config.json` 的 mqtt 段
+  uri→`mqtt://103.236.53.238:1883`、username/password→doorguard 账号(口令
+  与雨云 dg.pass 同源)、S60 stop/start 重启;观察日志 `[MQTT]` 连接成功+
+  `doorguard/status` retained online。
+- **安全基线与例外**:公网明文 MQTT(1883)+明文 HTTP 下载——设备/发布侧均无
+  TLS 能力(ota_http 仅 http;mongoose 无 TLS 编译开关),完整性依赖四层校验
+  (公告 sha256 流式比对+S60 装槽前 sha256sum -c)+ broker 强口令+ACL topic
+  隔离;若需抗 MITM 需给 mongoose 开 TLS(8883)+ota_http 实现 https,记待办。
+- **验收证据(2026-11-21)**:发布链端到端(v1.0.1-84 基线公告 retained 可读、
+  URL=公网 IP、Content-Length 8167168 精确对拍、Range 64B 206);Windows 外网
+  curl 8089 直连 200。板端切换与真升级(v1.0.1-85 测试包)待板在线补验。
+
 
 ## 8. 已知问题与待办
 
