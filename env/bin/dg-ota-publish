@@ -85,7 +85,10 @@ scp -q "$BIN" "$FW_HOST:$FW_DIR/$FW_FILE" || { echo "上传失败($FW_HOST:$FW_D
 # door-guard.bin 仅作「最新」别名供人工核对;设备只认公告里的版本名 URL
 ssh -o BatchMode=yes "$FW_HOST" "cp -f '$FW_DIR/$FW_FILE' '$FW_DIR/door-guard.bin'" \
     || echo "警告:door-guard.bin 别名同步失败(不影响设备升级)" >&2
-ssh -o BatchMode=yes "$FW_HOST" "docker exec $BROKER mosquitto_pub -h 127.0.0.1 -u $MQTT_USER -P \$(cat $PASSFILE) -r -t $TOPIC/ota/version -m '{\"version\":\"$VER\",\"date\":\"$DATE\",\"url\":\"http://$HOSTONLY:$FW_PORT/$FW_FILE\",\"sha256\":\"$SHA\",\"size\":$SIZE,\"notes\":\"$NOTES\"}'" \
+# 公告发布命令(2026-11-21 抽象:缺省=broker docker 容器(homeserver 内网);
+# 雨云公网=系统 mosquitto,经 DG_MQTT_PUB_INNER 覆盖,见 DEV_HANDBOOK §7.4)
+PUB_INNER="${DG_MQTT_PUB_INNER:-docker exec $BROKER mosquitto_pub -h 127.0.0.1 -u $MQTT_USER -P \$(cat $PASSFILE)}"
+ssh -o BatchMode=yes "$FW_HOST" "$PUB_INNER -r -t $TOPIC/ota/version -m '{\"version\":\"$VER\",\"date\":\"$DATE\",\"url\":\"http://$HOSTONLY:$FW_PORT/$FW_FILE\",\"sha256\":\"$SHA\",\"size\":$SIZE,\"notes\":\"$NOTES\"}'" \
     || { echo "公告发布失败(重跑本命令即可:文件已就位,公告幂等)" >&2; exit 1; }
 echo "已发布 retained 公告 → $TOPIC/ota/version(版本 $VER,URL …/$FW_FILE)"
 echo "板端将自动下载升级;观察:ssh ${DOORGUARD_IP:-192.168.2.95} tail -f /var/log/door-guard.log"

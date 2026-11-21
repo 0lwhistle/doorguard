@@ -48,6 +48,13 @@ fi
 echo "door-guard env 就绪"
 echo "  DOORGUARD_ROOT = $DOORGUARD_ROOT"
 echo "  脚本           = dg-build dg-build-pc dg-test dg-deploy dg-font dg-frontend dg-ota-pack dg-ota-upload dg-ota-publish dg-tc-install dg-serial(用法: env/README.md,本地层不在公开仓)"
+# ---- MQTT OTA 发布目标(2026-11-21 公网主用=雨云;内网回退步骤见 DEV_HANDBOOK §7.4)----
+# 雨云:ssh 别名 rainyun-ota(~/.ssh/config,系统 mosquitto 1883 + nginx 分发 8089);
+# 口令只在服务器 /opt/mosquitto/config/dg.pass(600),不落开发机
+export DG_FW_HOST="${DG_FW_HOST:-rainyun-ota}"
+export DG_FW_PORT="${DG_FW_PORT:-8089}"
+# 雨云 mosquitto 是系统服务非容器:发布命令用系统 mosquitto_pub(dg-ota-publish 抽象点)
+export DG_MQTT_PUB_INNER="${DG_MQTT_PUB_INNER:-mosquitto_pub -h 127.0.0.1 -u doorguard -P \$(cat /opt/mosquitto/config/dg.pass)}"
 [ -n "${DG_BUILD_DIR:-}" ]      && echo "  DG_BUILD_DIR   = $DG_BUILD_DIR"
 [ -n "${DG_TEST_BUILD_DIR:-}" ] && echo "  DG_TEST_BUILD_DIR = $DG_TEST_BUILD_DIR"
 [ -n "${DG_PC_BUILD_DIR:-}" ]   && echo "  DG_PC_BUILD_DIR   = $DG_PC_BUILD_DIR"
