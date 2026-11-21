@@ -73,6 +73,9 @@ DATE="$(date +%F)"
 SHA="$(sha256sum "$BIN" | cut -d' ' -f1)"
 SIZE="$(stat -c %s "$BIN")"
 HOSTONLY="${FW_HOST#*@}"
+# 公告 URL 的主机名与 ssh 目标解耦(2026-11-21):FW_HOST 可为 ssh 别名(rainyun-ota),
+# 设备解析不了别名——URL 主机名用 DG_FW_PUBLIC_HOST(缺省=FW_HOST 去用户前缀,兼容内网)
+PUBLIC_HOST="${DG_FW_PUBLIC_HOST:-$HOSTONLY}"
 
 echo "发布:$(basename "$BIN")  版本 $VER  $SIZE B"
 echo "  sha256 $SHA"
@@ -88,7 +91,7 @@ ssh -o BatchMode=yes "$FW_HOST" "cp -f '$FW_DIR/$FW_FILE' '$FW_DIR/door-guard.bi
 # 公告发布命令(2026-11-21 抽象:缺省=broker docker 容器(homeserver 内网);
 # 雨云公网=系统 mosquitto,经 DG_MQTT_PUB_INNER 覆盖,见 DEV_HANDBOOK §7.4)
 PUB_INNER="${DG_MQTT_PUB_INNER:-docker exec $BROKER mosquitto_pub -h 127.0.0.1 -u $MQTT_USER -P \$(cat $PASSFILE)}"
-ssh -o BatchMode=yes "$FW_HOST" "$PUB_INNER -r -t $TOPIC/ota/version -m '{\"version\":\"$VER\",\"date\":\"$DATE\",\"url\":\"http://$HOSTONLY:$FW_PORT/$FW_FILE\",\"sha256\":\"$SHA\",\"size\":$SIZE,\"notes\":\"$NOTES\"}'" \
+ssh -o BatchMode=yes "$FW_HOST" "$PUB_INNER -r -t $TOPIC/ota/version -m '{\"version\":\"$VER\",\"date\":\"$DATE\",\"url\":\"http://$PUBLIC_HOST:$FW_PORT/$FW_FILE\",\"sha256\":\"$SHA\",\"size\":$SIZE,\"notes\":\"$NOTES\"}'" \
     || { echo "公告发布失败(重跑本命令即可:文件已就位,公告幂等)" >&2; exit 1; }
 echo "已发布 retained 公告 → $TOPIC/ota/version(版本 $VER,URL …/$FW_FILE)"
 echo "板端将自动下载升级;观察:ssh ${DOORGUARD_IP:-192.168.2.95} tail -f /var/log/door-guard.log"

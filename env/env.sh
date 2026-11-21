@@ -53,6 +53,8 @@ echo "  脚本           = dg-build dg-build-pc dg-test dg-deploy dg-font dg-fro
 # 口令只在服务器 /opt/mosquitto/config/dg.pass(600),不落开发机
 export DG_FW_HOST="${DG_FW_HOST:-rainyun-ota}"
 export DG_FW_PORT="${DG_FW_PORT:-8089}"
+# 公告 URL 主机名(设备侧解析目标):ssh 别名设备不可解析,必须是 IP/域名
+export DG_FW_PUBLIC_HOST="${DG_FW_PUBLIC_HOST:-103.236.53.238}"
 # 雨云 mosquitto 是系统服务非容器:发布命令用系统 mosquitto_pub(dg-ota-publish 抽象点);
 # dg.pass 属 root:600,ops 经免密 sudo 读取
 export DG_MQTT_PUB_INNER="${DG_MQTT_PUB_INNER:-mosquitto_pub -h 127.0.0.1 -u doorguard -P \$(sudo cat /opt/mosquitto/config/dg.pass)}"
